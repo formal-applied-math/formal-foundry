@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 
-STANDARD_AXIOMS = "[propext, Classical.choice, Quot.sound]"
+ALLOWED_AXIOMS = ["propext", "Classical.choice", "Quot.sound"]
 
 FORBIDDEN = [
     "sorry", "admit", "native_decide", "polyrith",
@@ -70,11 +70,25 @@ def window_messages(messages: list[dict], keep_last: int = 3) -> list[dict]:
 
 
 def axiom_guard_block(file_content: str, decl_name: str) -> str:
+    """Append a subset check: the proof's axioms must lie within ALLOWED_AXIOMS.
+
+    The daemon drops `#print axioms` info messages, and `#guard_msgs` only does
+    exact-match (so it rejects a clean proof that depends on *fewer* than the
+    three standard axioms). Instead we collect the axioms programmatically and
+    `throwError` on any that is not allowed — a surfaced error the daemon
+    reports. A proof using a subset of the standard axioms passes; `sorryAx`
+    (or any exotic axiom, e.g. native_decide's `Lean.ofReduceBool`) fails.
+    """
+    allowed = ", ".join(f"`{a}" for a in ALLOWED_AXIOMS)
     return (
         f"{file_content}\n\n"
-        f"/-- info: '{decl_name}' depends on axioms: {STANDARD_AXIOMS} -/\n"
-        f"#guard_msgs in\n"
-        f"#print axioms {decl_name}\n"
+        "open Lean Elab Command in\n"
+        "run_cmd do\n"
+        f"  let axs ← Lean.collectAxioms `{decl_name}\n"
+        f"  let allowed : List Lean.Name := [{allowed}]\n"
+        "  for ax in axs do\n"
+        "    unless allowed.contains ax do\n"
+        '      throwError s!"DISALLOWED_AXIOM {ax}"\n'
     )
 
 

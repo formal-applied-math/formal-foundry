@@ -64,8 +64,9 @@ def test_window_messages_keeps_first_and_tail():
 def test_axiom_guard_block():
     out = axiom_guard_block("theorem foo : 1 = 1 := rfl", "foo")
     assert out.startswith("theorem foo")
-    assert "#guard_msgs" in out and "#print axioms foo" in out
-    assert "[propext, Classical.choice, Quot.sound]" in out
+    assert "Lean.collectAxioms `foo" in out
+    assert "DISALLOWED_AXIOM" in out
+    assert "`propext, `Classical.choice, `Quot.sound" in out
 
 
 def test_slop_report_flags_forbidden():
