@@ -60,15 +60,20 @@ def mistral_chat(messages, *, api_key, model=DEFAULT_MODEL,
             tokens = data.get("usage", {}).get("total_tokens", 0)
             return content, tokens
         except urllib.error.HTTPError as e:
+            body = ""
+            try:
+                body = e.read().decode("utf-8")[:500]
+            except Exception:
+                pass
             if e.code == 401:
                 raise RuntimeError(
-                    "401 from Mistral API — check MISTRAL_API_KEY") from e
+                    f"401 from Mistral API — check MISTRAL_API_KEY. {body}") from e
             if e.code in (429, 500, 502, 503) and attempt < 3:
                 wait = 5 * (2 ** attempt)
                 print(f"  [chat] HTTP {e.code}, retry in {wait}s", file=sys.stderr)
                 time.sleep(wait)
                 continue
-            raise
+            raise RuntimeError(f"HTTP {e.code} from Mistral API: {body}") from e
     raise RuntimeError("unreachable")
 
 
