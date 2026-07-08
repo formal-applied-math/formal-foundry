@@ -16,6 +16,27 @@ FORBIDDEN = [
 _FENCE_RE = re.compile(r"```(lean)?\s*\n(.*?)```", re.DOTALL)
 
 
+def normalize_content(content) -> str:
+    """Reduce a chat message's content to answer text.
+
+    Plain mode returns a string. Reasoning mode (reasoning_effort set) returns a
+    list of blocks — e.g. [{"type": "thinking", ...}, {"type": "text", "text": …}].
+    Keep the `text` blocks (the answer, incl. the ```lean fence); drop the
+    internal `thinking` blocks.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for b in content:
+            if isinstance(b, dict) and b.get("type") == "text":
+                parts.append(b.get("text", ""))
+            elif isinstance(b, str):
+                parts.append(b)
+        return "\n".join(parts)
+    return str(content)
+
+
 def extract_lean_code(text: str) -> str | None:
     blocks = _FENCE_RE.findall(text)
     if not blocks:
@@ -39,15 +60,12 @@ class TokenLedger:
 
 
 def build_initial_prompt(file_content: str) -> str:
+    # The house doctrine, idioms, values, and pins live in the system message
+    # (house_context.build_system_prompt); the user turn just presents the file.
     return (
-        "You are given a Lean 4 file from a Mathlib-based project "
-        "(Lean toolchain pinned by the project). Replace the `sorry` with a "
-        "complete proof.\n"
-        "Rules:\n"
-        "- Output the COMPLETE file in a single ```lean code block.\n"
-        "- Do not change the theorem statement, imports, or anything else.\n"
-        "- Forbidden: sorry, admit, native_decide, polyrith, exact?, apply?, "
-        "hint, new axioms.\n\n"
+        "Replace the `sorry` with a complete proof. Output the COMPLETE file "
+        "(imports and statement unchanged) in a single ```lean code block. "
+        "The house rules, idioms, and pins are in the system message.\n\n"
         f"```lean\n{file_content}\n```"
     )
 
@@ -63,10 +81,19 @@ def build_repair_prompt(errors: list[str]) -> str:
 
 
 def window_messages(messages: list[dict], keep_last: int = 3) -> list[dict]:
-    """First message + the last keep_last (assistant, user) exchange pairs."""
-    if len(messages) <= 1 + 2 * keep_last:
+    """Leading system message(s) + first user message + last keep_last pairs.
+
+    Preserves the whole head (any `system` messages carrying the house doctrine,
+    plus the first user turn with the file) so the agent never loses its context
+    as the transcript is windowed for long repair loops.
+    """
+    head = 0
+    while head < len(messages) and messages[head].get("role") == "system":
+        head += 1
+    head = min(head + 1, len(messages))  # + the first user message
+    if len(messages) <= head + 2 * keep_last:
         return messages
-    return [messages[0]] + messages[-2 * keep_last:]
+    return messages[:head] + messages[-2 * keep_last:]
 
 
 def axiom_guard_block(file_content: str, decl_name: str) -> str:

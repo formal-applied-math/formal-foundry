@@ -9,10 +9,22 @@ from probe_lib import (
     build_initial_prompt,
     build_repair_prompt,
     extract_lean_code,
+    normalize_content,
     sha256_hex,
     slop_report,
     window_messages,
 )
+
+
+def test_normalize_content_reasoning_blocks():
+    assert normalize_content("plain string") == "plain string"
+    blocks = [
+        {"type": "thinking", "thinking": [{"type": "text", "text": "secret reasoning"}]},
+        {"type": "text", "text": "```lean\nby norm_num\n```"},
+    ]
+    out = normalize_content(blocks)
+    assert out == "```lean\nby norm_num\n```"
+    assert "secret reasoning" not in out
 
 
 def test_extract_lean_code_fenced():
@@ -59,6 +71,18 @@ def test_window_messages_keeps_first_and_tail():
     out = window_messages(msgs, keep_last=2)
     assert out[0]["content"] == "initial"
     assert [m["content"] for m in out[1:]] == ["a8", "u8", "a9", "u9"]
+
+
+def test_window_messages_preserves_system():
+    msgs = [{"role": "system", "content": "SYS"},
+            {"role": "user", "content": "initial"}]
+    for i in range(10):
+        msgs.append({"role": "assistant", "content": f"a{i}"})
+        msgs.append({"role": "user", "content": f"u{i}"})
+    out = window_messages(msgs, keep_last=2)
+    assert out[0] == {"role": "system", "content": "SYS"}
+    assert out[1]["content"] == "initial"
+    assert [m["content"] for m in out[2:]] == ["a8", "u8", "a9", "u9"]
 
 
 def test_axiom_guard_block():

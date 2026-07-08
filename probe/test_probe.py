@@ -50,6 +50,21 @@ def test_pass_on_second_round_with_axiom_guard():
     assert "type mismatch" in chat.calls[1][-1]["content"]
 
 
+def test_run_target_prepends_system_prompt():
+    chat = make_chat([
+        ("```lean\nimport Mathlib\n\ntheorem foo : 2 + 2 = 4 := by norm_num\n```", 500),
+    ])
+    check = make_check([
+        {"success": True, "errors": [], "warnings": [], "sorry_count": 0},
+        {"success": True, "errors": [], "warnings": [], "sorry_count": 0},  # axiom guard
+    ])
+    out = run_target(TARGET, budget=50000, max_rounds=1,
+                     chat_fn=chat, check_fn=check, log_fn=lambda r: None,
+                     system_prompt="HOUSE DOCTRINE")
+    assert out["outcome"] == "pass"
+    assert chat.calls[0][0] == {"role": "system", "content": "HOUSE DOCTRINE"}
+
+
 def test_budget_exhaustion():
     chat = make_chat([("no code at all", 30000), ("still none", 30000)])
     check = make_check([])

@@ -20,6 +20,7 @@ import time
 import urllib.error
 import urllib.request
 
+from house_context import build_system_prompt
 from probe_lib import (
     TokenLedger,
     append_jsonl,
@@ -27,6 +28,7 @@ from probe_lib import (
     build_initial_prompt,
     build_repair_prompt,
     extract_lean_code,
+    normalize_content,
     slop_report,
     window_messages,
 )
@@ -37,13 +39,18 @@ DEFAULT_BASE_URL = "https://api.mistral.ai/v1"
 
 def mistral_chat(messages, *, api_key, model=DEFAULT_MODEL,
                  base_url=DEFAULT_BASE_URL, max_tokens=16384,
-                 temperature=0.7, timeout=600):
-    body = json.dumps({
+                 temperature=0.7, timeout=600, reasoning_effort=None):
+    payload = {
         "model": model,
         "messages": messages,
         "max_tokens": max_tokens,
         "temperature": temperature,
-    }).encode("utf-8")
+    }
+    # Leanstral supports reasoning_effort ("high" for hard proofs, "none" for
+    # speed); only send it when set so non-reasoning models aren't disturbed.
+    if reasoning_effort is not None:
+        payload["reasoning_effort"] = reasoning_effort
+    body = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         f"{base_url}/chat/completions",
         data=body,
@@ -56,7 +63,7 @@ def mistral_chat(messages, *, api_key, model=DEFAULT_MODEL,
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
-            content = data["choices"][0]["message"]["content"]
+            content = normalize_content(data["choices"][0]["message"]["content"])
             tokens = data.get("usage", {}).get("total_tokens", 0)
             return content, tokens
         except urllib.error.HTTPError as e:
@@ -92,10 +99,13 @@ def daemon_check(code: str, *, host="127.0.0.1", port=7878, timeout=600) -> dict
 
 
 def run_target(target: dict, *, budget: int, max_rounds: int,
-               chat_fn, check_fn, log_fn) -> dict:
+               chat_fn, check_fn, log_fn, system_prompt=None) -> dict:
     ledger = TokenLedger(budget)
     code = target["statement"]
-    messages = [{"role": "user", "content": build_initial_prompt(code)}]
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": build_initial_prompt(code)})
     t0 = time.time()
     outcome, rounds, last_slop, axioms_clean = "max_rounds", 0, None, None
 
@@ -160,6 +170,11 @@ def main() -> int:
     p.add_argument("--model", default=DEFAULT_MODEL)
     p.add_argument("--base-url", default=DEFAULT_BASE_URL)
     p.add_argument("--run-tag", required=True)
+    p.add_argument("--main-repo", default="/home/rapha/code/automated_proofs_quantfin",
+                   help="main repo root, for the live house-doctrine system prompt + pins")
+    p.add_argument("--reasoning-effort", default=None,
+                   choices=[None, "none", "low", "medium", "high"],
+                   help="Leanstral reasoning_effort; 'high' for hard targets")
     args = ap.parse_args()
 
     api_key = os.environ.get("MISTRAL_API_KEY")
@@ -167,6 +182,7 @@ def main() -> int:
         print("MISTRAL_API_KEY not set", file=sys.stderr)
         return 2
 
+    system_prompt = build_system_prompt(args.main_repo)
     manifest = json.load(open(args.manifest))
     root = os.path.dirname(os.path.abspath(args.manifest))
     run_dir = os.path.join(os.path.dirname(root), "runs")
@@ -175,7 +191,8 @@ def main() -> int:
 
     def chat_fn(messages):
         return mistral_chat(messages, api_key=api_key, model=args.model,
-                            base_url=args.base_url)
+                            base_url=args.base_url,
+                            reasoning_effort=args.reasoning_effort)
 
     for target in manifest["targets"]:
         if args.only and target["id"] != args.only:
@@ -187,7 +204,8 @@ def main() -> int:
         summary = run_target(target, budget=args.budget,
                              max_rounds=args.max_rounds, chat_fn=chat_fn,
                              check_fn=daemon_check,
-                             log_fn=lambda r: append_jsonl(attempts_log, r))
+                             log_fn=lambda r: append_jsonl(attempts_log, r),
+                             system_prompt=system_prompt)
         summary["model"] = args.model
         summary["ts"] = time.strftime("%Y-%m-%dT%H:%M:%S")
         append_jsonl(summary_log, summary)
