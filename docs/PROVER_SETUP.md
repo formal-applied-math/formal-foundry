@@ -64,30 +64,51 @@ The foundry's tackable queue is the `status:ready` issues in `formal-mathfin`
 (the roadmap lives there — no shadow list). Each issue's **Pointers** section
 drives the context pack; its **Task** is the statement to formalize.
 
-## The canonical production harness (P1): `lean-lsp-mcp`
+## The `lean-lsp-mcp` harness (built + verified, Docker-plugged)
 
-Leanstral was specifically trained for maximal performance with **`lean-lsp-mcp`**
-— an MCP server exposing the Lean language server (live goal states, type info,
-hovers, search, run) as tools, which is what enables its long-horizon (millions
-of tokens, multi-compaction) proof sessions. The text-loop here pastes compiler
-*error strings*; the MCP harness gives the agent the *goal state* directly. For
-P1, stand this up rather than extend the text-loop:
+Leanstral was specifically trained for **`lean-lsp-mcp`** — the MCP server
+exposing the Lean language server's live goal states, type info, hovers, search,
+and `run` as tools, which is what enables its long-horizon proof sessions. The
+text-loop pastes compiler *error strings*; this gives the agent the *goal state*
+directly. It is stood up and verified against this box's constraints:
 
-```toml
-# ~/.vibe/config.toml
-[[mcp_servers]]
-name = "lean-lsp"
-transport = "stdio"
-command = "uvx"
-args = ["lean-lsp-mcp"]
-tool_timeout_sec = 600
+- **`docker/docker-compose.lean-lsp.yml`** (main repo) adds a `lean-lsp` service:
+  the pinned Lean image + the `lake_build_cache` olean volume (reuses the built
+  oleans — no host build, no root-owned host `.lake`), `mem_limit 6g`, `cpuset`.
+  It `pip install`s `lean-lsp-mcp` at start and idles; `docker exec` spawns the
+  stdio MCP per session.
+- **Memory doctrine** — the Lean LSP loads only during a session, so it is *the*
+  one Lean process: the lean-repl daemon must be DOWN. `scripts/leanstral-vibe.sh`
+  enforces it (takes the daemon down, brings `lean-lsp` up, sources the key).
+- **`~/.vibe/config.toml`** wires the MCP as
+  `docker exec -i mathfin-lean-lsp lean-lsp-mcp --lean-project-path /app`.
+  Verified end-to-end: the handshake exposes 23 tools including `lean_goal`,
+  `lean_term_goal`, `lean_hover_info`, `lean_diagnostic_messages`,
+  `lean_completions`, and `lean_loogle`/`lean_leansearch`/`lean_state_search`.
+
+Runbook:
+
+```bash
+# one-time: Leanstral API key + agent
+vibe --setup                 # stores the Mistral API key
+# then, inside vibe, run /leanstall to install the Leanstral agent + model (labs-leanstral-1-5)
+
+# per session (the launcher takes the daemon down + brings lean-lsp up):
+cd ~/code/mathfin-foundry
+scripts/leanstral-vibe.sh --agent lean -p "prove the sorry in <MathFin/…>; use lean_goal to read the state"
+
+# tear the LSP down when done (frees the Lean slot for the daemon):
+docker compose -f ~/code/automated_proofs_quantfin/docker/docker-compose.yml \
+  -f ~/code/automated_proofs_quantfin/docker/docker-compose.lean-lsp.yml down lean-lsp
 ```
 
-Run with `vibe --agent lean` (Leanstral) pointed at a clone pinned to the
-toolchain/Mathlib/BM revs above; keep the same system doctrine + values gate +
-issue-driven context pack in front of it. The house doctrine, slop screen, and
-axiom guard are harness-independent — they wrap whichever loop produces the
-candidate.
+The house doctrine + values gate + issue-driven context pack (above) go in front
+of whichever loop produces the candidate — the text-loop *or* this MCP harness;
+the slop screen and axiom guard are harness-independent.
+
+Note: the first `up` pip-installs `lean-lsp-mcp` in the container (~30 s); to skip
+that, bake it into the image via CI (`publish-image.yml`), never a local
+`docker compose build` (memory doctrine).
 
 ## References
 
