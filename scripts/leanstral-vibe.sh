@@ -1,15 +1,20 @@
 #!/usr/bin/env bash
-# Launch a Leanstral (vibe) session wired to the Docker-plugged lean-lsp MCP.
+# Launch a Leanstral (vibe) session wired to the Docker-plugged lean-lsp MCP,
+# with the house doctrine (values + idioms + pins) prepended to the prompt so a
+# vibe session is equipped exactly like the text-loop probe.
 #
 # Memory doctrine: the Lean language server is the ONE local Lean process, so the
 # lean-repl daemon MUST be down. This script enforces that, brings up the
-# mem-capped lean-lsp service (which reuses the built oleans), sources the API
-# key, then runs vibe with any args you pass through.
+# mem-capped lean-lsp service (reusing the built oleans), sources the API key,
+# builds the doctrine, and runs vibe.
 #
-#   scripts/leanstral-vibe.sh --agent lean            # interactive
-#   scripts/leanstral-vibe.sh --agent lean -p "prove the sorry in MathFin/…"  # programmatic
+#   scripts/leanstral-vibe.sh --agent lean --auto-approve --max-turns 40 \
+#       -p "TASK: prove the sorry in MathFin/…. Pointers: … . Use lean_goal."
 #
+# The doctrine is injected only in programmatic (-p / --prompt) mode; interactive
+# sessions run without it (paste it, or start the session with it).
 set -euo pipefail
+FOUNDRY="$(cd "$(dirname "$0")/.." && pwd)"
 MAIN="${MAIN_REPO:-/home/rapha/code/automated_proofs_quantfin}"
 BASE="$MAIN/docker/docker-compose.yml"
 LSP="$MAIN/docker/docker-compose.lean-lsp.yml"
@@ -32,6 +37,21 @@ done
 if [ -f "$MAIN/.env" ]; then set -a; . "$MAIN/.env"; set +a; export MISTRAL_API_KEY; fi
 [ -n "${MISTRAL_API_KEY:-}" ] || { echo "[leanstral-vibe] MISTRAL_API_KEY not set" >&2; exit 2; }
 
-# 4. Run vibe (Leanstral) with the lean-lsp MCP. Pass through any args.
-#    First time only: run `vibe --setup` (key) and `/leanstall` (Leanstral agent).
-exec vibe --trust "$@"
+# 4. House doctrine (live values + idioms + pins), prepended to the -p prompt.
+DOCTRINE="$(python3 -c "import sys; sys.path.insert(0, '$FOUNDRY/probe'); from house_context import build_system_prompt; print(build_system_prompt('$MAIN'))")"
+args=(); take_prompt=0; injected=0
+for a in "$@"; do
+  if [ "$take_prompt" = 1 ]; then
+    args+=("${DOCTRINE}"$'\n\n════════════════════\nTASK\n════════════════════\n'"${a}")
+    take_prompt=0; injected=1; continue
+  fi
+  case "$a" in
+    -p|--prompt) args+=("$a"); take_prompt=1 ;;
+    *) args+=("$a") ;;
+  esac
+done
+[ "$injected" = 1 ] || echo "[leanstral-vibe] note: no -p prompt found — running WITHOUT the house doctrine (interactive mode). Pass -p \"…\" to inject it." >&2
+
+# 5. Run vibe (Leanstral) with the lean-lsp MCP.
+#    First time only: `vibe --setup` (key) and, inside vibe, /leanstall (agent).
+exec vibe --trust "${args[@]}"
