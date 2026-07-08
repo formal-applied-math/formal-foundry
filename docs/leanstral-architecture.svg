@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="900" viewBox="0 0 900 900" font-family="'Helvetica Neue',Helvetica,Arial,sans-serif">
+  <defs>
+    <marker id="arw" viewBox="0 0 10 10" refX="7.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#8a929e"/>
+    </marker>
+    <marker id="arwb" viewBox="0 0 10 10" refX="7.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#2f5fd0"/>
+    </marker>
+  </defs>
+  <rect width="900" height="900" fill="#ffffff"/>
+
+  <text x="450" y="34" text-anchor="middle" font-size="16" font-weight="700" fill="#1b2330">Leanstral — Lean 4 formalization harness</text>
+
+  <!-- 1 TARGET -->
+  <rect x="110" y="56" width="680" height="78" rx="12" fill="#f7f8fa" stroke="#d7dce3"/>
+  <text x="132" y="84" font-size="15" font-weight="700" fill="#1b2330">TARGET</text>
+  <text x="132" y="106" font-size="13.5" fill="#616a78">a Lean 4 stub&#160;&#160;<tspan font-family="'SF Mono',Menlo,Consolas,monospace" fill="#1b2330">theorem … := by sorry</tspan></text>
+  <text x="132" y="124" font-size="13.5" fill="#616a78">+ pointers to the existing modules it should reuse</text>
+
+  <line x1="450" y1="134" x2="450" y2="160" stroke="#8a929e" stroke-width="1.6" marker-end="url(#arw)"/>
+
+  <!-- 2 DOCTRINE -->
+  <rect x="110" y="162" width="680" height="94" rx="12" fill="#f7f8fa" stroke="#d7dce3"/>
+  <text x="132" y="190" font-size="15" font-weight="700" fill="#1b2330">HOUSE DOCTRINE<tspan font-size="12.5" font-weight="400" fill="#8a929e">&#160;&#160;system prompt · injected on every attempt</tspan></text>
+  <text x="132" y="214" font-size="13.5" fill="#616a78">values gate · house idioms · pins · consume-don't-reprove</text>
+  <text x="132" y="232" font-size="13.5" fill="#616a78">per-target context pack (the declarations to build on)</text>
+
+  <line x1="450" y1="256" x2="450" y2="282" stroke="#8a929e" stroke-width="1.6" marker-end="url(#arw)"/>
+
+  <!-- 3 LEANSTRAL -->
+  <rect x="110" y="284" width="680" height="124" rx="12" fill="#fdf3ee" stroke="#eccbb6"/>
+  <text x="132" y="312" font-size="15" font-weight="700" fill="#d9611e">LEANSTRAL<tspan font-size="12.5" font-weight="400" font-family="'SF Mono',Menlo,Consolas,monospace" fill="#a08774">&#160;&#160;labs-leanstral-1-5</tspan></text>
+  <text x="132" y="338" font-size="13.5" fill="#616a78">•&#160;&#160;calibration — text loop → Mistral API&#160;&#160;<tspan font-family="'SF Mono',Menlo,Consolas,monospace" fill="#1b2330" font-size="12.5">reasoning_effort=high</tspan></text>
+  <text x="132" y="362" font-size="13.5" fill="#616a78">•&#160;&#160;production — <tspan font-family="'SF Mono',Menlo,Consolas,monospace" fill="#1b2330" font-size="12.5">vibe ⇄ lean-lsp-mcp</tspan>&#160;&#160;(the trained-for harness)</text>
+  <text x="150" y="384" font-size="12.5" fill="#8a929e">live <tspan font-family="'SF Mono',Menlo,Consolas,monospace">lean_goal</tspan> · hover · diagnostics · <tspan font-family="'SF Mono',Menlo,Consolas,monospace">loogle</tspan> · <tspan font-family="'SF Mono',Menlo,Consolas,monospace">leansearch</tspan></text>
+
+  <!-- feedback loop 3 <-> 4 -->
+  <line x1="428" y1="410" x2="428" y2="478" stroke="#8a929e" stroke-width="1.6" marker-end="url(#arw)"/>
+  <line x1="472" y1="478" x2="472" y2="410" stroke="#2f5fd0" stroke-width="1.6" marker-end="url(#arwb)"/>
+  <text x="414" y="440" text-anchor="end" font-size="12" font-family="'SF Mono',Menlo,Consolas,monospace" fill="#616a78">candidate .lean</text>
+  <text x="486" y="440" text-anchor="start" font-size="12" font-family="'SF Mono',Menlo,Consolas,monospace" fill="#2f5fd0">goal states + errors</text>
+
+  <!-- 4 LEAN ENV -->
+  <rect x="110" y="482" width="680" height="102" rx="12" fill="#eef3fc" stroke="#c2d1ee"/>
+  <text x="132" y="510" font-size="15" font-weight="700" fill="#2f5fd0">LEAN ENVIRONMENT<tspan font-size="12.5" font-weight="400" fill="#8a929e">&#160;&#160;Docker · memory-capped 6 GB</tspan></text>
+  <text x="132" y="534" font-size="13.5" fill="#616a78">reuses the prebuilt oleans · one Lean process at a time:</text>
+  <text x="132" y="554" font-size="13.5" fill="#616a78"><tspan font-family="'SF Mono',Menlo,Consolas,monospace" fill="#1b2330" font-size="12.5">lean-repl daemon</tspan>&#160;&#160;XOR&#160;&#160;<tspan font-family="'SF Mono',Menlo,Consolas,monospace" fill="#1b2330" font-size="12.5">lean-lsp server</tspan></text>
+  <text x="132" y="574" font-size="12.5" fill="#8a929e">model runs on Mistral's servers → only ~5 GB Lean is local</text>
+
+  <line x1="450" y1="584" x2="450" y2="610" stroke="#8a929e" stroke-width="1.6" marker-end="url(#arw)"/>
+
+  <!-- 5 GATE -->
+  <rect x="110" y="612" width="680" height="104" rx="12" fill="#eaf5ef" stroke="#bfe0cd"/>
+  <text x="132" y="640" font-size="15" font-weight="700" fill="#1c8f5f">ACCEPTANCE GATE</text>
+  <text x="132" y="664" font-size="13.5" fill="#616a78">no errors · no <tspan font-family="'SF Mono',Menlo,Consolas,monospace" fill="#1b2330" font-size="12.5">sorry</tspan></text>
+  <text x="132" y="684" font-size="13.5" fill="#616a78">axioms ⊆ <tspan font-family="'SF Mono',Menlo,Consolas,monospace" fill="#1b2330" font-size="12.5">{propext, Classical.choice, Quot.sound}</tspan></text>
+  <text x="132" y="704" font-size="13.5" fill="#616a78">no forbidden tactics (<tspan font-family="'SF Mono',Menlo,Consolas,monospace" fill="#1b2330" font-size="12.5">native_decide, exact?, apply?</tspan>, …)</text>
+
+  <line x1="450" y1="716" x2="450" y2="742" stroke="#8a929e" stroke-width="1.6" marker-end="url(#arw)"/>
+
+  <!-- 6 REFINERY -->
+  <rect x="110" y="744" width="680" height="82" rx="12" fill="#eaf5ef" stroke="#bfe0cd"/>
+  <text x="132" y="772" font-size="15" font-weight="700" fill="#1c8f5f">REFINERY<tspan font-size="12.5" font-weight="400" fill="#8a929e">&#160;&#160;scout, not author</tspan></text>
+  <text x="132" y="795" font-size="13.5" fill="#616a78">8-lens values review → conceptually-right proof →</text>
+  <text x="132" y="813" font-size="13.5" fill="#616a78">a human authors the pull request into the library</text>
+
+  <text x="450" y="864" text-anchor="middle" font-size="12" font-family="'SF Mono',Menlo,Consolas,monospace" fill="#8a929e">pins:  Lean v4.31.0  ·  Mathlib @fabf563a  ·  BrownianMotion @bdf5ea0c (Degenne)</text>
+</svg>
