@@ -28,6 +28,11 @@
   <text x="670" y="78" text-anchor="middle" class="nt" fill="#d9611e">LEANSTRAL</text>
   <text x="670" y="98" text-anchor="middle" class="nd">labs-leanstral-1-5  ·  Mistral API (remote)</text>
 
+  <!-- SCHEDULER (top, above the gap) — the now-live autonomous driver -->
+  <rect x="895" y="54" width="330" height="58" rx="11" fill="#eef4f0" stroke="#cadfd0"/>
+  <text x="1060" y="78" text-anchor="middle" class="nt" fill="#1c8f5f">SCHEDULER</text>
+  <text x="1060" y="98" text-anchor="middle" class="nd">GitHub Actions cron  ·  1 issue / 3 days</text>
+
   <!-- ===== GITHUB (left) ===== -->
   <rect x="50" y="170" width="330" height="356" rx="13" fill="#eef4f0" stroke="#cadfd0"/>
   <text x="66" y="194" class="clab" fill="#1c8f5f">GITHUB · formal-mathfin (public)</text>
@@ -50,7 +55,7 @@
   <text x="476" y="194" class="clab" fill="#d9611e">FOUNDRY · mathfin-foundry (local, private)</text>
   <rect x="480" y="206" width="380" height="46" rx="9" fill="#ffffff" stroke="#d5dae1"/>
   <text x="494" y="227" class="nt"><tspan class="mono">house_context</tspan> → doctrine</text>
-  <text x="494" y="245" class="nd">values · idioms · pins · per-target context pack</text>
+  <text x="494" y="245" class="nd">values · idioms · pins · context pack (lean_scout index)</text>
   <rect x="500" y="270" width="360" height="136" rx="9" fill="#ffffff" stroke="#d5dae1"/>
   <text x="514" y="294" class="nt"><tspan class="mono">probe.py</tspan></text>
   <text x="514" y="314" class="nd">text-loop harness (calibration)</text>
@@ -106,6 +111,11 @@
   <!-- Foundry <-> Leanstral -->
   <line x1="670" y1="170" x2="670" y2="112" class="edge" marker-end="url(#a)"/>
   <text x="682" y="146" class="el">prompt + doctrine  ↔  proof / tool-calls</text>
+
+  <!-- Scheduler -> the tick (routed down the foundry/docker gap) -->
+  <polyline points="930,112 930,300 862,300" class="edge" marker-end="url(#a)"/>
+  <text x="884" y="205" class="el">drives</text>
+  <text x="884" y="219" class="el">the tick</text>
 
   <!-- issues -> Foundry -->
   <line x1="362" y1="234" x2="460" y2="234" class="edge" marker-end="url(#a)"/>
