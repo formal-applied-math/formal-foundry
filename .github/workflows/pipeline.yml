@@ -52,14 +52,21 @@ jobs:
 
       - name: Start the lean-repl daemon
         run: |
+          # The image's default entrypoint is the verify CLI; the daemon needs
+          # the same override the compose lean-repl service uses.
           docker run -d --name lean-repl -p 127.0.0.1:7878:7878 \
-            ghcr.io/raphaelrrcoelho/mathfin-verify:latest
-          echo "waiting for READY…"
-          for i in $(seq 1 90); do
+            --entrypoint python3 \
+            ghcr.io/raphaelrrcoelho/mathfin-verify:latest \
+            -m tools.verify.lean_repl
+          echo "waiting for READY (cold Mathlib env load ~5 min)…"
+          for i in $(seq 1 120); do
             if docker logs lean-repl 2>&1 | grep -q "READY:"; then echo "daemon ready"; exit 0; fi
+            if [ "$(docker inspect -f '{{.State.Running}}' lean-repl 2>/dev/null)" != "true" ]; then
+              echo "::error::daemon container exited early"; docker logs lean-repl; exit 1
+            fi
             sleep 5
           done
-          echo "::error::daemon did not become READY"; docker logs lean-repl; exit 1
+          echo "::error::daemon did not become READY in time"; docker logs lean-repl; exit 1
 
       - name: Setup Python
         uses: actions/setup-python@v5
