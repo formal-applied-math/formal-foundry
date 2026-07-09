@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 
@@ -41,8 +42,31 @@ def test_extract_signatures_lists_decls_and_skips_missing():
             f.write("theorem foo_bar : 1 = 1 := rfl\n"
                     "noncomputable def baz (x : ℝ) : ℝ := x\n"
                     "lemma qux : 2 = 2 := rfl\n")
-        pack = extract_signatures(d, ["M/Foo.lean", "M/DoesNotExist.lean"])
+        # index_dir points at an empty dir → no index → regex fallback
+        pack = extract_signatures(d, ["M/Foo.lean", "M/DoesNotExist.lean"],
+                                  index_dir=os.path.join(d, "noindex"))
         assert "theorem foo_bar" in pack
         assert "def baz" in pack
         assert "lemma qux" in pack
         assert "consume" in pack.lower()
+
+
+def test_extract_signatures_prefers_index_when_available():
+    with tempfile.TemporaryDirectory() as d:
+        idx = os.path.join(d, "index")
+        os.makedirs(idx)
+        with open(os.path.join(idx, "types.jsonl"), "w", encoding="utf-8") as f:
+            f.write(json.dumps({"name": "MathFin.vasicekBondPrice",
+                                "module": "MathFin.FixedIncome.VasicekBondPrice",
+                                "type": "ℝ → ℝ → ℝ", "docString": "ZCB price.",
+                                "allowCompletion": True}) + "\n")
+        with open(os.path.join(idx, "tactics.jsonl"), "w", encoding="utf-8") as f:
+            f.write(json.dumps({"module": "MathFin.FixedIncome.VasicekBondPrice",
+                                "goals": [{"pp": "⊢ 0 < P"}], "ppTac": "positivity",
+                                "kind": "k"}) + "\n")
+        pack = extract_signatures(d, ["MathFin/FixedIncome/VasicekBondPrice.lean"],
+                                  index_dir=idx)
+        # real signature (type), docstring, and a house-style exemplar
+        assert "vasicekBondPrice : ℝ → ℝ → ℝ" in pack
+        assert "ZCB price." in pack
+        assert "positivity" in pack and "TACTIC EXEMPLARS" in pack

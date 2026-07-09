@@ -1,0 +1,24 @@
+name = "scout-lake"
+defaultTargets = []
+
+# lean_scout index project — kept OUT of the main verification lakefile on
+# purpose: the main repo's lake-manifest.json is the verification anchor and the
+# ledger input-hash, so we never perturb its pins with a dev-only extractor dep.
+# This sibling project requires MathFin by local path (inheriting its pinned
+# Mathlib + BrownianMotion manifest, reusing the shared olean cache) and
+# lean_scout pinned to an exact rev (never @main).
+#
+# Require ORDER mirrors the main lakefile's mathlib-last rule: Lake gives LATER
+# requires precedence on transitive conflicts, so MathFin is declared LAST to
+# keep Mathlib/BrownianMotion at MathFin's authoritative pins. If lean_scout was
+# built against a different Mathlib this is where a conflict surfaces — see
+# scout-lake/README.md for the fallback.
+
+[[require]]
+name = "lean_scout"
+git = "https://github.com/mathlib-initiative/lean_scout.git"
+rev = "5b7cdb6b4ef4f19da644b785b96985a9a411cd65"
+
+[[require]]
+name = "MathFin"
+path = "../../automated_proofs_quantfin"

@@ -19,6 +19,8 @@ import json
 import os
 import re
 
+from scout_index import ScoutIndex, default_index_dir
+
 # --- Pins ---------------------------------------------------------------------
 
 def read_pins(main_repo: str) -> dict:
@@ -129,10 +131,49 @@ _DECL_RE = re.compile(
 )
 
 
-def extract_signatures(main_repo: str, modules: list[str], max_per_module: int = 40) -> str:
-    """Context pack: the declaration names in the cited MathFin modules, so the
-    agent builds on existing results instead of reproving them. `modules` are
-    repo-relative paths (e.g. 'MathFin/FixedIncome/VasicekBondPrice.lean')."""
+def _first_line(s: str | None) -> str:
+    if not s:
+        return ""
+    return s.strip().splitlines()[0].strip()
+
+
+def _index_pack(idx: ScoutIndex, modules: list[str], max_per_module: int,
+                exemplar_limit: int) -> str:
+    """Context pack from the lean_scout index: REAL elaborated signatures +
+    docstrings, plus house-style (goal → tactic) exemplars. '' if the index
+    covers none of the requested modules (caller then falls back to regex)."""
+    by_mod = idx.signatures(modules, max_per_module=max_per_module)
+    if not by_mod:
+        return ""
+    blocks: list[str] = []
+    for mod in modules:
+        recs = by_mod.get(_module_key(idx, mod))
+        if not recs:
+            continue
+        lines = []
+        for name, typ, doc in recs:
+            short = name.rsplit(".", 1)[-1]
+            lines.append(f"{short} : {typ}" + (f"    -- {_first_line(doc)}" if doc else ""))
+        blocks.append(f"• {mod}:\n    " + "\n    ".join(lines))
+    if not blocks:
+        return ""
+    pack = ("── EXISTING DECLARATIONS TO BUILD ON (real signatures; consume, do not reprove) ──\n"
+            + "\n".join(blocks) + "\n")
+    exemplars = idx.tactic_exemplars(modules, limit=exemplar_limit)
+    if exemplars:
+        ex_lines = [f"    {goal}\n        ⟶  {tac}" for goal, tac in exemplars]
+        pack += ("── HOUSE-STYLE TACTIC EXEMPLARS (how this library discharges goals) ──\n"
+                 + "\n".join(ex_lines) + "\n")
+    return pack
+
+
+def _module_key(idx: ScoutIndex, mod: str) -> str:
+    from scout_index import path_to_module
+    return path_to_module(mod)
+
+
+def _regex_pack(main_repo: str, modules: list[str], max_per_module: int) -> str:
+    """Fallback context pack: declaration names scraped from source by regex."""
     out: list[str] = []
     for mod in modules:
         path = os.path.join(main_repo, mod)
@@ -149,3 +190,21 @@ def extract_signatures(main_repo: str, modules: list[str], max_per_module: int =
         return ""
     return ("── EXISTING DECLARATIONS TO BUILD ON (consume these; do not reprove) ──\n"
             + "\n".join(out) + "\n")
+
+
+def extract_signatures(main_repo: str, modules: list[str], max_per_module: int = 40,
+                       index_dir: str | None = None, exemplar_limit: int = 6) -> str:
+    """Per-target context pack so the agent builds on existing results instead of
+    reproving them. `modules` are repo-relative paths (e.g.
+    'MathFin/FixedIncome/VasicekBondPrice.lean').
+
+    Prefers the lean_scout index (real elaborated signatures + docstrings +
+    house-style tactic exemplars) when it covers the requested modules; otherwise
+    falls back to the regex name scrape, so the foundry works with or without an
+    index built."""
+    idx = ScoutIndex(index_dir if index_dir is not None else default_index_dir())
+    if idx.available:
+        pack = _index_pack(idx, modules, max_per_module, exemplar_limit)
+        if pack:
+            return pack
+    return _regex_pack(main_repo, modules, max_per_module)
