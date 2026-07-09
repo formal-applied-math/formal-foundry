@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="810" viewBox="0 0 1200 810" font-family="'Helvetica Neue',Helvetica,Arial,sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" width="1680" height="700" viewBox="0 0 1680 700" font-family="'Helvetica Neue',Helvetica,Arial,sans-serif">
   <defs>
     <marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#8a929e"/></marker>
     <marker id="ab" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#2f5fd0"/></marker>
@@ -15,129 +15,123 @@
       .note-d{font-size:11px;fill:#8a929e;}
     </style>
   </defs>
-  <rect width="1200" height="810" fill="#ffffff"/>
-  <text x="600" y="34" text-anchor="middle" font-size="16.5" font-weight="700" fill="#1b2330">Leanstral formalization harness — components &amp; interactions</text>
+  <rect width="1680" height="700" fill="#ffffff"/>
+  <text x="700" y="34" text-anchor="middle" font-size="16.5" font-weight="700" fill="#1b2330">Leanstral formalization harness — components &amp; interactions</text>
 
-  <!-- ===== OPERATOR (top-left) ===== -->
-  <rect x="48" y="58" width="288" height="60" rx="11" fill="#f2f4f7" stroke="#d5dae1"/>
-  <text x="66" y="82" class="nt">OPERATOR (R)</text>
-  <text x="66" y="102" class="nd">authors statements · runs harness · opens PRs</text>
+  <!-- OPERATOR (top-left) -->
+  <rect x="50" y="54" width="300" height="58" rx="11" fill="#f2f4f7" stroke="#d5dae1"/>
+  <text x="68" y="78" class="nt">OPERATOR (R)</text>
+  <text x="68" y="98" class="nd">authors statements · runs harness · opens PRs</text>
 
-  <!-- ===== GITHUB repo cluster (left) ===== -->
-  <rect x="48" y="150" width="288" height="356" rx="13" fill="#eef4f0" stroke="#cadfd0"/>
-  <text x="64" y="174" class="clab" fill="#1c8f5f">GITHUB · formal-mathfin (public)</text>
-  <rect x="66" y="188" width="252" height="60" rx="9" fill="#ffffff" stroke="#d5dae1"/>
-  <text x="80" y="211" class="nt">roadmap issues</text>
-  <text x="80" y="231" class="nd"><tspan class="mono">status:ready</tspan> = target queue</text>
-  <rect x="66" y="262" width="252" height="74" rx="9" fill="#ffffff" stroke="#d5dae1"/>
-  <text x="80" y="285" class="nt">Lean library + benchmarks</text>
-  <text x="80" y="305" class="nd">Mathlib + BrownianMotion sources</text>
-  <text x="80" y="321" class="nd"><tspan class="mono">MathFin/</tspan> — the target files live here</text>
-  <rect x="66" y="350" width="252" height="52" rx="9" fill="#ffffff" stroke="#d5dae1"/>
-  <text x="80" y="372" class="nt"><tspan class="mono">.env</tspan> key + toolchain pins</text>
-  <text x="80" y="390" class="nd">API key · Lean/Mathlib/BM revs</text>
-  <rect x="66" y="416" width="252" height="52" rx="9" fill="#ffffff" stroke="#d5dae1"/>
-  <text x="80" y="438" class="nt">pull requests → main</text>
-  <text x="80" y="456" class="nd">the accepted, refined proofs</text>
+  <!-- LEANSTRAL (top-center, above Foundry) -->
+  <rect x="505" y="54" width="330" height="58" rx="11" fill="#fdf3ee" stroke="#e6b892"/>
+  <text x="670" y="78" text-anchor="middle" class="nt" fill="#d9611e">LEANSTRAL</text>
+  <text x="670" y="98" text-anchor="middle" class="nd">labs-leanstral-1-5  ·  Mistral API (remote)</text>
 
-  <!-- ===== CENTER SPINE ===== -->
-  <!-- Leanstral -->
-  <rect x="470" y="58" width="280" height="60" rx="11" fill="#fdf3ee" stroke="#e6b892"/>
-  <text x="610" y="82" text-anchor="middle" class="nt" fill="#d9611e">LEANSTRAL</text>
-  <text x="610" y="102" text-anchor="middle" class="nd">labs-leanstral-1-5  ·  Mistral API (remote)</text>
+  <!-- ===== GITHUB (left) ===== -->
+  <rect x="50" y="170" width="330" height="356" rx="13" fill="#eef4f0" stroke="#cadfd0"/>
+  <text x="66" y="194" class="clab" fill="#1c8f5f">GITHUB · formal-mathfin (public)</text>
+  <rect x="68" y="208" width="294" height="58" rx="9" fill="#ffffff" stroke="#d5dae1"/>
+  <text x="82" y="231" class="nt">roadmap issues</text>
+  <text x="82" y="251" class="nd"><tspan class="mono">status:ready</tspan> = target queue</text>
+  <rect x="68" y="280" width="294" height="72" rx="9" fill="#ffffff" stroke="#d5dae1"/>
+  <text x="82" y="303" class="nt">Lean library + benchmarks</text>
+  <text x="82" y="323" class="nd">Mathlib + BrownianMotion sources</text>
+  <text x="82" y="339" class="nd"><tspan class="mono">MathFin/</tspan> — the target files</text>
+  <rect x="68" y="366" width="294" height="52" rx="9" fill="#ffffff" stroke="#d5dae1"/>
+  <text x="82" y="388" class="nt"><tspan class="mono">.env</tspan> key + toolchain pins</text>
+  <text x="82" y="406" class="nd">API key · Lean/Mathlib/BM revs</text>
+  <rect x="68" y="432" width="294" height="52" rx="9" fill="#ffffff" stroke="#d5dae1"/>
+  <text x="82" y="454" class="nt">pull requests → main</text>
+  <text x="82" y="472" class="nd">the accepted, refined proofs</text>
 
-  <!-- Foundry cluster -->
-  <rect x="420" y="176" width="380" height="248" rx="13" fill="#fbf5f0" stroke="#ecd6c3"/>
-  <text x="436" y="200" class="clab" fill="#d9611e">FOUNDRY · mathfin-foundry (local, private)</text>
-  <rect x="438" y="212" width="344" height="48" rx="9" fill="#ffffff" stroke="#d5dae1"/>
-  <text x="452" y="234" class="nt"><tspan class="mono">house_context</tspan> → doctrine</text>
-  <text x="452" y="252" class="nd">values · idioms · pins · per-target context pack</text>
-  <rect x="438" y="278" width="166" height="134" rx="9" fill="#ffffff" stroke="#d5dae1"/>
-  <text x="452" y="301" class="nt"><tspan class="mono">probe.py</tspan></text>
-  <text x="452" y="321" class="nd">text-loop harness</text>
-  <text x="452" y="337" class="nd">(calibration)</text>
-  <text x="452" y="359" class="nd">prompt → extract →</text>
-  <text x="452" y="375" class="nd">compile → repair</text>
-  <rect x="616" y="278" width="166" height="134" rx="9" fill="#ffffff" stroke="#d5dae1"/>
-  <text x="630" y="301" class="nt"><tspan class="mono">vibe</tspan> + launcher</text>
-  <text x="630" y="321" class="nd">agentic harness</text>
-  <text x="630" y="337" class="nd">(production)</text>
-  <text x="630" y="359" class="nd"><tspan class="mono">leanstral-vibe.sh</tspan></text>
-  <text x="630" y="375" class="nd">drives the LSP tools</text>
+  <!-- ===== FOUNDRY (center) ===== -->
+  <rect x="460" y="170" width="420" height="420" rx="13" fill="#fbf5f0" stroke="#ecd6c3"/>
+  <text x="476" y="194" class="clab" fill="#d9611e">FOUNDRY · mathfin-foundry (local, private)</text>
+  <rect x="480" y="206" width="380" height="46" rx="9" fill="#ffffff" stroke="#d5dae1"/>
+  <text x="494" y="227" class="nt"><tspan class="mono">house_context</tspan> → doctrine</text>
+  <text x="494" y="245" class="nd">values · idioms · pins · per-target context pack</text>
+  <rect x="500" y="270" width="360" height="136" rx="9" fill="#ffffff" stroke="#d5dae1"/>
+  <text x="514" y="294" class="nt"><tspan class="mono">probe.py</tspan></text>
+  <text x="514" y="314" class="nd">text-loop harness (calibration)</text>
+  <text x="514" y="336" class="nd">prompt → extract →</text>
+  <text x="514" y="352" class="nd">compile → repair</text>
+  <text x="514" y="380" class="nd" font-style="italic">the calibration path</text>
+  <rect x="500" y="430" width="360" height="136" rx="9" fill="#ffffff" stroke="#d5dae1"/>
+  <text x="514" y="454" class="nt"><tspan class="mono">vibe</tspan> + launcher</text>
+  <text x="514" y="474" class="nd">agentic harness (production)</text>
+  <text x="514" y="496" class="nd"><tspan class="mono">leanstral-vibe.sh</tspan></text>
+  <text x="514" y="512" class="nd">drives the LSP tools</text>
+  <text x="514" y="540" class="nd" font-style="italic">the production path</text>
 
-  <!-- Docker cluster -->
-  <rect x="420" y="540" width="380" height="240" rx="13" fill="#eef3fc" stroke="#c6d5f0"/>
-  <text x="436" y="564" class="clab" fill="#2f5fd0">DOCKER · one Lean process · memory-capped 6 GB</text>
-  <rect x="438" y="576" width="166" height="82" rx="9" fill="#ffffff" stroke="#d5dae1"/>
-  <text x="452" y="599" class="nt"><tspan class="mono">lean-repl</tspan> daemon</text>
-  <text x="452" y="619" class="nd">checks a code blob</text>
-  <text x="452" y="635" class="nd">TCP <tspan class="mono">:7878</tspan></text>
-  <rect x="616" y="576" width="166" height="82" rx="9" fill="#ffffff" stroke="#d5dae1"/>
-  <text x="630" y="599" class="nt"><tspan class="mono">lean-lsp</tspan></text>
-  <text x="630" y="619" class="nd"><tspan class="mono">lean-lsp-mcp</tspan></text>
-  <text x="630" y="635" class="nd">+ the Lean LSP</text>
-  <rect x="438" y="686" width="344" height="54" rx="9" fill="#ffffff" stroke="#d5dae1"/>
-  <text x="452" y="709" class="nt"><tspan class="mono">oleans</tspan> · lake_build_cache volume</text>
-  <text x="452" y="727" class="nd">the library's prebuilt artifacts (reused)</text>
+  <!-- ===== DOCKER (right) ===== -->
+  <rect x="960" y="170" width="420" height="490" rx="13" fill="#eef3fc" stroke="#c6d5f0"/>
+  <text x="976" y="194" class="clab" fill="#2f5fd0">DOCKER · one Lean process · memory-capped 6 GB</text>
+  <rect x="980" y="270" width="380" height="110" rx="9" fill="#ffffff" stroke="#d5dae1"/>
+  <text x="994" y="294" class="nt"><tspan class="mono">lean-repl</tspan> daemon</text>
+  <text x="994" y="314" class="nd">checks a code blob over TCP <tspan class="mono">:7878</tspan></text>
+  <text x="994" y="334" class="nd">returns errors + sorry-count</text>
+  <rect x="980" y="430" width="380" height="110" rx="9" fill="#ffffff" stroke="#d5dae1"/>
+  <text x="994" y="454" class="nt"><tspan class="mono">lean-lsp</tspan></text>
+  <text x="994" y="474" class="nd"><tspan class="mono">lean-lsp-mcp</tspan> + the Lean LSP</text>
+  <text x="994" y="494" class="nd">serves live goal states as MCP tools</text>
+  <rect x="980" y="566" width="380" height="54" rx="9" fill="#ffffff" stroke="#d5dae1"/>
+  <text x="994" y="588" class="nt"><tspan class="mono">oleans</tspan> · lake_build_cache volume</text>
+  <text x="994" y="606" class="nd">the library's prebuilt artifacts (reused)</text>
+  <text x="994" y="642" class="nd" font-style="italic">the library's MathFin/ is bind-mounted into this container at /app</text>
 
-  <!-- ===== NOTES (right, borderless annotations) ===== -->
-  <text x="864" y="174" class="clab" fill="#97a0ad">NOTES</text>
-  <rect x="864" y="186" width="300" height="82" rx="10" fill="#f6f7f9"/>
-  <text x="882" y="210" class="note-t">One Lean process</text>
-  <text x="882" y="230" class="note-d"><tspan class="mono">lean-repl</tspan> ⊕ <tspan class="mono">lean-lsp</tspan> — the launcher takes the</text>
-  <text x="882" y="246" class="note-d">daemon down before a vibe session; both</text>
-  <text x="882" y="262" class="note-d">reuse the same olean volume.</text>
-  <rect x="864" y="284" width="300" height="66" rx="10" fill="#f6f7f9"/>
-  <text x="882" y="308" class="note-t">Model is remote</text>
-  <text x="882" y="328" class="note-d">the 119B model runs on Mistral's servers;</text>
-  <text x="882" y="344" class="note-d">only the ~5 GB Lean env is local.</text>
-  <rect x="864" y="366" width="300" height="66" rx="10" fill="#f6f7f9"/>
-  <text x="882" y="390" class="note-t">Scout, not author</text>
-  <text x="882" y="410" class="note-d">a machine proof passes the values gate +</text>
-  <text x="882" y="426" class="note-d">an 8-lens refinery before it becomes a PR.</text>
+  <!-- ===== NOTES (far right) ===== -->
+  <text x="1414" y="194" class="clab" fill="#97a0ad">NOTES</text>
+  <rect x="1414" y="206" width="248" height="104" rx="10" fill="#f6f7f9"/>
+  <text x="1432" y="230" class="note-t">One Lean process</text>
+  <text x="1432" y="250" class="note-d"><tspan class="mono">lean-repl</tspan> ⊕ <tspan class="mono">lean-lsp</tspan> — the launcher</text>
+  <text x="1432" y="266" class="note-d">takes the daemon down before a vibe</text>
+  <text x="1432" y="282" class="note-d">session; both reuse the olean volume.</text>
+  <rect x="1414" y="326" width="248" height="86" rx="10" fill="#f6f7f9"/>
+  <text x="1432" y="350" class="note-t">Model is remote</text>
+  <text x="1432" y="370" class="note-d">the 119B model runs on Mistral's</text>
+  <text x="1432" y="386" class="note-d">servers; only ~5 GB Lean is local.</text>
+  <rect x="1414" y="428" width="248" height="86" rx="10" fill="#f6f7f9"/>
+  <text x="1432" y="452" class="note-t">Scout, not author</text>
+  <text x="1432" y="472" class="note-d">a machine proof passes the values</text>
+  <text x="1432" y="488" class="note-d">gate + an 8-lens refinery before PR.</text>
 
-  <!-- ===== EDGES (orthogonal) ===== -->
+  <!-- ===== EDGES ===== -->
+  <!-- R -> GitHub -->
+  <line x1="195" y1="112" x2="195" y2="170" class="edge" marker-end="url(#a)"/>
+  <!-- R -> Foundry -->
+  <polyline points="350,84 410,84 410,192 460,192" class="edge" marker-end="url(#a)"/>
+  <text x="416" y="130" class="el">runs the harness</text>
+
   <!-- Foundry <-> Leanstral -->
-  <line x1="610" y1="176" x2="610" y2="122" class="edge" marker-end="url(#a)"/>
-  <text x="622" y="152" class="el">prompt + doctrine  ↔  proof / tool-calls</text>
+  <line x1="670" y1="170" x2="670" y2="112" class="edge" marker-end="url(#a)"/>
+  <text x="682" y="146" class="el">prompt + doctrine  ↔  proof / tool-calls</text>
+
+  <!-- issues -> Foundry -->
+  <line x1="362" y1="234" x2="460" y2="234" class="edge" marker-end="url(#a)"/>
+  <text x="411" y="226" text-anchor="middle" class="el">target + pins</text>
 
   <!-- house_context -> provers -->
-  <line x1="521" y1="260" x2="521" y2="278" class="edge" marker-end="url(#a)"/>
-  <line x1="699" y1="260" x2="699" y2="278" class="edge" marker-end="url(#a)"/>
-  <text x="610" y="274" text-anchor="middle" class="el">inject doctrine</text>
+  <line x1="600" y1="252" x2="600" y2="270" class="edge" marker-end="url(#a)"/>
+  <polyline points="488,252 488,498 500,498" class="edge" marker-end="url(#a)"/>
+  <text x="612" y="266" class="el">inject doctrine</text>
 
   <!-- probe -> lean-repl -->
-  <line x1="521" y1="412" x2="521" y2="576" class="edge" marker-start="url(#a)" marker-end="url(#a)"/>
-  <text x="533" y="486" class="el">check a code blob</text>
-  <text x="533" y="502" class="el">TCP :7878 → errors</text>
+  <line x1="860" y1="322" x2="980" y2="322" class="edge" marker-start="url(#a)" marker-end="url(#a)"/>
+  <text x="920" y="308" text-anchor="middle" class="el">check code</text>
+  <text x="920" y="356" text-anchor="middle" class="el">:7878 → errors</text>
 
   <!-- vibe <-> lean-lsp -->
-  <line x1="699" y1="412" x2="699" y2="576" class="edb" marker-start="url(#ab)" marker-end="url(#ab)"/>
-  <text x="711" y="486" class="elk">MCP (docker exec)</text>
-  <text x="711" y="502" class="elk"><tspan class="mono">lean_goal</tspan> · edit · diagnostics</text>
+  <line x1="860" y1="484" x2="980" y2="484" class="edb" marker-start="url(#ab)" marker-end="url(#ab)"/>
+  <text x="920" y="470" text-anchor="middle" class="elk">MCP (docker exec)</text>
+  <text x="920" y="518" text-anchor="middle" class="elk"><tspan class="mono">lean_goal</tspan> · edit</text>
 
   <!-- lean-repl / lean-lsp -> oleans -->
-  <line x1="521" y1="658" x2="521" y2="686" class="edge" marker-end="url(#a)"/>
-  <line x1="699" y1="658" x2="699" y2="686" class="edge" marker-end="url(#a)"/>
-  <text x="610" y="676" text-anchor="middle" class="el">read oleans</text>
+  <polyline points="1350,380 1350,566" class="edge" marker-end="url(#a)"/>
+  <line x1="1170" y1="540" x2="1170" y2="566" class="edge" marker-end="url(#a)"/>
+  <text x="1180" y="556" class="el">read oleans</text>
 
-  <!-- R -> Foundry (orthogonal) -->
-  <polyline points="336,88 392,88 392,198 420,198" class="edge" marker-end="url(#a)"/>
-  <text x="398" y="140" class="el">runs the harness</text>
-
-  <!-- R -> GitHub -->
-  <line x1="150" y1="118" x2="150" y2="150" class="edge" marker-end="url(#a)"/>
-
-  <!-- issues -> Foundry (horizontal) -->
-  <line x1="318" y1="230" x2="420" y2="230" class="edge" marker-end="url(#a)"/>
-  <text x="332" y="222" class="el"><tspan class="mono">status:ready</tspan> → target</text>
-
-  <!-- library -> Docker (bind-mount, orthogonal down the gap) -->
-  <polyline points="318,300 372,300 372,616 420,616" class="edge" marker-end="url(#a)"/>
-  <text x="330" y="458" class="el">bind-mount</text>
-  <text x="330" y="474" class="el">→ <tspan class="mono">/app</tspan></text>
-
-  <!-- Foundry -> PRs (accepted, orthogonal) -->
-  <polyline points="420,300 388,300 388,442 318,442" class="edge" marker-end="url(#a)"/>
-  <text x="330" y="418" class="el">accepted → PR</text>
+  <!-- Foundry -> PRs (accepted) -->
+  <polyline points="460,498 412,498 412,458 362,458" class="edge" marker-end="url(#a)"/>
+  <text x="372" y="450" class="el">accepted → PR</text>
 </svg>
