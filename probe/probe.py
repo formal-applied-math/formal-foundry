@@ -20,7 +20,7 @@ import time
 import urllib.error
 import urllib.request
 
-from house_context import build_system_prompt
+from house_context import build_system_prompt, extract_signatures
 from probe_lib import (
     TokenLedger,
     append_jsonl,
@@ -99,13 +99,19 @@ def daemon_check(code: str, *, host="127.0.0.1", port=7878, timeout=600) -> dict
 
 
 def run_target(target: dict, *, budget: int, max_rounds: int,
-               chat_fn, check_fn, log_fn, system_prompt=None) -> dict:
+               chat_fn, check_fn, log_fn, system_prompt=None, context_pack="") -> dict:
     ledger = TokenLedger(budget)
     code = target["statement"]
     messages = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
-    messages.append({"role": "user", "content": build_initial_prompt(code)})
+    initial = build_initial_prompt(code)
+    if context_pack:
+        # per-target "consume, don't reprove" context: real signatures of the
+        # modules the stub points at, from the lean_scout index. Kept in the
+        # first user message so window_messages preserves it across repair rounds.
+        initial = context_pack + "\n" + initial
+    messages.append({"role": "user", "content": initial})
     t0 = time.time()
     outcome, rounds, last_slop, axioms_clean = "max_rounds", 0, None, None
 
@@ -200,12 +206,15 @@ def main() -> int:
         if target.get("kind") != "prove":
             continue
         target["statement"] = open(os.path.join(root, target["file"])).read()
-        print(f"[{target['id']}] budget={args.budget} …", flush=True)
+        pointers = target.get("pointers", [])
+        context_pack = extract_signatures(args.main_repo, pointers) if pointers else ""
+        print(f"[{target['id']}] budget={args.budget} "
+              f"pointers={len(pointers)} …", flush=True)
         summary = run_target(target, budget=args.budget,
                              max_rounds=args.max_rounds, chat_fn=chat_fn,
                              check_fn=daemon_check,
                              log_fn=lambda r: append_jsonl(attempts_log, r),
-                             system_prompt=system_prompt)
+                             system_prompt=system_prompt, context_pack=context_pack)
         summary["model"] = args.model
         summary["ts"] = time.strftime("%Y-%m-%dT%H:%M:%S")
         append_jsonl(summary_log, summary)

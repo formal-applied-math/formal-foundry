@@ -22,6 +22,16 @@ from probe_lib import sha256_hex
 STREAMS = {"bk": "backlog", "a4": "depth", "sp": "textbook", "ctl": "control"}
 
 
+def parse_pointers(code: str) -> list[str]:
+    """Pointers a stub declares for its context pack, via a comment line:
+        -- pointers: MathFin/BlackScholes/Call.lean, MathFin/BlackScholes/Forward.lean
+    Returns the repo-relative module paths (empty if none)."""
+    m = re.search(r"--\s*pointers:\s*(.+)", code)
+    if not m:
+        return []
+    return [p.strip() for p in m.group(1).split(",") if p.strip()]
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--main-repo", required=True)
@@ -57,6 +67,7 @@ def main() -> int:
         targets.append({
             "id": fname[:-5], "stream": STREAMS[m.group(1)], "kind": "prove",
             "sorry_name": decl.group(1), "file": fname,
+            "pointers": parse_pointers(code),
             "input_hash": sha256_hex(code + toolchain),
         })
         print(f"ok  {fname}  ({decl.group(1)})")

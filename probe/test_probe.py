@@ -65,6 +65,23 @@ def test_run_target_prepends_system_prompt():
     assert chat.calls[0][0] == {"role": "system", "content": "HOUSE DOCTRINE"}
 
 
+def test_run_target_injects_context_pack():
+    chat = make_chat([
+        ("```lean\nimport Mathlib\n\ntheorem foo : 2 + 2 = 4 := by norm_num\n```", 500),
+    ])
+    check = make_check([
+        {"success": True, "errors": [], "warnings": [], "sorry_count": 0},
+        {"success": True, "errors": [], "warnings": [], "sorry_count": 0},  # axiom guard
+    ])
+    pack = "── EXISTING DECLARATIONS ──\nvasicekBondPrice : ℝ → ℝ → ℝ\n"
+    out = run_target(TARGET, budget=50000, max_rounds=1, chat_fn=chat, check_fn=check,
+                     log_fn=lambda r: None, context_pack=pack)
+    assert out["outcome"] == "pass"
+    first_user = next(m for m in chat.calls[0] if m["role"] == "user")
+    assert "vasicekBondPrice" in first_user["content"]   # pack injected
+    assert "theorem foo" in first_user["content"]         # statement still present
+
+
 def test_budget_exhaustion():
     chat = make_chat([("no code at all", 30000), ("still none", 30000)])
     check = make_check([])
