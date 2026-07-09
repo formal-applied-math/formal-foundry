@@ -1,0 +1,86 @@
+name: autoformalizer pipeline
+
+# One token-paced tick every 3 days: pick a queued target, prove it with
+# Leanstral, stop at "candidate ready → refinery issue". Never opens a PR.
+# Secrets required: MISTRAL_API_KEY, GHCR_TOKEN (read:packages for the image).
+# The pipeline safely no-ops until R seeds stubs into targets/queue/.
+
+on:
+  schedule:
+    - cron: "17 6 */3 * *"        # every 3 days, off-minute (not :00)
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "ignore the due (interval) check"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write                  # commit state + telemetry back
+  issues: write                    # open the refinery notification
+
+concurrency:
+  group: pipeline
+  cancel-in-progress: false        # never interrupt a running proof
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout foundry
+        uses: actions/checkout@v4
+
+      - name: Checkout MathFin (live pins + daemon oleans source)
+        uses: actions/checkout@v4
+        with:
+          repository: raphaelrrcoelho/formal-mathfin
+          path: main
+
+      - name: GHCR login
+        run: echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u raphaelrrcoelho --password-stdin
+
+      - name: Pull the pinned verify image
+        run: docker pull ghcr.io/raphaelrrcoelho/mathfin-verify:latest
+
+      - name: Start the lean-repl daemon
+        run: |
+          docker run -d --name lean-repl -p 127.0.0.1:7878:7878 \
+            ghcr.io/raphaelrrcoelho/mathfin-verify:latest
+          echo "waiting for READY…"
+          for i in $(seq 1 90); do
+            if docker logs lean-repl 2>&1 | grep -q "READY:"; then echo "daemon ready"; exit 0; fi
+            sleep 5
+          done
+          echo "::error::daemon did not become READY"; docker logs lean-repl; exit 1
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run one pipeline tick
+        env:
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          CI: "1"
+          MAIN_REPO: ${{ github.workspace }}/main
+          FOUNDRY_REPO: ${{ github.repository }}
+          FORCE: ${{ inputs.force && '1' || '' }}
+        run: bash scripts/pipeline-tick.sh
+
+      - name: Persist state + telemetry
+        if: always()
+        run: |
+          git config user.name "pipeline-bot"
+          git config user.email "pipeline@users.noreply.github.com"
+          git add pipeline_state.json runs 2>/dev/null || true
+          git diff --cached --quiet || git commit -m "pipeline: state + telemetry [skip ci]"
+          git push || true
+
+      - name: Upload telemetry
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-runs
+          path: runs/
+          if-no-files-found: ignore

@@ -1,0 +1,18 @@
+# Autoformalizer pipeline — cadence + token budget.
+# Read by pipeline.py / pipeline_lib.PipelineConfig. The GitHub Actions cron
+# fires one tick every `interval_days`; each tick runs at most `max_issues_per_tick`
+# issue(s), charging the per-issue cap against a monthly allowance (conservative:
+# the cap is charged whether or not the attempt spends it, so the allowance is a
+# hard ceiling on issues/month, not an estimate).
+#
+# Sizing: allowance 8M / cap 500k → ≤16 issues/month; at 1 issue / 3 days that's
+# ~10/month, so the ceiling protects against runaway/manual triggers without
+# binding normal cadence. difficulty:hard issues escalate to escalate_hard_cap.
+
+[pipeline]
+interval_days = 3
+monthly_token_allowance = 8000000
+tokens_per_issue_cap = 500000
+escalate_hard_cap = 2000000
+max_issues_per_tick = 1
+reasoning_effort = "high"
