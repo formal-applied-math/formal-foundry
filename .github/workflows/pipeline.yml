@@ -37,8 +37,15 @@ jobs:
           repository: raphaelrrcoelho/formal-mathfin
           path: main
 
-      - name: GHCR login
-        run: echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u raphaelrrcoelho --password-stdin
+      - name: GHCR login (optional — image is public; login only eases rate limits)
+        env:
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+        run: |
+          if [ -n "$GHCR_TOKEN" ]; then
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u raphaelrrcoelho --password-stdin
+          else
+            echo "no GHCR_TOKEN set — anonymous pull (mathfin-verify is public)"
+          fi
 
       - name: Pull the pinned verify image
         run: docker pull ghcr.io/raphaelrrcoelho/mathfin-verify:latest
