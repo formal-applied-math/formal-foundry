@@ -26,6 +26,12 @@ message on every attempt. It is assembled live (never stale) from:
   decidable predicates; annotate ambiguous coerced lambdas; the
   `HasDerivAt.congr_of_eventuallyEq` derivative-identification idiom;
   `convexOn_of_deriv2_nonneg'` on open sets; canonical `Real.exp (-(r * τ))`.
+  Plus the Mathlib house-style golf a maintainer holds proofs to (PR #484 review):
+  bare proof term over `by exact_mod_cast` when defeq, let Lean insert coercions,
+  bind ∀-vars in the `have` signature, `simpa … using`, no gratuitous `classical`,
+  `set` without `with`, the minimal typeclass (`SigmaFiniteFiltration` not
+  `IsFiniteMeasure` when it suffices), and — the headline — lift the bespoke core
+  into a general reusable lemma instead of tailoring it to one call site.
 - **Structural strategy** — "this IS already that under renaming" (reduce a new
   closed form to an instance of an existing one), the pointwise-certificate for
   variational minima, one-period-inequality + induction.

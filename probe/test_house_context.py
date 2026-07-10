@@ -22,6 +22,10 @@ def test_doctrine_covers_values_and_idioms():
     assert "grind" in d and "nlinarith" in d and "field_simp" in d
     assert "Real.exp (-(r * τ))" in d
     assert "This IS already that" in d
+    # mathlib house-style golf (BM PR #484 maintainer review)
+    assert "bare proof term" in d.lower()
+    assert "reusable abstraction" in d.lower()
+    assert "SigmaFiniteFiltration" in d
 
 
 def test_system_prompt_injects_live_pins():

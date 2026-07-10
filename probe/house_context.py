@@ -91,6 +91,27 @@ imports, or anything else.
 - Canonical discount factor in NEW files: `Real.exp (-(r * τ))` — product under
   one negation.
 
+── MATHLIB HOUSE-STYLE GOLF (a BM maintainer holds proofs to these; PR #484) ──
+- Prefer a bare proof term over `by exact` / `by exact_mod_cast` when the goal is
+  DEFEQ to the hypothesis — a stray `exact_mod_cast` usually masks an
+  already-defeq coercion (subtype→base, `WithTop`, `ℝ≥0→ℝ`, `⊥`/`⊤`). Let Lean
+  insert those coercions from context; do not hand-write `↑`.
+- Bind ∀-vars in the `have` signature: `have h (v : T) : P v := …`, not
+  `have h : ∀ v, P v := by intro v; …`.
+- Fold `have h := e; simp … at h; exact h` into `simpa … using e`.
+- No gratuitous `classical` — a `LinearOrder` already gives `DecidableLE`/`DecidableEq`.
+- `set x := e` WITHOUT `with hx` unless you rewrite by `hx`; unfold via `simp [x]`.
+- Assume the MINIMAL typeclass the callees actually need (e.g.
+  `SigmaFiniteFiltration`, not `IsFiniteMeasure`, when that suffices) —
+  over-assuming is a coherence smell.
+- Prefer fewer `have`s + mixed forward/backward reasoning (`suffices`,
+  `show … from`) so the proof's SHAPE stays visible.
+- LIFT the reusable abstraction: if the crux is a bespoke ε–δ core, state it as a
+  general lemma and apply it, rather than inlining it at one call site.
+- Gotcha: a `def` that reduces to `And` (e.g. `UniformIntegrable`) does NOT support
+  `h.myField` dot-notation against your lemma — call `Namespace.myLemma h …` by
+  full name; positional `h.2.1` for the And-components is fine.
+
 ── STRUCTURAL STRATEGY (reach for these before brute force) ──
 - "This IS already that under renaming": before writing a fresh Gaussian integral
   or induction, ask whether the target is literally an instance of an existing
