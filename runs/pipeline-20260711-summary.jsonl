@@ -1,1 +1,2 @@
 {"target": "cal-bk-88", "stream": "backlog", "outcome": "pass", "rounds": 1, "tokens": 59271, "budget": 500000, "wall_s": 1417.2, "axioms_clean": true, "slop": {"forbidden": [], "line_count": 80, "max_bracket_args": 1}, "model": "labs-leanstral-1-5", "ts": "2026-07-11T20:08:23"}
+{"target": "cal-bk-88", "stream": "backlog", "outcome": "pass", "rounds": 2, "tokens": 23491, "budget": 500000, "wall_s": 299.5, "axioms_clean": true, "slop": {"forbidden": [], "line_count": 95, "max_bracket_args": 1}, "model": "labs-leanstral-1-5", "ts": "2026-07-11T20:37:29"}
