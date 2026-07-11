@@ -32,6 +32,30 @@ def parse_pointers(code: str) -> list[str]:
     return [p.strip() for p in m.group(1).split(",") if p.strip()]
 
 
+_META_KEYS = {
+    "main-module": ("main_module", str),
+    "benchmark": ("benchmark", str),
+    "benchmark-id": ("benchmark_id", str),
+    "source-issue": ("source_issue", lambda s: int(s.lstrip("#"))),
+}
+
+
+def parse_meta(code: str) -> dict:
+    """Placement metadata a stub declares via comment header lines, telling the
+    assembler where a proven candidate lands and which issue it closes:
+        -- main-module: MathFin/FX/InterestRateParity.lean
+        -- benchmark: benchmarks/mathematical_finance.json
+        -- benchmark-id: mf-fx-interest-rate-parity
+        -- source-issue: 108
+    Returns only the keys present."""
+    out: dict = {}
+    for raw_key, (dest, cast) in _META_KEYS.items():
+        m = re.search(rf"--\s*{re.escape(raw_key)}:\s*(.+)", code)
+        if m:
+            out[dest] = cast(m.group(1).strip())
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--main-repo", required=True)
@@ -69,6 +93,7 @@ def main() -> int:
             "sorry_name": decl.group(1), "file": fname,
             "pointers": parse_pointers(code),
             "input_hash": sha256_hex(code + toolchain),
+            **parse_meta(code),
         })
         print(f"ok  {fname}  ({decl.group(1)})")
 
