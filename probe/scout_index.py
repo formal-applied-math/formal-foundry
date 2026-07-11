@@ -115,6 +115,14 @@ class ScoutIndex:
                 return list(r.get("deps") or [])
         return []
 
+    def signature_of(self, name: str) -> tuple[str, str, str | None] | None:
+        """(module, type, docString) for a constant by name, or None if the
+        types index does not know it."""
+        for r in self._t():
+            if r.get("name") == name:
+                return (r.get("module", ""), r.get("type", ""), r.get("docString"))
+        return None
+
     def dependency_closure(self, names: list[str], depth: int = 2) -> list[str]:
         """BFS over const_dep from `names` up to `depth` hops; the reachable
         constants excluding the seeds, in discovery order. This is the cross-file

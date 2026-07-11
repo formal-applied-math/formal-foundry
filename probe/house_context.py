@@ -158,28 +158,54 @@ def _first_line(s: str | None) -> str:
     return s.strip().splitlines()[0].strip()
 
 
+def _sig_line(name: str, typ: str, doc: str | None) -> str:
+    short = name.rsplit(".", 1)[-1]
+    return f"{short} : {typ}" + (f"    -- {_first_line(doc)}" if doc else "")
+
+
 def _index_pack(idx: ScoutIndex, modules: list[str], max_per_module: int,
-                exemplar_limit: int) -> str:
+                exemplar_limit: int, closure_depth: int = 2,
+                closure_limit: int = 24) -> str:
     """Context pack from the lean_scout index: REAL elaborated signatures +
-    docstrings, plus house-style (goal → tactic) exemplars. '' if the index
-    covers none of the requested modules (caller then falls back to regex)."""
+    docstrings, the cross-file dependency-closure premises of those decls, plus
+    house-style (goal → tactic) exemplars. '' if the index covers none of the
+    requested modules (caller then falls back to regex)."""
     by_mod = idx.signatures(modules, max_per_module=max_per_module)
     if not by_mod:
         return ""
     blocks: list[str] = []
+    seed_names: list[str] = []
     for mod in modules:
         recs = by_mod.get(_module_key(idx, mod))
         if not recs:
             continue
         lines = []
         for name, typ, doc in recs:
-            short = name.rsplit(".", 1)[-1]
-            lines.append(f"{short} : {typ}" + (f"    -- {_first_line(doc)}" if doc else ""))
+            seed_names.append(name)
+            lines.append(_sig_line(name, typ, doc))
         blocks.append(f"• {mod}:\n    " + "\n    ".join(lines))
     if not blocks:
         return ""
     pack = ("── EXISTING DECLARATIONS TO BUILD ON (real signatures; consume, do not reprove) ──\n"
             + "\n".join(blocks) + "\n")
+    # cross-file premises: the dependency closure of the pointer modules' decls,
+    # so the agent sees the lemmas those decls transitively rest on, not just the
+    # pointer modules themselves (miniCTX: cross-file premises are a first-order
+    # lever). Skip closure constants defined IN the pointer modules (already shown)
+    # and non-MathFin/Mathlib-core noise without a recorded type.
+    seed_set = set(seed_names)
+    clines: list[str] = []
+    for cname in idx.dependency_closure(seed_names, depth=closure_depth):
+        if cname in seed_set:
+            continue
+        sig = idx.signature_of(cname)
+        if sig and sig[1]:
+            clines.append(_sig_line(cname, sig[1], sig[2]))
+        if len(clines) >= closure_limit:
+            break
+    if clines:
+        pack += ("── DEPENDENCY-CLOSURE SIGNATURES (cross-file premises these decls rest on) ──\n    "
+                 + "\n    ".join(clines) + "\n")
     exemplars = idx.tactic_exemplars(modules, limit=exemplar_limit)
     if exemplars:
         ex_lines = [f"    {goal}\n        ⟶  {tac}" for goal, tac in exemplars]
@@ -214,7 +240,8 @@ def _regex_pack(main_repo: str, modules: list[str], max_per_module: int) -> str:
 
 
 def extract_signatures(main_repo: str, modules: list[str], max_per_module: int = 40,
-                       index_dir: str | None = None, exemplar_limit: int = 6) -> str:
+                       index_dir: str | None = None, exemplar_limit: int = 6,
+                       closure_depth: int = 2) -> str:
     """Per-target context pack so the agent builds on existing results instead of
     reproving them. `modules` are repo-relative paths (e.g.
     'MathFin/FixedIncome/VasicekBondPrice.lean').
@@ -225,7 +252,8 @@ def extract_signatures(main_repo: str, modules: list[str], max_per_module: int =
     index built."""
     idx = ScoutIndex(index_dir if index_dir is not None else default_index_dir())
     if idx.available:
-        pack = _index_pack(idx, modules, max_per_module, exemplar_limit)
+        pack = _index_pack(idx, modules, max_per_module, exemplar_limit,
+                           closure_depth=closure_depth)
         if pack:
             return pack
     return _regex_pack(main_repo, modules, max_per_module)

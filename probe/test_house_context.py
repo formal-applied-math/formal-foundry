@@ -74,3 +74,21 @@ def test_extract_signatures_prefers_index_when_available():
         assert "vasicekBondPrice : ℝ → ℝ → ℝ" in pack
         assert "ZCB price." in pack
         assert "positivity" in pack and "TACTIC EXEMPLARS" in pack
+
+
+def test_context_pack_includes_dependency_closure():
+    with tempfile.TemporaryDirectory() as d:
+        idx = os.path.join(d, "index")
+        os.makedirs(idx)
+        with open(os.path.join(idx, "types.jsonl"), "w", encoding="utf-8") as f:
+            f.write(json.dumps({"name": "MathFin.foo", "module": "MathFin.A",
+                                "type": "ℝ → ℝ", "docString": None}) + "\n")
+            f.write(json.dumps({"name": "MathFin.helper", "module": "MathFin.B",
+                                "type": "ℝ → Prop", "docString": "the helper"}) + "\n")
+        with open(os.path.join(idx, "const_dep.jsonl"), "w", encoding="utf-8") as f:
+            f.write(json.dumps({"name": "MathFin.foo", "deps": ["MathFin.helper"]}) + "\n")
+        pack = extract_signatures(d, ["MathFin/A.lean"], index_dir=idx)
+        assert "foo : ℝ → ℝ" in pack                # pointer-module decl
+        assert "helper : ℝ → Prop" in pack           # its cross-module dependency
+        assert "the helper" in pack                  # closure carries the docstring too
+        assert "DEPENDENCY-CLOSURE" in pack
