@@ -68,20 +68,21 @@ echo "[tick] outcome=$OUTCOME tokens=$TOKENS" >&2
 python3 pipeline.py record --config "$CFG" --state "$STATE" --id "$ID" \
   --outcome "$OUTCOME" ${TOKENS:+--tokens "$TOKENS"} >&2
 
-# 5. Notify — candidate ready for R's refinery. NEVER a PR.
+# 5. On a pass: open the ready-for-review PR on formal-mathfin (fully hands-off).
+#    Gated on MAIN_PR_TOKEN — without it (any local run) we fall back to the
+#    candidate-notify path, so nothing ever tries to PR without the credential.
 CAND="$FOUNDRY/runs/$TAG-$ID.lean"
 if [ "$OUTCOME" = "pass" ] && [ -f "$CAND" ]; then
-  MSG="Leanstral pipeline: candidate proof for $ID is ready for refinery ($TAG).
-Run the 8-lens values review; if it holds, author the PR by hand (scout-not-author).
-Candidate: runs/$TAG-$ID.lean  ·  tokens: $TOKENS"
-  if [ -n "${CI:-}" ] && command -v gh >/dev/null 2>&1; then
-    gh issue create --repo "${FOUNDRY_REPO:-}" \
-      --title "refinery: candidate for $ID ($TAG)" --body "$MSG" \
-      --label "refinery" 2>/dev/null || echo "[tick] (gh issue create failed; candidate still at $CAND)" >&2
+  if [ -n "${MAIN_PR_TOKEN:-}" ]; then
+    echo "[tick] pass → opening PR on formal-mathfin (closes the source issue)…" >&2
+    GH_TOKEN="$MAIN_PR_TOKEN" "$FOUNDRY/scripts/open-pr.sh" --id "$ID" --tag "$TAG" \
+      || echo "[tick] (open-pr.sh failed; candidate still at $CAND)" >&2
   else
-    echo "[tick] CANDIDATE READY → $CAND" >&2
+    MSG="Leanstral pipeline: candidate proof for $ID is ready ($TAG).
+No MAIN_PR_TOKEN in this environment, so no PR was opened. Candidate: runs/$TAG-$ID.lean · tokens: $TOKENS"
+    echo "[tick] CANDIDATE READY (no token → no PR) → $CAND" >&2
     echo "$MSG" >&2
   fi
 else
-  echo "[tick] no candidate ($OUTCOME) — nothing to refinery this tick" >&2
+  echo "[tick] no candidate ($OUTCOME) — nothing to contribute this tick" >&2
 fi

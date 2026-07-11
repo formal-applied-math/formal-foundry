@@ -122,3 +122,32 @@ that, bake it into the image via CI (`publish-image.yml`), never a local
 - [mistralai/Leanstral-1.5-119B-A6B — Hugging Face](https://huggingface.co/mistralai/Leanstral-1.5-119B-A6B)
 - [oOo0oOo/lean-lsp-mcp](https://github.com/oOo0oOo/lean-lsp-mcp)
 - house idioms: `formal-mathfin/docs/patterns.md`; values: `docs/values-review.md`.
+
+## Hands-off PR activation (the one credential)
+
+The scheduled pipeline (`.github/workflows/pipeline.yml`) proves a queued issue
+and, on a pass, opens a ready-for-review PR on `formal-mathfin` that closes the
+source issue. That step needs one credential — the only thing granting the
+foundry write access to main:
+
+1. On `raphaelrrcoelho/formal-mathfin`, create a **fine-grained PAT** scoped to
+   that repo with **Contents: read/write** + **Pull requests: read/write**.
+2. Store it as the foundry secret (never in argv/logs):
+
+   ```bash
+   printf '%s' "<PAT>" | gh secret set MAIN_PR_TOKEN --repo raphaelrrcoelho/mathfin-foundry
+   ```
+
+Without `MAIN_PR_TOKEN` the tick falls back to candidate-notify and opens no PR,
+so the pipeline is safe before the grant. Revoking the PAT fully disables auto-PR.
+
+Flow: `pipeline-tick.sh` (prove) → on pass `open-pr.sh` (assemble the proof into
+its `MathFin/` module + a re-export benchmark entry + umbrella import; regen
+`formalization.yaml` and, in the verify image, `lake build` + `AxiomAuditGen`;
+green-or-abort) → PR labeled `autoform`. A candidate that will not assemble green
+files an `autoform-blocked` issue on the foundry instead of opening a red PR.
+R reviews (8-lens) and merges — scout authors the draft, human authors the merge.
+
+FIRST-RUN NOTE: the in-image build/regen path in `open-pr.sh` (docker run against
+a mounted main checkout) is validated on the first live PR; until then, expect to
+finalize the AxiomAuditGen/ledger regen environment.

@@ -90,16 +90,37 @@ case "$PROOF_BODY" in
 esac
 
 # --- 4. validate + regenerate (green-or-abort) -------------------------------
-# daemon MUST be down (one Lake writer). The workflow guarantees that.
-lake build MathFin || blocked "lake build failed"
-python3 -m tools.verify.axiom_audit_gen --write || blocked "axiom_audit_gen failed"
-python3 -m tools.formalization_yaml --write     || blocked "formalization_yaml regen failed"
-# ledger: a fresh entry needs a daemon re-verify (a separate workflow step). Here
-# we only regenerate what does not need the daemon; the PR body flags the pending row.
+# The Lean toolchain lives in the mathfin-verify IMAGE, not on the runner host,
+# so the build + elaboration-dependent regens run INSIDE the image against this
+# fresh checkout (mounted at /work). formalization.yaml is host-side Python (no
+# Lean) and is regenerated either way. The daemon must be DOWN for the build
+# (one Lake writer) — the workflow guarantees that before calling this script.
+# FIRST-RUN NOTE: this docker/mount/cache path is validated on the first live PR;
+# on any failure we abort to an autoform-blocked issue rather than open a red PR.
+IMAGE="${VERIFY_IMAGE:-ghcr.io/raphaelrrcoelho/mathfin-verify:latest}"
+# the proving daemon is done; stop it so the build has the memory headroom
+# (two Mathlib-loaded Lean envs overcommit even a 16 GB runner).
+docker stop lean-repl >/dev/null 2>&1 || true
+REGEN='set -e
+       lake exe cache get >/dev/null 2>&1 || true
+       lake build MathFin
+       python3 -m tools.verify.axiom_audit_gen --write
+       python3 -m tools.formalization_yaml --write
+       python3 -m tools.verify.ledger status || true'
+if command -v docker >/dev/null 2>&1; then
+  docker run --rm -v "$MAIN":/work -w /work "$IMAGE" bash -lc "$REGEN" \
+    || blocked "in-image build/regen failed (lake build MathFin / axiom_audit_gen)"
+else
+  # no docker (local dry-run): regen only the host-side artifact, flag the rest.
+  python3 -m tools.formalization_yaml --write || blocked "formalization_yaml regen failed"
+  echo "[open-pr] WARN: no docker — AxiomAuditGen + lake build NOT run; PR CI will gate them" >&2
+fi
 
 # --- 5. commit + push + PR ---------------------------------------------------
-git add "$MODULE" "$BENCH" MathFin.lean \
-        MathFin/AxiomAuditGen.lean formalization.yaml
+# specific adds only (never -A): the proof, the benchmark entry, the umbrella
+# import, and whichever regenerated artifacts exist.
+git add "$MODULE" "$BENCH" MathFin.lean formalization.yaml
+git add MathFin/AxiomAuditGen.lean verification_ledger.json 2>/dev/null || true
 git -c user.name="mathfin-autoform" -c user.email="autoform@users.noreply.github.com" \
     commit -q -m "feat(autoform): $ID — prove $(basename "$MODULE" .lean) (closes #$ISSUE)"
 git push -f origin "$BRANCH"

@@ -1,8 +1,14 @@
 name: autoformalizer pipeline
 
 # One token-paced tick every 3 days: pick a queued target, prove it with
-# Leanstral, stop at "candidate ready → refinery issue". Never opens a PR.
-# Secrets required: MISTRAL_API_KEY, GHCR_TOKEN (read:packages for the image).
+# Leanstral, and on a pass open a ready-for-review PR on formal-mathfin that
+# closes the source issue (fully hands-off; R reviews + merges).
+# Secrets:
+#   MISTRAL_API_KEY  — the Leanstral endpoint.
+#   MAIN_PR_TOKEN    — fine-grained PAT on formal-mathfin (contents:write +
+#                      pull-requests:write). WITHOUT it the tick falls back to
+#                      candidate-notify and opens NO PR. Revoking it disables auto-PR.
+#   GHCR_TOKEN       — optional (read:packages; the image is public).
 # The pipeline safely no-ops until R seeds stubs into targets/queue/.
 
 on:
@@ -31,11 +37,13 @@ jobs:
       - name: Checkout foundry
         uses: actions/checkout@v4
 
-      - name: Checkout MathFin (live pins + daemon oleans source)
+      - name: Checkout MathFin (live pins; PR target — token gives push rights)
         uses: actions/checkout@v4
         with:
           repository: raphaelrrcoelho/formal-mathfin
           path: main
+          fetch-depth: 0                 # full history so the autoform branch pushes cleanly
+          token: ${{ secrets.MAIN_PR_TOKEN }}   # empty on forks / until R grants it → tick notifies, no PR
 
       - name: GHCR login (optional — image is public; login only eases rate limits)
         env:
@@ -73,9 +81,11 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Run one pipeline tick
+      - name: Run one pipeline tick (prove → on pass, open the PR)
         env:
           MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          MAIN_PR_TOKEN: ${{ secrets.MAIN_PR_TOKEN }}
+          MAIN_REPO_SLUG: raphaelrrcoelho/formal-mathfin
           CI: "1"
           MAIN_REPO: ${{ github.workspace }}/main
           FOUNDRY_REPO: ${{ github.repository }}
