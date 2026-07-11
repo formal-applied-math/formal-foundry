@@ -22,6 +22,8 @@ reasoning_effort = "high"
 # repairs on the best failure. Research basis: Kimina sample-efficiency knee at
 # ~pass@32, Goedel self-correction ablation at ~2 repair rounds, Leanstral's
 # dominant lever is tokens-per-attempt (PutnamBench 44→587 solves at 50k→4M).
-fanout = 8
+# fanout temporarily 1 while hardening the in-image build/PR path (fast prove
+# cycles); revert to 8 once the first PR lands (production pass@k).
+fanout = 1
 repair_rounds = 2
 tokens_per_attempt = 60000
