@@ -129,12 +129,20 @@ else
 fi
 
 # --- 5. commit + push + PR ---------------------------------------------------
+MODEL="${MODEL:-labs-leanstral-1-5}"   # the prover, for attribution + the PR body
 # specific adds only (never -A): the proof, the benchmark entry, the umbrella
 # import, and whichever regenerated artifacts exist.
 git add "$MODULE" "$BENCH" MathFin.lean formalization.yaml
 git add MathFin/AxiomAuditGen.lean verification_ledger.json 2>/dev/null || true
+# Attribution rule: credit LEANSTRAL, the prover that did the mathematical work
+# (honest provenance, matching the benchmark entry's metadata.provenance and the
+# formalization.yaml automation count). This is distinct from the standing rule
+# that Claude / the coding assistant is never attributed anywhere.
 git -c user.name="mathfin-autoform" -c user.email="autoform@users.noreply.github.com" \
-    commit -q -m "feat(autoform): $ID — prove $(basename "$MODULE" .lean) (closes #$ISSUE)"
+    commit -q \
+    -m "feat(autoform): $ID — prove $(basename "$MODULE" .lean) (closes #$ISSUE)" \
+    -m "Proved by Leanstral (${MODEL}) via the mathfin-foundry autoform pipeline; human-reviewed before merge." \
+    -m "Co-Authored-By: Leanstral <${MODEL}@users.noreply.mistral.ai>"
 git push -f origin "$BRANCH"
 
 TOKENS="$(python3 - "$FOUNDRY/runs/$TAG-summary.jsonl" "$ID" <<'PY'
@@ -148,7 +156,6 @@ except OSError: pass
 print(tok)
 PY
 )"
-MODEL="${MODEL:-labs-leanstral-1-5}"
 BODY="$(cat <<EOF
 this pr was produced by the autoform pipeline (leanstral $MODEL), then assembled and validated green in ci. closes #$ISSUE.
 
