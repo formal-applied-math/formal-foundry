@@ -72,8 +72,10 @@ def main() -> int:
     ap.add_argument("--main-repo", required=True)
     args = ap.parse_args()
 
+    # the live queue the scheduler reads (targets/queue/manifest.json); stubs +
+    # their <id>.entry.json sidecars live alongside it.
     tdir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                        "targets")
+                        "targets", "queue")
     toolchain = open(os.path.join(args.main_repo, "lean-toolchain")).read().strip()
     commit = subprocess.run(["git", "-C", args.main_repo, "rev-parse", "HEAD"],
                             capture_output=True, text=True).stdout.strip()
