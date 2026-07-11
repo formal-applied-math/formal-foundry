@@ -40,6 +40,17 @@ _META_KEYS = {
 }
 
 
+def load_entry(stub_path: str) -> dict | None:
+    """The re-export benchmark entry authored alongside a stub, at
+    `<stub>.entry.json` — the object `assemble.apply_contribution` appends to the
+    benchmark file (carrying its own `metadata.provenance`). None if absent."""
+    base = stub_path[:-5] if stub_path.endswith(".lean") else stub_path
+    try:
+        return json.load(open(base + ".entry.json", encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
 def parse_meta(code: str) -> dict:
     """Placement metadata a stub declares via comment header lines, telling the
     assembler where a proven candidate lands and which issue it closes:
@@ -88,13 +99,17 @@ def main() -> int:
             bad.append(f"{fname}: statement does not elaborate: "
                        f"{res['errors'][:2]}")
             continue
-        targets.append({
+        target = {
             "id": fname[:-5], "stream": STREAMS[m.group(1)], "kind": "prove",
             "sorry_name": decl.group(1), "file": fname,
             "pointers": parse_pointers(code),
             "input_hash": sha256_hex(code + toolchain),
             **parse_meta(code),
-        })
+        }
+        entry = load_entry(path)
+        if entry is not None:
+            target["benchmark_entry"] = entry
+        targets.append(target)
         print(f"ok  {fname}  ({decl.group(1)})")
 
     if bad:

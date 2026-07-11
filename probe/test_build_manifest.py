@@ -46,3 +46,26 @@ def test_parse_meta_empty_when_absent():
 
 def test_parse_meta_source_issue_tolerates_hash():
     assert parse_meta("-- source-issue: #109\n")["source_issue"] == 109
+
+
+def test_load_entry_reads_sidecar():
+    import json, os, tempfile
+    from build_manifest import load_entry
+    with tempfile.TemporaryDirectory() as d:
+        stub = os.path.join(d, "cal-bk-88.lean")
+        open(stub, "w").close()
+        with open(os.path.join(d, "cal-bk-88.entry.json"), "w") as f:
+            json.dump({"id": "mf-fx-contango", "metadata":
+                       {"provenance": {"source": "leanstral-autoform", "issue": 88}}}, f)
+        entry = load_entry(stub)
+        assert entry["id"] == "mf-fx-contango"
+        assert entry["metadata"]["provenance"]["source"] == "leanstral-autoform"
+
+
+def test_load_entry_none_when_absent():
+    import os, tempfile
+    from build_manifest import load_entry
+    with tempfile.TemporaryDirectory() as d:
+        stub = os.path.join(d, "cal-bk-99.lean")
+        open(stub, "w").close()
+        assert load_entry(stub) is None
