@@ -52,3 +52,25 @@ def test_apply_contribution_adds_trailing_newline_to_module():
                   "benchmark": "benchmarks/x.json", "benchmark_id": "id"}
         apply_contribution("theorem foo : True := trivial", target, {"id": "id"}, main)
         assert open(os.path.join(main, "MathFin/A.lean")).read().endswith("\n")
+
+
+def test_ensure_umbrella_import_appends_once():
+    from assemble import ensure_umbrella_import
+    with tempfile.TemporaryDirectory() as main:
+        with open(os.path.join(main, "MathFin.lean"), "w") as f:
+            f.write("import MathFin.A\nimport MathFin.B\n")
+        changed = ensure_umbrella_import(main, "MathFin/FX/Siegel.lean")
+        assert changed == ["MathFin.lean"]
+        text = open(os.path.join(main, "MathFin.lean")).read()
+        assert "import MathFin.FX.Siegel\n" in text
+        assert ensure_umbrella_import(main, "MathFin/FX/Siegel.lean") == []  # idempotent
+
+
+def test_ensure_umbrella_import_handles_no_trailing_newline():
+    from assemble import ensure_umbrella_import
+    with tempfile.TemporaryDirectory() as main:
+        with open(os.path.join(main, "MathFin.lean"), "w") as f:
+            f.write("import MathFin.A")  # no trailing newline
+        ensure_umbrella_import(main, "MathFin/C.lean")
+        text = open(os.path.join(main, "MathFin.lean")).read()
+        assert text == "import MathFin.A\nimport MathFin.C\n"

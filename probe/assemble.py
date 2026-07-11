@@ -13,6 +13,31 @@ from __future__ import annotations
 
 import json
 import os
+import re
+
+
+def _module_name(main_module: str) -> str:
+    """'MathFin/FX/Siegel.lean' -> 'MathFin.FX.Siegel'."""
+    p = main_module[:-5] if main_module.endswith(".lean") else main_module
+    return p.replace("/", ".")
+
+
+def ensure_umbrella_import(main_repo: str, main_module: str,
+                           umbrella: str = "MathFin.lean") -> list[str]:
+    """Append `import <Module>` to the `MathFin.lean` umbrella so `lake build`
+    puts the new module in the build graph (a benchmark snippet importing an
+    unbuilt module gets a silently-empty environment — the umbrella header even
+    warns about this). No-op if already present. Returns [umbrella] if it
+    changed, else []."""
+    mod_name = _module_name(main_module)
+    umbrella_abs = os.path.join(main_repo, umbrella)
+    text = open(umbrella_abs, encoding="utf-8").read()
+    if re.search(rf"^import {re.escape(mod_name)}\s*$", text, re.MULTILINE):
+        return []
+    sep = "" if text.endswith("\n") or not text else "\n"
+    with open(umbrella_abs, "w", encoding="utf-8") as f:
+        f.write(text + sep + f"import {mod_name}\n")
+    return [umbrella]
 
 
 def append_entry(benchmark_text: str, entry: dict) -> str:
