@@ -115,6 +115,26 @@ class ScoutIndex:
                 return list(r.get("deps") or [])
         return []
 
+    def dependency_closure(self, names: list[str], depth: int = 2) -> list[str]:
+        """BFS over const_dep from `names` up to `depth` hops; the reachable
+        constants excluding the seeds, in discovery order. This is the cross-file
+        premise reach a context pack should surface (miniCTX: in-file context
+        alone misses the cross-file dependencies)."""
+        dep_of = {r.get("name"): list(r.get("deps") or []) for r in self._cd()}
+        seen, frontier, order = set(names), list(names), []
+        for _ in range(depth):
+            nxt = []
+            for n in frontier:
+                for dname in dep_of.get(n, []):
+                    if dname not in seen:
+                        seen.add(dname)
+                        order.append(dname)
+                        nxt.append(dname)
+            frontier = nxt
+            if not frontier:
+                break
+        return order
+
 
 def default_index_dir(foundry_root: str | None = None) -> str:
     """The conventional index location: <foundry>/index/ (probe/ is one below)."""

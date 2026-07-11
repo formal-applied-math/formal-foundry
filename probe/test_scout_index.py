@@ -84,3 +84,19 @@ def test_dependencies_lookup():
 
 def test_default_index_dir_points_at_foundry_index():
     assert default_index_dir("/x/foundry").replace("\\", "/") == "/x/foundry/index"
+
+
+def test_dependency_closure_bfs():
+    with tempfile.TemporaryDirectory() as d:
+        with open(os.path.join(d, "types.jsonl"), "w") as f:
+            f.write("")  # makes .available True; closure reads const_dep only
+        with open(os.path.join(d, "const_dep.jsonl"), "w") as f:
+            for rec in [{"name": "A", "deps": ["B", "C"]},
+                        {"name": "B", "deps": ["D"]},
+                        {"name": "C", "deps": []}]:
+                f.write(json.dumps(rec) + "\n")
+        idx = ScoutIndex(d)
+        assert set(idx.dependency_closure(["A"], depth=1)) == {"B", "C"}
+        assert set(idx.dependency_closure(["A"], depth=2)) == {"B", "C", "D"}
+        assert idx.dependency_closure(["A"], depth=1) == ["B", "C"]  # discovery order
+        assert idx.dependency_closure(["nope"], depth=3) == []
