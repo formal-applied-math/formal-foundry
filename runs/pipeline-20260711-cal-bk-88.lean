@@ -37,59 +37,33 @@ theorem contango_backwardation_basis
     (S < S * Real.exp ((r - δ) * T) ↔ δ < r) ∧
     (S * Real.exp ((r - δ) * T) < S ↔ r < δ) ∧
     S * Real.exp ((r - δ) * 0) = S := by
-  have h_third : S * Real.exp ((r - δ) * 0) = S := by simp
-  have h_first : (S < S * Real.exp ((r - δ) * T) ↔ δ < r) := by
+  have h_cancel_lt : S < S * Real.exp ((r - δ) * T) ↔ 1 < Real.exp ((r - δ) * T) := by
     constructor
     · intro h
-      have h_one_lt_exp : 1 < Real.exp ((r - δ) * T) := by
-        by_contra hle
-        push_neg at hle
-        have hle' : S * Real.exp ((r - δ) * T) ≤ S := by
-          calc
-            S * Real.exp ((r - δ) * T) ≤ S * 1 := mul_le_mul_of_nonneg_left hle (by linarith)
-            _ = S := by ring
-        linarith
-      have h_mul_pos : 0 < (r - δ) * T := by
-        have h_exp_lt : Real.exp 0 < Real.exp ((r - δ) * T) := by
-          simpa [Real.exp_zero] using h_one_lt_exp
-        exact Real.exp_lt_exp.mp h_exp_lt
-      have h_r_gt_delta : 0 < r - δ := by
-        nlinarith
-      linarith
+      have : S * 1 < S * Real.exp ((r - δ) * T) := by simpa [mul_one] using h
+      exact lt_of_mul_lt_mul_left this hS.le
     · intro h
-      have h_r_gt_delta : 0 < r - δ := by linarith
-      have h_mul_pos : 0 < (r - δ) * T := by nlinarith
-      have h_exp_lt : Real.exp 0 < Real.exp ((r - δ) * T) := Real.exp_lt_exp.mpr h_mul_pos
-      have h_one_lt_exp : 1 < Real.exp ((r - δ) * T) := by simpa [Real.exp_zero] using h_exp_lt
-      calc
-        S = S * 1 := by ring
-        _ < S * Real.exp ((r - δ) * T) := mul_lt_mul_of_pos_left h_one_lt_exp hS
-  have h_second : (S * Real.exp ((r - δ) * T) < S ↔ r < δ) := by
+      have : S * 1 < S * Real.exp ((r - δ) * T) := mul_lt_mul_of_pos_left h hS
+      simpa [mul_one] using this
+  have h_cancel_gt : S * Real.exp ((r - δ) * T) < S ↔ Real.exp ((r - δ) * T) < 1 := by
     constructor
     · intro h
-      have h_exp_lt_one : Real.exp ((r - δ) * T) < 1 := by
-        by_contra hle
-        push_neg at hle
-        have hle' : S ≤ S * Real.exp ((r - δ) * T) := by
-          calc
-            S = S * 1 := by ring
-            _ ≤ S * Real.exp ((r - δ) * T) := mul_le_mul_of_nonneg_left hle (by linarith)
-        linarith
-      have h_mul_neg : (r - δ) * T < 0 := by
-        have h_exp_lt : Real.exp ((r - δ) * T) < Real.exp 0 := by
-          simpa [Real.exp_zero] using h_exp_lt_one
-        exact Real.exp_lt_exp.mp h_exp_lt
-      have h_r_lt_delta : r - δ < 0 := by
-        nlinarith
-      linarith
+      have : S * Real.exp ((r - δ) * T) < S * 1 := by simpa [mul_one] using h
+      exact lt_of_mul_lt_mul_left this hS.le
     · intro h
-      have h_r_lt_delta : r - δ < 0 := by linarith
-      have h_mul_neg : (r - δ) * T < 0 := by nlinarith
-      have h_exp_lt : Real.exp ((r - δ) * T) < Real.exp 0 := Real.exp_lt_exp.mpr h_mul_neg
-      have h_exp_lt_one : Real.exp ((r - δ) * T) < 1 := by simpa [Real.exp_zero] using h_exp_lt
-      calc
-        S * Real.exp ((r - δ) * T) < S * 1 := mul_lt_mul_of_pos_left h_exp_lt_one hS
-        _ = S := by ring
-  exact ⟨h_first, h_second, h_third⟩
-
-end MathFin
+      have : S * Real.exp ((r - δ) * T) < S * 1 := mul_lt_mul_of_pos_left h hS
+      simpa [mul_one] using this
+  refine ⟨?_, ?_, ?_⟩
+  · rw [h_cancel_lt, ← Real.exp_zero, Real.exp_lt_exp]
+    constructor
+    · intro h
+      nlinarith
+    · intro h
+      nlinarith
+  · rw [h_cancel_gt, ← Real.exp_zero, Real.exp_lt_exp]
+    constructor
+    · intro h
+      nlinarith
+    · intro h
+      nlinarith
+  · simp
