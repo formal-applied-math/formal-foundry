@@ -64,9 +64,16 @@ PY
 )
 echo "[tick] outcome=$OUTCOME tokens=$TOKENS" >&2
 
-# 4. Record (charge actual tokens; falls back to the cap if 0).
-python3 pipeline.py record --config "$CFG" --state "$STATE" --id "$ID" \
-  --outcome "$OUTCOME" ${TOKENS:+--tokens "$TOKENS"} >&2
+# 4. Record (charge actual tokens; falls back to the cap if 0). NOT on an infra
+#    `error` — that leaves the target un-attempted so the next tick retries it
+#    (a genuine prove-failure, e.g. max_rounds/budget_exhausted, DOES record so
+#    the pipeline moves on to the next issue instead of re-spending on a hard one).
+if [ "$OUTCOME" != "error" ]; then
+  python3 pipeline.py record --config "$CFG" --state "$STATE" --id "$ID" \
+    --outcome "$OUTCOME" ${TOKENS:+--tokens "$TOKENS"} >&2
+else
+  echo "[tick] outcome=error → NOT recording (retryable next tick)" >&2
+fi
 
 # 5. On a pass: open the ready-for-review PR on formal-mathfin (fully hands-off).
 #    Gated on MAIN_PR_TOKEN — without it (any local run) we fall back to the
