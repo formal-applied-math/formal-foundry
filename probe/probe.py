@@ -25,6 +25,7 @@ from probe_lib import (
     TokenLedger,
     append_jsonl,
     axiom_guard_block,
+    best_failure,
     build_initial_prompt,
     build_repair_prompt,
     extract_lean_code,
@@ -99,13 +100,23 @@ def daemon_check(code: str, *, host="127.0.0.1", port=7878, timeout=600) -> dict
 
 
 def run_target(target: dict, *, budget: int, max_rounds: int,
-               chat_fn, check_fn, log_fn, system_prompt=None, context_pack="") -> dict:
+               chat_fn, check_fn, log_fn, system_prompt=None, context_pack="",
+               fanout: int = 1, repair_rounds: int | None = None) -> dict:
+    """Prove `target` with pass@`fanout` sampling + bounded compiler-feedback
+    repair. Each round samples up to `fanout` whole-proof candidates from the
+    current context, checks each, and passes on the first axioms-clean success;
+    otherwise it keeps the fewest-error failure (`best_failure`) and repairs it
+    for up to `repair_rounds` further rounds. `fanout=1` with `repair_rounds`
+    defaulting to `max_rounds` reproduces the original sequential single-sample
+    loop exactly (the Kimina knee says most value is by pass@~32; the Goedel
+    ablation says ~2 repair rounds is where compiler feedback pays)."""
+    if repair_rounds is None:
+        repair_rounds = max_rounds
     ledger = TokenLedger(budget)
-    code = target["statement"]
     messages = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
-    initial = build_initial_prompt(code)
+    initial = build_initial_prompt(target["statement"])
     if context_pack:
         # per-target "consume, don't reprove" context: real signatures of the
         # modules the stub points at, from the lean_scout index. Kept in the
@@ -114,45 +125,71 @@ def run_target(target: dict, *, budget: int, max_rounds: int,
     messages.append({"role": "user", "content": initial})
     t0 = time.time()
     outcome, rounds, last_slop, axioms_clean = "max_rounds", 0, None, None
+    max_total_rounds = min(max_rounds, 1 + repair_rounds)
 
-    for rnd in range(1, max_rounds + 1):
+    for rnd in range(1, max_total_rounds + 1):
         if ledger.exhausted:
             outcome = "budget_exhausted"
             break
         rounds = rnd
-        content, tokens = chat_fn(window_messages(messages))
-        ledger.add(tokens)
-        candidate = extract_lean_code(content)
-        if candidate is None:
-            messages += [{"role": "assistant", "content": content},
-                         {"role": "user", "content":
-                          "No ```lean block found. Output the COMPLETE file "
-                          "in a single ```lean block."}]
-            continue
-        last_slop = slop_report(candidate)
-        if last_slop["forbidden"]:
-            messages += [{"role": "assistant", "content": content},
-                         {"role": "user", "content":
-                          f"Forbidden constructs used: {last_slop['forbidden']}. "
-                          "Rewrite the proof without them. COMPLETE file, one "
-                          "```lean block."}]
-            continue
-        result = check_fn(candidate)
-        log_fn({
-            "target": target["id"], "stream": target["stream"], "round": rnd,
-            "tokens_cum": ledger.spent, "success": result["success"],
-            "errors_head": result["errors"][:3],
-            "sorry_count": result.get("sorry_count", 0),
-        })
-        if result["success"] and result.get("sorry_count", 0) == 0:
-            guard = check_fn(axiom_guard_block(candidate, target["sorry_name"]))
-            axioms_clean = bool(guard["success"])
-            outcome = "pass" if axioms_clean else "axiom_dirty"
-            target["_winning_candidate"] = candidate
+        base = window_messages(messages)
+        checked: list[dict] = []   # compiled-but-not-clean / failed: {content, errors}
+        rejected: list[tuple] = []  # no-code / forbidden: (content, feedback)
+        won = False
+
+        for _ in range(fanout):
+            if ledger.exhausted:
+                break
+            content, tokens = chat_fn(base)
+            ledger.add(tokens)
+            candidate = extract_lean_code(content)
+            if candidate is None:
+                rejected.append((content,
+                                 "No ```lean block found. Output the COMPLETE file "
+                                 "in a single ```lean block."))
+                continue
+            last_slop = slop_report(candidate)
+            if last_slop["forbidden"]:
+                rejected.append((content,
+                                 f"Forbidden constructs used: {last_slop['forbidden']}. "
+                                 "Rewrite the proof without them. COMPLETE file, one "
+                                 "```lean block."))
+                continue
+            result = check_fn(candidate)
+            log_fn({
+                "target": target["id"], "stream": target["stream"], "round": rnd,
+                "tokens_cum": ledger.spent, "success": result["success"],
+                "errors_head": result["errors"][:3],
+                "sorry_count": result.get("sorry_count", 0),
+            })
+            if result["success"] and result.get("sorry_count", 0) == 0:
+                guard = check_fn(axiom_guard_block(candidate, target["sorry_name"]))
+                if guard["success"]:
+                    axioms_clean = True
+                    outcome = "pass"
+                    target["_winning_candidate"] = candidate
+                    won = True
+                    break
+                axioms_clean = False
+                outcome = "axiom_dirty"
+                checked.append({"content": content, "errors":
+                                ["proof depends on a disallowed axiom; stay within "
+                                 "propext, Classical.choice, Quot.sound"]})
+            else:
+                checked.append({"content": content, "errors": result["errors"]})
+
+        if won:
             break
-        messages += [{"role": "assistant", "content": content},
-                     {"role": "user",
-                      "content": build_repair_prompt(result["errors"])}]
+        # set up the next repair round on the most promising failure
+        if checked:
+            idx = best_failure(checked)
+            messages += [{"role": "assistant", "content": checked[idx]["content"]},
+                         {"role": "user",
+                          "content": build_repair_prompt(checked[idx]["errors"])}]
+        elif rejected:
+            content, feedback = rejected[-1]
+            messages += [{"role": "assistant", "content": content},
+                         {"role": "user", "content": feedback}]
         if ledger.exhausted:
             outcome = "budget_exhausted"
             break

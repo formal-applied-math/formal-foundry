@@ -102,3 +102,42 @@ def test_forbidden_tactic_rejected_not_passed():
                      chat_fn=chat, check_fn=check, log_fn=lambda r: None)
     assert out["outcome"] == "max_rounds"
     assert out["slop"]["forbidden"] == ["native_decide"]
+
+
+def test_fanout_passes_when_one_of_k_succeeds_same_round():
+    # k=2: first candidate fails to compile, second passes — both in ROUND 1.
+    chat = make_chat([
+        ("```lean\nimport Mathlib\n\ntheorem foo : 2 + 2 = 4 := by omega\n```", 400),
+        ("```lean\nimport Mathlib\n\ntheorem foo : 2 + 2 = 4 := by norm_num\n```", 400),
+    ])
+    check = make_check([
+        {"success": False, "errors": ["e"], "warnings": [], "sorry_count": 0},  # cand 1
+        {"success": True, "errors": [], "warnings": [], "sorry_count": 0},       # cand 2
+        {"success": True, "errors": [], "warnings": [], "sorry_count": 0},       # axiom guard
+    ])
+    out = run_target(TARGET, budget=50000, max_rounds=3, fanout=2, repair_rounds=2,
+                     chat_fn=chat, check_fn=check, log_fn=lambda r: None)
+    assert out["outcome"] == "pass"
+    assert out["rounds"] == 1
+    assert out["tokens"] == 800  # both candidates charged
+
+
+def test_fanout_repairs_best_failure_across_rounds():
+    # k=2 round 1: both fail (2 errors vs 1); repair should build on the 1-error one.
+    chat = make_chat([
+        ("```lean\nimport Mathlib\n\ntheorem foo : 2 + 2 = 4 := by ring_nf\n```", 300),   # 2 errors
+        ("```lean\nimport Mathlib\n\ntheorem foo : 2 + 2 = 4 := by simp only []\n```", 300),# 1 error "ALPHA"
+        ("```lean\nimport Mathlib\n\ntheorem foo : 2 + 2 = 4 := by norm_num\n```", 300),   # round 2 pass
+    ])
+    check = make_check([
+        {"success": False, "errors": ["x", "y"], "warnings": [], "sorry_count": 0},  # cand 1
+        {"success": False, "errors": ["ALPHA"], "warnings": [], "sorry_count": 0},    # cand 2 (fewer)
+        {"success": True, "errors": [], "warnings": [], "sorry_count": 0},            # round 2
+        {"success": True, "errors": [], "warnings": [], "sorry_count": 0},            # axiom guard
+    ])
+    out = run_target(TARGET, budget=50000, max_rounds=3, fanout=2, repair_rounds=2,
+                     chat_fn=chat, check_fn=check, log_fn=lambda r: None)
+    assert out["outcome"] == "pass"
+    assert out["rounds"] == 2
+    # the repair round's prompt was built from the FEWEST-error candidate ("ALPHA")
+    assert "ALPHA" in chat.calls[2][-1]["content"]

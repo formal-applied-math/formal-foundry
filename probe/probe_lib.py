@@ -119,6 +119,13 @@ def axiom_guard_block(file_content: str, decl_name: str) -> str:
     )
 
 
+def best_failure(results: list[dict]) -> int:
+    """Index of the failing candidate with the fewest compiler errors — the most
+    promising to repair (Goedel-style: build the repair round on the closest
+    miss). Ties resolve to the earliest."""
+    return min(range(len(results)), key=lambda i: len(results[i].get("errors", [])))
+
+
 def slop_report(code: str) -> dict:
     found = [w for w in FORBIDDEN if w in code]
     brackets = re.findall(r"\[([^\[\]]*)\]", code)

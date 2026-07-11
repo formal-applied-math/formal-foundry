@@ -6,6 +6,7 @@ from probe_lib import (
     TokenLedger,
     append_jsonl,
     axiom_guard_block,
+    best_failure,
     build_initial_prompt,
     build_repair_prompt,
     extract_lean_code,
@@ -110,3 +111,16 @@ def test_sha256_and_jsonl():
         append_jsonl(path, {"b": 2})
         lines = [json.loads(x) for x in open(path)]
         assert lines == [{"a": 1}, {"b": 2}]
+
+
+def test_best_failure_picks_fewest_errors():
+    results = [{"errors": ["a", "b"]}, {"errors": ["c"]}, {"errors": ["d", "e", "f"]}]
+    assert best_failure(results) == 1
+
+
+def test_best_failure_ties_resolve_earliest():
+    assert best_failure([{"errors": ["a"]}, {"errors": ["b"]}]) == 0
+
+
+def test_best_failure_tolerates_missing_errors_key():
+    assert best_failure([{"errors": ["a"]}, {}]) == 1
