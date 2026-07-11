@@ -64,32 +64,35 @@ PY
 )
 echo "[tick] outcome=$OUTCOME tokens=$TOKENS" >&2
 
-# 4. Record (charge actual tokens; falls back to the cap if 0). NOT on an infra
-#    `error` — that leaves the target un-attempted so the next tick retries it
-#    (a genuine prove-failure, e.g. max_rounds/budget_exhausted, DOES record so
-#    the pipeline moves on to the next issue instead of re-spending on a hard one).
-if [ "$OUTCOME" != "error" ]; then
-  python3 pipeline.py record --config "$CFG" --state "$STATE" --id "$ID" \
-    --outcome "$OUTCOME" ${TOKENS:+--tokens "$TOKENS"} >&2
-else
-  echo "[tick] outcome=error → NOT recording (retryable next tick)" >&2
-fi
-
-# 5. On a pass: open the ready-for-review PR on formal-mathfin (fully hands-off).
-#    Gated on MAIN_PR_TOKEN — without it (any local run) we fall back to the
-#    candidate-notify path, so nothing ever tries to PR without the credential.
+# 4. On a pass: open the ready-for-review PR FIRST (before recording), so a PR
+#    failure leaves the target retryable. Gated on MAIN_PR_TOKEN — without it
+#    (any local run) we fall back to candidate-notify and never try to PR.
 CAND="$FOUNDRY/runs/$TAG-$ID.lean"
+PR_OPENED=0
 if [ "$OUTCOME" = "pass" ] && [ -f "$CAND" ]; then
   if [ -n "${MAIN_PR_TOKEN:-}" ]; then
     echo "[tick] pass → opening PR on formal-mathfin (closes the source issue)…" >&2
-    GH_TOKEN="$MAIN_PR_TOKEN" "$FOUNDRY/scripts/open-pr.sh" --id "$ID" --tag "$TAG" \
-      || echo "[tick] (open-pr.sh failed; candidate still at $CAND)" >&2
+    if GH_TOKEN="$MAIN_PR_TOKEN" "$FOUNDRY/scripts/open-pr.sh" --id "$ID" --tag "$TAG"; then
+      PR_OPENED=1
+    else
+      echo "[tick] (open-pr.sh did not open a PR; candidate still at $CAND)" >&2
+    fi
   else
-    MSG="Leanstral pipeline: candidate proof for $ID is ready ($TAG).
-No MAIN_PR_TOKEN in this environment, so no PR was opened. Candidate: runs/$TAG-$ID.lean · tokens: $TOKENS"
-    echo "[tick] CANDIDATE READY (no token → no PR) → $CAND" >&2
-    echo "$MSG" >&2
+    echo "[tick] CANDIDATE READY (no MAIN_PR_TOKEN → no PR) → $CAND · tokens: $TOKENS" >&2
   fi
 else
   echo "[tick] no candidate ($OUTCOME) — nothing to contribute this tick" >&2
+fi
+
+# 5. Record — charge tokens + mark the target done, EXCEPT when it should stay
+#    retryable: an infra `error`, or a `pass` whose PR did not open (so the next
+#    tick retries it). A genuine prove-failure (max_rounds/budget_exhausted) DOES
+#    record, so the pipeline moves on instead of re-spending on a hard target.
+if [ "$OUTCOME" = "error" ]; then
+  echo "[tick] outcome=error → NOT recording (retryable next tick)" >&2
+elif [ "$OUTCOME" = "pass" ] && [ "$PR_OPENED" = 0 ] && [ -n "${MAIN_PR_TOKEN:-}" ]; then
+  echo "[tick] pass but PR not opened → NOT recording (retryable next tick)" >&2
+else
+  python3 pipeline.py record --config "$CFG" --state "$STATE" --id "$ID" \
+    --outcome "$OUTCOME" ${TOKENS:+--tokens "$TOKENS"} >&2
 fi

@@ -54,15 +54,19 @@ ISSUE="$(read_meta source_issue)"
 [ -n "$MODULE" ] && [ -n "$BENCH" ] || {
   echo "[open-pr] target $ID missing main_module/benchmark metadata" >&2; exit 1; }
 
+FOUNDRY_SLUG="${FOUNDRY_REPO:-raphaelrrcoelho/mathfin-foundry}"
+
 blocked() {  # file an autoform-blocked issue on the FOUNDRY repo, do NOT open a PR
   echo "[open-pr] BLOCKED: $1" >&2
   if [ -n "${CI:-}" ] && command -v gh >/dev/null 2>&1; then
-    gh issue create --repo "${FOUNDRY_REPO:-raphaelrrcoelho/mathfin-foundry}" \
+    gh label create autoform-blocked --repo "$FOUNDRY_SLUG" --color B60205 \
+      --description "autoform candidate did not assemble green" 2>/dev/null || true
+    gh issue create --repo "$FOUNDRY_SLUG" \
       --title "autoform-blocked: $ID ($TAG)" --label "autoform-blocked" \
       --body "candidate for $ID ($TAG) did not assemble green: $1. proof is at runs/$TAG-$ID.lean; needs manual placement." \
       2>/dev/null || true
   fi
-  exit 0
+  exit 3   # non-zero so the tick knows the PR did NOT open (target stays retryable)
 }
 
 # --- 2. branch + place -------------------------------------------------------
@@ -108,7 +112,9 @@ REGEN='set -e
        python3 -m tools.formalization_yaml --write
        python3 -m tools.verify.ledger status || true'
 if command -v docker >/dev/null 2>&1; then
-  docker run --rm -v "$MAIN":/work -w /work "$IMAGE" bash -lc "$REGEN" \
+  # --entrypoint bash overrides the image's default entrypoint (the mathfin-verify
+  # CLI); without it the shell command is fed as args to that CLI and errors.
+  docker run --rm --entrypoint bash -v "$MAIN":/work -w /work "$IMAGE" -lc "$REGEN" \
     || blocked "in-image build/regen failed (lake build MathFin / axiom_audit_gen)"
 else
   # no docker (local dry-run): regen only the host-side artifact, flag the rest.
@@ -154,7 +160,9 @@ review checklist (8-lens, before merge):
 - [ ] axioms clean; no slop.
 EOF
 )"
+gh label create autoform --repo "$SLUG" --color 0E8A16 \
+  --description "opened by the autoform pipeline; review before merge" 2>/dev/null || true
 gh pr create --repo "$SLUG" --head "$BRANCH" --label autoform \
   --title "autoform: $(basename "$MODULE" .lean) (closes #$ISSUE)" \
-  --body "$BODY"
+  --body "$BODY" || blocked "gh pr create failed"
 echo "[open-pr] PR opened for $ID (closes #$ISSUE)" >&2
