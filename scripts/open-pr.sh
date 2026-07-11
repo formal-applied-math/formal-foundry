@@ -105,12 +105,18 @@ IMAGE="${VERIFY_IMAGE:-ghcr.io/raphaelrrcoelho/mathfin-verify:latest}"
 # the proving daemon is done; stop it so the build has the memory headroom
 # (two Mathlib-loaded Lean envs overcommit even a 16 GB runner).
 docker stop lean-repl >/dev/null 2>&1 || true
+# After the build, verify + record the new benchmark entry in the ledger via
+# `lake env lean` IN THIS container (LEDGER_EXEC_LOCAL — no docker-exec/daemon).
+# Default `verify` scope is stale+missing; the corpus has 0 bare-`import MathFin`
+# entries, so the umbrella change restales nothing and this checks only the 1 new
+# entry (~60s). A fresh ledger + status=0 is the last green gate.
 REGEN='set -e
        lake exe cache get >/dev/null 2>&1 || true
        lake build MathFin
        python3 -m tools.verify.axiom_audit_gen --write
        python3 -m tools.formalization_yaml --write
-       python3 -m tools.verify.ledger status || true'
+       LEDGER_EXEC_LOCAL=1 python3 -m tools.verify.ledger verify --exec --timeout 600
+       python3 -m tools.verify.ledger status'
 if command -v docker >/dev/null 2>&1; then
   # --entrypoint bash overrides the image's default entrypoint (the mathfin-verify
   # CLI); without it the shell command is fed as args to that CLI and errors.
