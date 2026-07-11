@@ -237,7 +237,12 @@ def main() -> int:
     system_prompt = build_system_prompt(args.main_repo)
     manifest = json.load(open(args.manifest))
     root = os.path.dirname(os.path.abspath(args.manifest))
-    run_dir = os.path.join(os.path.dirname(root), "runs")
+    # runs/ lives at the FOUNDRY root (where pipeline-tick.sh writes + reads the
+    # candidate), not relative to the manifest — the manifest can sit at any depth
+    # (targets/queue/manifest.json). Derive it from this file's location + ensure it.
+    foundry_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    run_dir = os.path.join(foundry_root, "runs")
+    os.makedirs(run_dir, exist_ok=True)
     attempts_log = os.path.join(run_dir, f"{args.run_tag}-attempts.jsonl")
     summary_log = os.path.join(run_dir, f"{args.run_tag}-summary.jsonl")
 
