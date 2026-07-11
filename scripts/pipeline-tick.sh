@@ -36,12 +36,16 @@ fi
 ID="$(printf '%s' "$DEC" | python3 -c 'import sys,json;print(json.load(sys.stdin)["target"]["id"])')"
 BUDGET="$(printf '%s' "$DEC" | python3 -c 'import sys,json;print(json.load(sys.stdin)["budget"])')"
 EFFORT="$(printf '%s' "$DEC" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("reasoning_effort","high"))')"
-echo "[tick] running target $ID (budget=$BUDGET, effort=$EFFORT)" >&2
+FANOUT="$(printf '%s' "$DEC" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("fanout",1))')"
+REPAIR="$(printf '%s' "$DEC" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("repair_rounds",2))')"
+TPA="$(printf '%s' "$DEC" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("tokens_per_attempt",60000))')"
+echo "[tick] running target $ID (budget=$BUDGET, effort=$EFFORT, fanout=$FANOUT, repair=$REPAIR)" >&2
 
 # 2. Prove (metered; writes runs/$TAG-summary.jsonl + winning candidate .lean).
 set +e
 python3 probe.py prove --manifest "$QUEUE" --only "$ID" --budget "$BUDGET" \
-  --reasoning-effort "$EFFORT" --run-tag "$TAG" --main-repo "$MAIN"
+  --reasoning-effort "$EFFORT" --fanout "$FANOUT" --repair-rounds "$REPAIR" \
+  --max-tokens "$TPA" --run-tag "$TAG" --main-repo "$MAIN"
 set -e
 
 # 3. Read the outcome + actual tokens from the run summary.

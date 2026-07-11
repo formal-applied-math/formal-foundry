@@ -218,6 +218,12 @@ def main() -> int:
     p.add_argument("--reasoning-effort", default=None,
                    choices=[None, "none", "low", "medium", "high"],
                    help="Leanstral reasoning_effort; 'high' for hard targets")
+    p.add_argument("--fanout", type=int, default=1,
+                   help="pass@k whole-proof candidates sampled per round (1 = sequential)")
+    p.add_argument("--repair-rounds", type=int, default=None,
+                   help="max compiler-feedback repair rounds (default: --max-rounds)")
+    p.add_argument("--max-tokens", type=int, default=16384,
+                   help="max_tokens per attempt (Leanstral's lever is tokens-per-attempt)")
     args = ap.parse_args()
 
     api_key = os.environ.get("MISTRAL_API_KEY")
@@ -234,7 +240,7 @@ def main() -> int:
 
     def chat_fn(messages):
         return mistral_chat(messages, api_key=api_key, model=args.model,
-                            base_url=args.base_url,
+                            base_url=args.base_url, max_tokens=args.max_tokens,
                             reasoning_effort=args.reasoning_effort)
 
     for target in manifest["targets"]:
@@ -251,7 +257,8 @@ def main() -> int:
                              max_rounds=args.max_rounds, chat_fn=chat_fn,
                              check_fn=daemon_check,
                              log_fn=lambda r: append_jsonl(attempts_log, r),
-                             system_prompt=system_prompt, context_pack=context_pack)
+                             system_prompt=system_prompt, context_pack=context_pack,
+                             fanout=args.fanout, repair_rounds=args.repair_rounds)
         summary["model"] = args.model
         summary["ts"] = time.strftime("%Y-%m-%dT%H:%M:%S")
         append_jsonl(summary_log, summary)

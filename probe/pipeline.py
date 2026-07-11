@@ -60,6 +60,8 @@ def cmd_plan(args) -> int:
     return emit({"action": "run", "target": target,
                  "budget": P.issue_budget(cfg, difficulty),
                  "reasoning_effort": cfg.reasoning_effort,
+                 "fanout": cfg.fanout, "repair_rounds": cfg.repair_rounds,
+                 "tokens_per_attempt": cfg.tokens_per_attempt,
                  "remaining": P.budget_remaining(state, cfg)})
 
 

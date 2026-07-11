@@ -16,3 +16,12 @@ tokens_per_issue_cap = 500000
 escalate_hard_cap = 2000000
 max_issues_per_tick = 1
 reasoning_effort = "high"
+
+# pass@k harness knobs. The per-issue cap is spent as ~`fanout` whole-proof
+# attempts x `tokens_per_attempt`, then <=`repair_rounds` compiler-feedback
+# repairs on the best failure. Research basis: Kimina sample-efficiency knee at
+# ~pass@32, Goedel self-correction ablation at ~2 repair rounds, Leanstral's
+# dominant lever is tokens-per-attempt (PutnamBench 44→587 solves at 50k→4M).
+fanout = 8
+repair_rounds = 2
+tokens_per_attempt = 60000

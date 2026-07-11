@@ -39,6 +39,13 @@ class PipelineConfig:
     escalate_hard_cap: int = 2_000_000
     max_issues_per_tick: int = 1
     reasoning_effort: str = "high"
+    # pass@k harness knobs (research: Kimina knee ~pass@32, Goedel ~2 repair
+    # rounds, Leanstral's lever is tokens-PER-attempt). The per-issue cap is
+    # spent as ~fanout attempts x tokens_per_attempt, then <=repair_rounds
+    # compiler-feedback repairs on the best failure.
+    fanout: int = 8
+    repair_rounds: int = 2
+    tokens_per_attempt: int = 60_000
 
     @staticmethod
     def load(path: str | None) -> "PipelineConfig":

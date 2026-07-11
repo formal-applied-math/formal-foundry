@@ -114,3 +114,10 @@ def test_state_roundtrip():
 
 def test_load_state_missing_returns_fresh():
     assert P.load_state("/no/such/state.json")["attempted_issues"] == []
+
+
+def test_config_has_fanout_and_repair_defaults():
+    cfg = PipelineConfig()
+    assert cfg.fanout == 8
+    assert cfg.repair_rounds == 2
+    assert cfg.tokens_per_attempt == 60000
