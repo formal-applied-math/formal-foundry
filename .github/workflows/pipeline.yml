@@ -34,6 +34,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
+      - name: Free disk space
+        # the in-image `lake exe cache get` + `lake build MathFin` (Mathlib
+        # oleans ~5 GB + build artifacts) on top of the pulled verify image
+        # overflows the runner's ~14 GB free disk. Reclaim the ~15 GB of
+        # preinstalled toolchains we never use (Android SDK, .NET, GHC, Swift).
+        run: |
+          df -h / | tail -1
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+                      /usr/local/.ghcup /usr/local/share/boost /opt/hostedtoolcache/CodeQL \
+                      /usr/local/lib/node_modules 2>/dev/null || true
+          docker image prune -af >/dev/null 2>&1 || true
+          echo "after cleanup:"; df -h / | tail -1
+
       - name: Checkout foundry
         uses: actions/checkout@v4
 
