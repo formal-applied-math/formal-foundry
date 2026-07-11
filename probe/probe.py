@@ -34,6 +34,9 @@ from probe_lib import (
     window_messages,
 )
 
+# Reconfirmed 2026-07-11 against docs.mistral.ai: `labs-leanstral-1-5` is the
+# live Leanstral 1.5 id on api.mistral.ai/v1 (free until 2026-09-30). The older
+# `labs-leanstral-2603` was retired 2026-06-30 — do not target it.
 DEFAULT_MODEL = "labs-leanstral-1-5"
 DEFAULT_BASE_URL = "https://api.mistral.ai/v1"
 
