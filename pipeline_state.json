@@ -1,16 +1,7 @@
 {
-  "attempted_issues": [
-    "cal-bk-88"
-  ],
-  "history": [
-    {
-      "epoch": 1783800503,
-      "id": "cal-bk-88",
-      "outcome": "pass",
-      "tokens": 59271
-    }
-  ],
-  "last_tick_epoch": 1783800503,
+  "attempted_issues": [],
+  "history": [],
+  "last_tick_epoch": 0,
   "month": "2026-07",
-  "tokens_spent_this_month": 59271
+  "tokens_spent_this_month": 0
 }
