@@ -167,6 +167,11 @@ DRAFT_SYSTEM = (
     "Unicode superscript `σ²`); `*` for products; `Real.exp`/`Real.log`/`Real.sqrt`.\n"
     "- State EXACTLY what the issue asks: no vacuity, no weaker restatement. Prefer a "
     "conjunction when the issue lists a small cluster of facts.\n"
+    "- If the issue names a defined quantity (the premium π = (1+θ)·μ, the forward "
+    "F = …, a par rate, …), INTRODUCE it as a bound variable with a defining "
+    "hypothesis (e.g. `(π : ℝ) (hπ : π = (1 + θ) * μ)`) and state BOTH the definition "
+    "and the requested property — do not collapse a definition into only its "
+    "consequence.\n"
     "- Take givens as hypotheses (positive reals, nonneg loadings, …)."
 )
 
