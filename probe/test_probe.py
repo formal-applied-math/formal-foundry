@@ -1,9 +1,61 @@
-from probe import _parse_daemon_response, run_target
+import socket
+
+import probe
+from probe import _parse_daemon_response, daemon_check, run_target
 
 
 def test_parse_daemon_response_valid():
     r = _parse_daemon_response(b'{"success": true, "errors": [], "sorry_count": 1}')
     assert r["success"] is True and r["sorry_count"] == 1
+
+
+class _FakeSock:
+    """Minimal socket stand-in whose recv raises, exercising daemon_check's
+    failure handling without a real daemon."""
+
+    def __init__(self, exc):
+        self._exc = exc
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def settimeout(self, t):
+        pass
+
+    def sendall(self, b):
+        pass
+
+    def shutdown(self, how):
+        pass
+
+    def recv(self, n):
+        raise self._exc
+
+
+def test_daemon_check_socket_timeout_returns_error_dict(monkeypatch):
+    # a wedged / mid-respawn daemon can blow the socket deadline; daemon_check must
+    # surface it as a FAILED check (like _parse_daemon_response does for a bad
+    # payload), never let an uncaught TimeoutError skip the whole issue.
+    monkeypatch.setattr(probe.socket, "create_connection",
+                        lambda *a, **k: _FakeSock(socket.timeout("timed out")))
+    r = daemon_check("import Mathlib")
+    assert r["success"] is False
+    assert r["errors"]
+    assert r["sorry_count"] == 0
+
+
+def test_daemon_check_connection_refused_returns_error_dict(monkeypatch):
+    # daemon down (respawning) → create_connection raises ConnectionRefusedError;
+    # a failed check, not a crash.
+    def refuse(*a, **k):
+        raise ConnectionRefusedError("connection refused")
+    monkeypatch.setattr(probe.socket, "create_connection", refuse)
+    r = daemon_check("import Mathlib")
+    assert r["success"] is False
+    assert r["errors"]
 
 
 def test_parse_daemon_response_empty_is_error_not_raise():

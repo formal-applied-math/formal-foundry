@@ -46,8 +46,10 @@ max_issues = 1
 max_attempt_issues = 3
 gate_budget = 20000
 draft_rounds = 3         # draft attempts w/ compiler feedback — magistral drafts are
-                         # stochastic; 3 balances resampling vs per-issue wall-clock
-                         # (5 made a hard issue hang + kill the run)
+                         # stochastic; 3 balances resampling vs per-issue wall-clock.
+                         # (the run-killing hang once blamed on rounds=5 was really the
+                         # daemon's missing elaboration timeout, since fixed; each
+                         # elaboration is now bounded, so rounds is purely cost/quality)
 draft_model = "magistral-medium-latest"
 prover_model = "labs-leanstral-1-5"
 draft_max_tokens = 16000   # reasoning headroom — magistral emits a think trace before the code

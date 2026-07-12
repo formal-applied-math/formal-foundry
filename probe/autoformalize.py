@@ -369,36 +369,50 @@ def draft_with_repair(issue: dict, context_pack: str, pins: str, *, chat_fn, che
 
 # --- kernel-grade faithfulness gates (labs-leanstral via run_target) ----------
 
-_GATE_MAX_ROUNDS = 2
+# Lightened gates. Each faithfulness-gate attempt is a Lean daemon elaboration, and
+# the two gates were the bulk of an issue's daemon load (fanout 2 x 2 rounds each ≈ 8
+# checks) — the load that let one spinning candidate wedge the daemon. The gate is a
+# cheapest-first SAFETY NET (catch a gross vacuity / falsity), not a proof to
+# maximize: one reasoned pass@1 attempt catches a blatant contradiction, and a subtle
+# one is left to the semantic judge + the human merge. Default to pass@1 / single
+# round (1 check per gate); tunable per-call for a deeper sweep.
+_GATE_FANOUT = 1
+_GATE_ROUNDS = 1
 
 
 def _try_prove(goal: str, sorry_name: str, *, chat_fn, check_fn, budget: int,
-               fanout: int = 2, repair_rounds: int = 1, system_prompt=None) -> tuple[bool, int]:
+               fanout: int = _GATE_FANOUT, rounds: int = _GATE_ROUNDS,
+               system_prompt=None) -> tuple[bool, int]:
     """Short pass@k attempt to prove `goal`. Returns `(proved, tokens)` — `proved`
-    is True only on an axioms-clean success (run_target's `pass`)."""
+    is True only on an axioms-clean success (run_target's `pass`). `rounds` bounds
+    both the sampling rounds and the compiler-feedback repairs (`rounds - 1`)."""
     target = {"id": "gate", "stream": "gate", "statement": goal, "sorry_name": sorry_name}
-    res = run_target(target, budget=budget, max_rounds=_GATE_MAX_ROUNDS, chat_fn=chat_fn,
+    res = run_target(target, budget=budget, max_rounds=rounds, chat_fn=chat_fn,
                      check_fn=check_fn, log_fn=lambda r: None, system_prompt=system_prompt,
-                     fanout=fanout, repair_rounds=repair_rounds)
+                     fanout=fanout, repair_rounds=max(0, rounds - 1))
     return res["outcome"] == "pass", res["tokens"]
 
 
 def hypothesis_rejection(lean_text: str, sorry_name: str, *, chat_fn, check_fn,
-                         budget: int, system_prompt=None) -> dict:
+                         budget: int, fanout: int = _GATE_FANOUT, rounds: int = _GATE_ROUNDS,
+                         system_prompt=None) -> dict:
     """Try to prove `⊢ False` from the stub's hypotheses. A clean proof ⇒ the
     hypotheses are contradictory ⇒ the theorem is vacuously true. Returns
     `{vacuous, tokens}`."""
     proved, tokens = _try_prove(vacuity_goal(lean_text), sorry_name, chat_fn=chat_fn,
-                                check_fn=check_fn, budget=budget, system_prompt=system_prompt)
+                                check_fn=check_fn, budget=budget, fanout=fanout, rounds=rounds,
+                                system_prompt=system_prompt)
     return {"vacuous": proved, "tokens": tokens}
 
 
 def disproof(lean_text: str, sorry_name: str, *, chat_fn, check_fn,
-             budget: int, system_prompt=None) -> dict:
+             budget: int, fanout: int = _GATE_FANOUT, rounds: int = _GATE_ROUNDS,
+             system_prompt=None) -> dict:
     """Try to prove `⊢ ¬ Concl` under the stub's hypotheses. A clean proof ⇒ the
     statement is false as written. Returns `{false, tokens}`."""
     proved, tokens = _try_prove(disproof_goal(lean_text), sorry_name, chat_fn=chat_fn,
-                                check_fn=check_fn, budget=budget, system_prompt=system_prompt)
+                                check_fn=check_fn, budget=budget, fanout=fanout, rounds=rounds,
+                                system_prompt=system_prompt)
     return {"false": proved, "tokens": tokens}
 
 

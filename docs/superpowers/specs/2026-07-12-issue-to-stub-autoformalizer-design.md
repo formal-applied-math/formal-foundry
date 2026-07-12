@@ -268,3 +268,48 @@ level, so no stub *staged* locally yet. Getting a first stage is a tuning matter
 retry-hardened) — the machinery, gates, and safety are proven. Deployment note:
 the refill's `gh issue list` needs **issues:read** on `formal-mathfin`; the
 `MAIN_PR_TOKEN` PAT is currently Contents+PRs only.
+
+## Robustness pass (2026-07-12) — the yield-0 blocker was infra, not calibration
+
+The "runs keep timing out" symptom (local `--only 67`, CI #53 exit-143), earlier filed
+under *free-tier throttle / daemon-OOM-under-load*, had a single concrete root cause found
+by a systematic dig: **the lean-repl daemon had no elaboration timeout.** lean-interact's
+`DEFAULT_TIMEOUT` is `None`, and `tools/verify/lean_backend.py::run_raw` called
+`server.run(Command(cmd=code))` with no `timeout`, so the REPL read (`t.join(None)`)
+**blocked forever** on a spinning tactic. A leanstral kernel-gate candidate running
+`nlinarith` on an unprovable `⊢ False` never replies → the daemon wedges holding its lock
+→ the only thing that ever fires is the client's own 300s socket timeout. Non-deterministic
+(leanstral's tactic choice is stochastic), which is exactly why a draft-only diagnostic
+always passed while the full cascade hung.
+
+Three fixes, each TDD'd:
+
+1. **Bounded elaboration / recycle-on-stuck** (`tools/verify/lean_backend.py`, main repo):
+   `run_raw` now passes `timeout=LEAN_ELAB_TIMEOUT` (default 180s). lean-interact kills the
+   stuck REPL on timeout; the next request respawns a fresh one. A timeout is surfaced as a
+   clean elaboration failure and is **not** retried (the same code just re-spins). This is
+   the meaningful form of "daemon recycling." `tests/test_lean_backend.py` verifies it with
+   a fake server (no Lean boot): a finite timeout is passed, and a `TimeoutError` surfaces
+   as a single non-retried failure.
+2. **Client defense-in-depth** (`probe/probe.py`): `daemon_check` catches
+   `socket.timeout`/`OSError` and returns a failed-check dict — a wedged or respawning
+   daemon degrades to a failed candidate, never an uncaught exception that skips the issue.
+3. **Lightened gates** (`probe/autoformalize.py`): the two faithfulness gates drop from
+   fanout-2 × 2-rounds (~8 daemon checks/issue) to pass@1 / single round (`_GATE_FANOUT=1`,
+   `_GATE_ROUNDS=1`) → 2 checks. They are a cheapest-first safety net, not proofs to
+   maximize; a subtle vacuity is left to the judge + human merge. Per-issue daemon load
+   ~9 → ~3 checks.
+
+**Clean `--only 67` run on a fresh daemon: EXIT 0, 712s wall, zero hang.** The full
+cascade ran to completion; the wedge is structurally gone. Outcome: `#67 retired —
+vacuous`. This is **not** a false positive: a gate "pass" requires an axiom-clean,
+sorry-free proof of `⊢ False` (the axiom guard), so by Lean's consistency the draft's
+hypotheses were genuinely contradictory (magistral over-constrained the statement). The
+safety net worked. Net: the infrastructure is fixed; the remaining zero-stage state is now
+a **draft-quality** matter (re-draft luck / a broader ready-issue sweep), not a hang.
+
+**CI deploy gotcha:** the CI daemon (`pipeline.yml`, `docker run`) uses the **baked image**,
+not a `tools/` bind-mount, and `publish-image.yml`'s trigger paths **exclude `tools/`**
+(it is bind-mounted locally). So Fix 1 reaches the CI daemon **only** via a manual
+`gh workflow run publish-image.yml` after pushing `lean_backend.py`; a local daemon restart
+suffices locally.

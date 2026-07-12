@@ -483,6 +483,25 @@ def test_disproof_passes_when_negation_unprovable():
     assert r["false"] is False
 
 
+def test_gate_is_lightened_to_a_single_daemon_check_by_default():
+    # each gate attempt is a daemon elaboration; the probe is a cheapest-first
+    # SAFETY NET, not a proof to maximize. Default it to pass@1 / single round so
+    # the two gates cost 2 checks per issue, not ~8 (fanout 2 x 2 rounds each) —
+    # the load that let one spinning candidate wedge the daemon.
+    lean_text, _e, _p = af.emit_target_files(_ISSUE, _STUB, _META)
+    calls = []
+
+    def counting_check(code):
+        calls.append(code)
+        return {"success": False, "errors": ["unsolved goals"], "sorry_count": 0}
+
+    r = af.hypothesis_rejection(lean_text, "fra_value",
+                                chat_fn=_canned_chat("```lean\nattempt\n```", 50),
+                                check_fn=counting_check, budget=20000)
+    assert r["vacuous"] is False
+    assert len(calls) == 1
+
+
 # --- refill orchestrator (monkeypatched steps; control flow only) ------------
 
 def _issue(n, **kw):

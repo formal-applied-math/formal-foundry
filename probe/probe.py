@@ -122,16 +122,25 @@ def _parse_daemon_response(raw: bytes) -> dict:
 
 
 def daemon_check(code: str, *, host="127.0.0.1", port=7878, timeout=300) -> dict:
-    with socket.create_connection((host, port), timeout=30) as sock:
-        sock.settimeout(timeout)
-        sock.sendall(code.encode("utf-8"))
-        sock.shutdown(socket.SHUT_WR)
-        chunks = []
-        while True:
-            data = sock.recv(65536)
-            if not data:
-                break
-            chunks.append(data)
+    try:
+        with socket.create_connection((host, port), timeout=30) as sock:
+            sock.settimeout(timeout)
+            sock.sendall(code.encode("utf-8"))
+            sock.shutdown(socket.SHUT_WR)
+            chunks = []
+            while True:
+                data = sock.recv(65536)
+                if not data:
+                    break
+                chunks.append(data)
+    except (socket.timeout, TimeoutError, OSError) as e:
+        # A wedged daemon (a spinning elaboration killed server-side) or one busy
+        # respawning a fresh REPL can blow the socket deadline or refuse the
+        # connection. Surface it as a FAILED check — exactly like a malformed
+        # payload — so the gate/draft treats it as a failed candidate and moves on,
+        # never an uncaught TimeoutError that skips the whole issue mid-tick.
+        return {"success": False, "sorry_count": 0,
+                "errors": [f"daemon check did not complete: {type(e).__name__}: {e}"]}
     return _parse_daemon_response(b"".join(chunks))
 
 
