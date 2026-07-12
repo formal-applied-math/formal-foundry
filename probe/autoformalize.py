@@ -337,46 +337,49 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn,
         if len(seeded) >= max_issues or spent >= budget:
             break
         n = issue.get("number")
-
-        d = draft_stub(issue, context_fn(issue), pins, chat_fn=reason_fn)
-        spent += d["tokens"]
-        if not d["stub"]:
-            log(f"#{n}: no draft"); continue
+        # A transient error on ONE issue (e.g. an HTTP 429 that exhausts retries,
+        # a daemon hiccup, a malformed draft) must not kill the tick — log it and
+        # move to the next candidate.
         try:
+            d = draft_stub(issue, context_fn(issue), pins, chat_fn=reason_fn)
+            spent += d["tokens"]
+            if not d["stub"]:
+                log(f"#{n}: no draft"); continue
             lean_text, entry, _placement = emit_target_files(issue, d["stub"], d["meta"])
-        except ValueError as e:
-            log(f"#{n}: emit failed ({e})"); continue
 
-        elab = check_fn(lean_text)
-        if not elab.get("success") or elab.get("sorry_count", 0) != 1:
-            log(f"#{n}: does not elaborate ({elab.get('errors', [])[:1]})"); continue
-        name = split_statement(d["stub"])[0]
+            elab = check_fn(lean_text)
+            if not elab.get("success") or elab.get("sorry_count", 0) != 1:
+                log(f"#{n}: does not elaborate ({elab.get('errors', [])[:1]})"); continue
+            name = split_statement(d["stub"])[0]
 
-        vac = hypothesis_rejection(lean_text, name, chat_fn=prove_fn, check_fn=check_fn,
-                                   budget=gate_budget, system_prompt=system_prompt)
-        spent += vac["tokens"]
-        if vac["vacuous"]:
-            log(f"#{n}: retired — vacuous (hypotheses contradictory)"); continue
+            vac = hypothesis_rejection(lean_text, name, chat_fn=prove_fn, check_fn=check_fn,
+                                       budget=gate_budget, system_prompt=system_prompt)
+            spent += vac["tokens"]
+            if vac["vacuous"]:
+                log(f"#{n}: retired — vacuous (hypotheses contradictory)"); continue
 
-        dis = disproof(lean_text, name, chat_fn=prove_fn, check_fn=check_fn,
-                       budget=gate_budget, system_prompt=system_prompt)
-        spent += dis["tokens"]
-        if dis["false"]:
-            log(f"#{n}: retired — false as written"); continue
+            dis = disproof(lean_text, name, chat_fn=prove_fn, check_fn=check_fn,
+                           budget=gate_budget, system_prompt=system_prompt)
+            spent += dis["tokens"]
+            if dis["false"]:
+                log(f"#{n}: retired — false as written"); continue
 
-        j = judge_faithfulness(issue, d["stub"], chat_fn=reason_fn)
-        spent += j["tokens"]
-        if not j.get("faithful"):
-            log(f"#{n}: unfaithful — {j.get('verdict', '')}"); continue
+            j = judge_faithfulness(issue, d["stub"], chat_fn=reason_fn)
+            spent += j["tokens"]
+            if not j.get("faithful"):
+                log(f"#{n}: unfaithful — {j.get('verdict', '')}"); continue
 
-        rt = roundtrip_check(issue, d["stub"], chat_fn=reason_fn)
-        spent += rt["tokens"]
-        if not rt.get("faithful"):
-            log(f"#{n}: roundtrip drift — {rt.get('verdict', '')}"); continue
+            rt = roundtrip_check(issue, d["stub"], chat_fn=reason_fn)
+            spent += rt["tokens"]
+            if not rt.get("faithful"):
+                log(f"#{n}: roundtrip drift — {rt.get('verdict', '')}"); continue
 
-        paths = _write_target(queue_dir, n, lean_text, entry)
-        seeded.append({"id": f"cal-bk-{n}", "issue": n, "paths": paths})
-        log(f"#{n}: staged cal-bk-{n}")
+            paths = _write_target(queue_dir, n, lean_text, entry)
+            seeded.append({"id": f"cal-bk-{n}", "issue": n, "paths": paths})
+            log(f"#{n}: staged cal-bk-{n}")
+        except Exception as e:  # noqa: BLE001 — resilience: skip the issue, not the tick
+            log(f"#{n}: error ({type(e).__name__}: {e}) — skipping")
+            continue
     return {"seeded": seeded, "tokens": spent}
 
 
@@ -456,10 +459,6 @@ def main() -> int:
                  log=lambda m: print(f"[refill] {m}", file=sys.stderr))
     print(json.dumps(res))
     return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
 
 
 def explicit_arg_names(binders: str) -> list[str]:
@@ -602,3 +601,7 @@ def emit_target_files(issue: dict, stub: str, meta: dict) -> tuple[str, dict, di
         "source_issue": n,
     }
     return lean_text, entry, placement
+
+
+if __name__ == "__main__":
+    sys.exit(main())

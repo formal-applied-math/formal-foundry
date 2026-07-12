@@ -401,6 +401,21 @@ def test_refill_skips_unfaithful_judge(monkeypatch, tmp_path):
     assert not (tmp_path / "cal-bk-7.lean").exists()
 
 
+def test_refill_skips_issue_on_step_exception(monkeypatch, tmp_path):
+    # a transient error (e.g. HTTP 429 exhaustion) on one issue must not crash the
+    # whole refill — log it and skip to the next issue.
+    def boom(i, cp, p, chat_fn):
+        if i["number"] == 1:
+            raise RuntimeError("HTTP 429 from Mistral API")
+        return _good_draft(i, cp, p, chat_fn)
+    monkeypatch.setattr(af, "draft_stub", boom)
+    _pass_gates(monkeypatch)
+    res = af.refill([_issue(1), _issue(2)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
+                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
+    assert [s["issue"] for s in res["seeded"]] == [2]
+    assert (tmp_path / "cal-bk-2.lean").exists()
+
+
 def test_refill_wires_reason_and_prove_fns(monkeypatch, tmp_path):
     seen = {}
     monkeypatch.setattr(af, "draft_stub",
