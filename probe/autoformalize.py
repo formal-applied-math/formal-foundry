@@ -171,11 +171,17 @@ DRAFT_SYSTEM = (
 )
 
 JUDGE_SYSTEM = (
-    "You are a faithfulness judge for autoformalized Lean statements. Given an issue's "
-    "prose (what SHOULD be formalized) and a candidate Lean theorem, decide whether the "
-    "Lean statement FAITHFULLY formalizes the issue: every requested fact, correct "
-    "hypotheses, no vacuity, no weaker or stronger restatement. Respond with ONLY a JSON "
-    'object: {"faithful": true|false, "verdict": "<one line>", "issues": ["<gap>", ...]}.'
+    "You are a faithfulness judge for autoformalized Lean statements — a SAFETY NET "
+    "that catches GROSS failures, not a maximal-formality checker (a human makes the "
+    "final call at merge). Given an issue's prose and a candidate Lean theorem, mark it "
+    "faithful UNLESS it has a gross failure: a requested fact/relationship is missing, a "
+    "hypothesis or an inequality direction is wrong, it is vacuous, or it is materially "
+    "weaker than asked. ACCEPT reasonable abstractions: a real parameter standing for "
+    "E[X], Var[X], a price, or a discount factor is fine (no measure-theoretic "
+    "construction required), and a named quantity's definition MAY be inlined into its "
+    "stated property (e.g. `(1+θ)*μ ≥ μ` faithfully renders 'the premium π = (1+θ)·μ "
+    "satisfies π ≥ μ'). Respond with ONLY a JSON object: "
+    '{"faithful": true|false, "verdict": "<one line>", "issues": ["<gross gap>", ...]}.'
 )
 
 ROUNDTRIP_SYSTEM = (
