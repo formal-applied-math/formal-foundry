@@ -13,10 +13,11 @@ There are two repos:
 - **`formal-mathfin`** (public) — a Lean 4 library of ~324 formally verified
   theorems in mathematical finance. This is *the artifact*. A theorem is "done"
   only when Lean's kernel accepts a proof with zero gaps.
-- **`mathfin-foundry`** (private, this repo) — an autoformalization pipeline. It
-  points an LLM theorem-prover (Mistral's **Leanstral**) at open proof tasks,
-  gets back candidate Lean proofs, checks them, and surfaces the good ones for a
-  human to refine and merge into `formal-mathfin`.
+- **`mathfin-foundry`** (private, this repo) — a two-engine, self-feeding
+  autoformalization pipeline. From an open proof *issue* it drafts a Lean
+  *statement* (Mistral's **Magistral**, faithfulness-gated), then proves it
+  (Mistral's **Leanstral**), checks both against Lean's kernel, and surfaces the
+  good ones for a human to refine and merge into `formal-mathfin`.
 
 If you've built agentic coding loops, you already understand the foundry. It is
 an agent proposing code (a Lean proof) into a **compiler-feedback repair loop** —
@@ -98,14 +99,17 @@ The pipeline is a metered repair loop. Full ASCII/Mermaid diagram in
 `docs/leanstral-architecture.md`; the compact version:
 
 ```
- TARGET            a Lean stub `theorem … := by sorry` + pointers to the
- (a GitHub issue)  existing modules it should build on
+ TARGET            a Lean stub `theorem … := by sorry` + pointers. When the queue
+ (from an issue)   is empty the tick SELF-FEEDS: Magistral drafts the stub from the
+                   next ready issue and five faithfulness gates validate it
+                   (elaborate · ⊢False · ⊢¬Concl · judge · roundtrip) before it is
+                   queued — `probe/autoformalize.py`.
         │
         ▼
  HOUSE DOCTRINE    injected as the system prompt on every attempt:
- (system prompt)   values gate · house idioms · exact pins ·
-                   "consume Mathlib/Degenne, don't reprove" · per-target
-                   context pack (the signatures of the modules to reuse)
+ (system prompt)   values gate · the LIVE `docs/patterns.md` (first-class) ·
+                   exact pins · "consume Mathlib/Degenne, don't reprove" ·
+                   per-target context pack (signatures of the modules to reuse)
         │
         ▼
  LEANSTRAL         Mistral's Lean-4 prover. Emits a candidate .lean file;
@@ -141,8 +145,9 @@ PutnamBench curve climbs 44 → 587 solves as the per-problem budget goes
 
 ### The hard rules (read these before touching anything)
 
-- **The foundry reads `formal-mathfin`; it never writes to it.** PRs into main are
-  authored by a human from a local clone after the refinery. No bot PRs, ever.
+- **The foundry reads `formal-mathfin`; it never *merges* to it.** The pipeline may
+  OPEN a ready-for-review PR (with `MAIN_PR_TOKEN`), but every PR runs the refinery +
+  8-lens and a human owns the merge. Nothing reaches `main` unreviewed.
 - **Scout, not author.** Nothing merges without the human refinement pass and the
   8-lens bar. This is non-negotiable and it's the whole ethical spine of the op.
 - **API traffic carries only public-corpus and fresh-textbook statements** — never
@@ -155,9 +160,11 @@ PutnamBench curve climbs 44 → 587 solves as the per-problem budget goes
 
 ### The hands-off PR pipeline
 
-`.github/workflows/pipeline.yml` runs on a cron: it picks a ready issue, proves
-it, and — on a pass — opens a *ready-for-review* PR on `formal-mathfin` that
-closes the source issue (assembling the proof into its module + a re-export
+`.github/workflows/pipeline.yml` runs on a cron. When the queue has no
+unattempted target it first **self-feeds** — Magistral autoformalizes and
+faithfulness-gates a stub from the next ready issue (`autoformalize.py`) — then it
+proves the target and, on a pass, opens a *ready-for-review* PR on `formal-mathfin`
+that closes the source issue (assembling the proof into its module + a re-export
 benchmark entry, regenerating the audit, and building green-or-abort in the
 verify image). The first fully-autonomous green PR (#120, a contango result)
 landed 2026-07-11. A candidate that won't assemble green files a blocked issue on

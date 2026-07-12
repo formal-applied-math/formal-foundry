@@ -20,7 +20,10 @@ message on every attempt. It is assembled live (never stale) from:
 - **Coherence-first / anti-wrapper** — consume Mathlib/Degenne lemmas rather than
   reprove them; never wrap a single library lemma in a finance-named restatement;
   `loogle`/`leansearch%` are available (LeanSearchClient is a pinned dep).
-- **House idioms** (distilled from `formal-mathfin/docs/patterns.md`) — the
+- **House patterns & idioms** — the **live `formal-mathfin/docs/patterns.md` is
+  injected IN FULL** by `house_context.read_patterns`, a first-class requirement:
+  always its *current* form (read fresh per prompt), never a snapshot, so the prover
+  proves to the library's latest patterns. A quick summary of what it carries: the
   `grind → nlinarith [certificates] → positivity/gcongr/bound` tactic order;
   `field_simp` before `ring`, `push_cast` before `field_simp`; `abbrev` for
   decidable predicates; annotate ambiguous coerced lambdas; the
