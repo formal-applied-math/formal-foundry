@@ -48,6 +48,29 @@ def test_parse_meta_source_issue_tolerates_hash():
     assert parse_meta("-- source-issue: #109\n")["source_issue"] == 109
 
 
+def test_parse_meta_reads_deferred_subset_header():
+    # a SUBSET proof rides its remaining facts on a `-- deferred:` header (`;`-joined);
+    # parse_meta splits them back to a list so open-pr can surface them as follow-ups.
+    code = (
+        "-- main-module: MathFin/Futures/Contango.lean\n"
+        "-- source-issue: 88\n"
+        "-- deferred: term-structure monotonicity: T ↦ F(T) increasing iff r > δ; "
+        "basis → 0 as T→0⁺\n"
+        "theorem t : True := by sorry\n"
+    )
+    m = parse_meta(code)
+    assert m["source_issue"] == 88
+    assert m["deferred"] == [
+        "term-structure monotonicity: T ↦ F(T) increasing iff r > δ",
+        "basis → 0 as T→0⁺",
+    ]
+
+
+def test_parse_meta_no_deferred_key_when_full_issue():
+    # the common case (full-issue proof) carries no `-- deferred:` header at all.
+    assert "deferred" not in parse_meta("-- source-issue: 88\ntheorem t : True := by sorry\n")
+
+
 def test_load_entry_reads_sidecar():
     import json, os, tempfile
     from build_manifest import load_entry

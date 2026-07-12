@@ -160,13 +160,25 @@ DRAFT_SYSTEM = (
     "- Output exactly one ```lean block: a single "
     "`theorem NAME <binders> : <conclusion> := by sorry`.\n"
     "- Then a ```json block: "
-    '{"module_name": "<CamelCase>", "benchmark_id": "mf-<area>-<slug>", "docstring": "<one line>"}.\n'
+    '{"module_name": "<CamelCase>", "benchmark_id": "mf-<area>-<slug>", "docstring": '
+    '"<one line>", "deferred": ["<remaining fact>", ...]}. `deferred` is [] when your '
+    "theorem covers the whole issue; when you formalize a SUBSET, list the facts you "
+    "left out (one short phrase each, verbatim intent) so a human can open follow-up "
+    "issues.\n"
     "- Use Mathlib conventions (ℝ, Real.exp, …). CONSUME the existing declarations "
     "shown below rather than reproving them.\n"
     "- Use ASCII-parseable Lean operators: `^` for powers (write `σ^2`, NEVER the "
     "Unicode superscript `σ²`); `*` for products; `Real.exp`/`Real.log`/`Real.sqrt`.\n"
-    "- State EXACTLY what the issue asks: no vacuity, no weaker restatement. Prefer a "
-    "conjunction when the issue lists a small cluster of facts.\n"
+    "- Formalize the issue's facts FAITHFULLY: never weaken a fact you state (no "
+    "vacuity, no flipped inequality, no dropped hypothesis) and never silently drop "
+    "part of what you state. When the issue lists a small cluster (a ≤3 bundle), "
+    "prefer a single conjunction covering all of it.\n"
+    "- SUBSETTING IS ALLOWED. Cover the whole issue when you can; but when a bundle "
+    "mixes easy and hard facts and a faithful whole is out of reach in one clean "
+    "theorem, formalize a coherent, self-contained SUBSET rather than forcing or "
+    "weakening the whole — and DECLARE the omitted facts in the json `deferred` array "
+    "so they become follow-up issues. Deferring a fact is NOT weakening one: what you "
+    "DO state must still be exactly right.\n"
     "- If the issue names a defined quantity (the premium π = (1+θ)·μ, the forward "
     "F = …, a par rate, …), INTRODUCE it as a bound variable with a defining "
     "hypothesis (e.g. `(π : ℝ) (hπ : π = (1 + θ) * μ)`) and state BOTH the definition "
@@ -179,9 +191,15 @@ JUDGE_SYSTEM = (
     "You are a faithfulness judge for autoformalized Lean statements — a SAFETY NET "
     "that catches GROSS failures, not a maximal-formality checker (a human makes the "
     "final call at merge). Given an issue's prose and a candidate Lean theorem, mark it "
-    "faithful UNLESS it has a gross failure: a requested fact/relationship is missing, a "
-    "hypothesis or an inequality direction is wrong, it is vacuous, or it is materially "
-    "weaker than asked. ACCEPT reasonable abstractions: a real parameter standing for "
+    "faithful UNLESS it has a gross failure IN WHAT IT STATES: a fact it states is wrong, "
+    "vacuous, or materially weaker than asked, a hypothesis or an inequality direction "
+    "is wrong, or it silently drops part of a fact it claims to state. A candidate MAY "
+    "faithfully formalize a SUBSET of a multi-part issue: when the drafter has DECLARED "
+    "the omitted facts (they are listed below as 'declared deferred'), covering fewer "
+    "facts than the issue lists is NOT a gross failure — judge the theorem as stated "
+    "against the subset it claims, and let the deferred facts become follow-up issues. "
+    "Only an UNDECLARED missing fact — a silent gap, absent from the deferred list — "
+    "counts against faithfulness. ACCEPT reasonable abstractions: a real parameter standing for "
     "E[X], Var[X], a price, or a discount factor is fine (no measure-theoretic "
     "construction required), and a named quantity's definition MAY be inlined into its "
     "stated property (e.g. `(1+θ)*μ ≥ μ` faithfully renders 'the premium π = (1+θ)·μ "
@@ -232,10 +250,16 @@ def draft_messages(issue: dict, context_pack: str, pins: str) -> list[dict]:
             {"role": "user", "content": user}]
 
 
-def judge_messages(issue: dict, stub: str) -> list[dict]:
+def judge_messages(issue: dict, stub: str, deferred: list[str] | None = None) -> list[dict]:
+    declared = ""
+    if deferred:
+        bullets = "\n".join(f"- {d}" for d in deferred)
+        declared = ("\n\nDECLARED DEFERRED (the drafter intentionally left these for "
+                    "follow-up issues; do NOT fail the subset for omitting them):\n"
+                    f"{bullets}")
     return [{"role": "system", "content": JUDGE_SYSTEM},
             {"role": "user",
-             "content": f"ISSUE:\n{_issue_prose(issue)}\n\nCANDIDATE:\n```lean\n{stub}\n```"}]
+             "content": f"ISSUE:\n{_issue_prose(issue)}\n\nCANDIDATE:\n```lean\n{stub}\n```{declared}"}]
 
 
 def informalize_messages(stub: str) -> list[dict]:
@@ -254,10 +278,13 @@ def compare_messages(stub_a: str, stub_b: str) -> list[dict]:
              "content": f"THEOREM A:\n```lean\n{stub_a}\n```\n\nTHEOREM B:\n```lean\n{stub_b}\n```"}]
 
 
-def judge_faithfulness(issue: dict, stub: str, *, chat_fn) -> dict:
-    """Semantic judge: does the stub say what the issue asks? Returns the verdict
-    dict plus `tokens`."""
-    content, tokens = chat_fn(judge_messages(issue, stub))
+def judge_faithfulness(issue: dict, stub: str, *, chat_fn,
+                       deferred: list[str] | None = None) -> dict:
+    """Semantic judge: does the stub say what the issue asks? A declared-subset
+    (`deferred` — the facts the drafter intentionally left for follow-up issues) is
+    judged against the subset it claims, not dinged for the omission. Returns the
+    verdict dict plus `tokens`."""
+    content, tokens = chat_fn(judge_messages(issue, stub, deferred))
     v = parse_verdict(content)
     v["tokens"] = tokens
     return v
@@ -449,6 +476,7 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn,
                 log(f"#{n}: no elaborating draft after {draft_rounds} rounds"); continue
             stub, lean_text, entry = dr["stub"], dr["lean_text"], dr["entry"]
             name = split_statement(stub)[0]
+            deferred = normalize_deferred((dr.get("meta") or {}).get("deferred"))
 
             vac = hypothesis_rejection(lean_text, name, chat_fn=prove_fn, check_fn=check_fn,
                                        budget=gate_budget, system_prompt=system_prompt)
@@ -462,7 +490,7 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn,
             if dis["false"]:
                 log(f"#{n}: retired — false as written"); continue
 
-            j = judge_faithfulness(issue, stub, chat_fn=reason_fn)
+            j = judge_faithfulness(issue, stub, chat_fn=reason_fn, deferred=deferred)
             spent += j["tokens"]
             if not j.get("faithful"):
                 log(f"#{n}: unfaithful — {j.get('verdict', '')}"); continue
@@ -631,6 +659,22 @@ def section_for_area(area: str) -> str:
     return "".join(p.capitalize() for p in re.split(r"[-_ ]+", area or "") if p)
 
 
+def normalize_deferred(val) -> list[str]:
+    """The drafter's declared-deferred facts (json `deferred`) as a clean list of
+    one-line phrases: the parts of a multi-fact issue this subset does NOT prove, to
+    become follow-up issues. Accepts a list (json array) or a single string; drops
+    blanks. `[]` (covers the whole issue) is the common case."""
+    if val is None:
+        return []
+    items = val if isinstance(val, list) else [val]
+    out = []
+    for x in items:
+        s = str(x).strip()
+        if s:
+            out.append(s)
+    return out
+
+
 def emit_target_files(issue: dict, stub: str, meta: dict) -> tuple[str, dict, dict]:
     """Assemble a queue target from a drafted stub — MECHANICAL, no model call.
 
@@ -649,16 +693,22 @@ def emit_target_files(issue: dict, stub: str, meta: dict) -> tuple[str, dict, di
     main_module = f"MathFin/{section}/{module_name}.lean"
     benchmark_id = meta["benchmark_id"]
     docstring = (meta.get("docstring") or "").strip()
+    deferred = normalize_deferred(meta.get("deferred"))
     pointers = issue.get("pointers", [])
     name, binders, concl = split_statement(stub)
 
-    headers = "\n".join([
+    header_lines = [
         f"-- pointers: {', '.join(pointers)}",
         f"-- main-module: {main_module}",
         f"-- benchmark: {_BENCHMARK}",
         f"-- benchmark-id: {benchmark_id}",
         f"-- source-issue: {n}",
-    ])
+    ]
+    if deferred:
+        # this proof is a faithful SUBSET of the issue; the deferred facts ride the
+        # header (build_manifest → manifest → open-pr surfaces them as follow-ups).
+        header_lines.append(f"-- deferred: {'; '.join(deferred)}")
+    headers = "\n".join(header_lines)
     # coherence-first: import the pointer modules so the drafted statement can
     # consume existing MathFin defs (a path 'MathFin/FixedIncome/ZCB.lean' becomes
     # 'public import MathFin.FixedIncome.ZCB'); an unused import is harmless.
@@ -688,6 +738,22 @@ def emit_target_files(issue: dict, stub: str, meta: dict) -> tuple[str, dict, di
         f"theorem {mf_name} {binders.strip()} :{concl.rstrip()} :=\n"
         f"  {app}\n"
     )
+    scope = (
+        f"Full formal proof in {main_module} (magistral-drafted statement, "
+        "leanstral proof). Re-export from MathFin. Axioms-clean."
+    )
+    provenance = {
+        "statement_source": "magistral-autoform",
+        "statement_model": "magistral-medium",
+        "source": "leanstral-autoform",
+        "model": "labs-leanstral-1-5",
+        "issue": n,
+    }
+    if deferred:
+        # honest disclosure in the entry itself: `full` proof of a SUBSET of the issue.
+        scope += (f" Faithful SUBSET of issue #{n}; deferred to follow-up issues: "
+                  f"{'; '.join(deferred)}.")
+        provenance["deferred"] = deferred
     entry = {
         "id": benchmark_id,
         "name": issue.get("title", benchmark_id),
@@ -699,17 +765,8 @@ def emit_target_files(issue: dict, stub: str, meta: dict) -> tuple[str, dict, di
             "reference": issue.get("title", ""),
             "difficulty": issue.get("difficulty", "medium"),
             "formalization_status": "full",
-            "formalization_scope": (
-                f"Full formal proof in {main_module} (magistral-drafted statement, "
-                "leanstral proof). Re-export from MathFin. Axioms-clean."
-            ),
-            "provenance": {
-                "statement_source": "magistral-autoform",
-                "statement_model": "magistral-medium",
-                "source": "leanstral-autoform",
-                "model": "labs-leanstral-1-5",
-                "issue": n,
-            },
+            "formalization_scope": scope,
+            "provenance": provenance,
         },
     }
     placement = {
@@ -717,6 +774,7 @@ def emit_target_files(issue: dict, stub: str, meta: dict) -> tuple[str, dict, di
         "benchmark": _BENCHMARK,
         "benchmark_id": benchmark_id,
         "source_issue": n,
+        "deferred": deferred,
     }
     return lean_text, entry, placement
 

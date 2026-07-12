@@ -51,8 +51,34 @@ PY
 MODULE="$(read_meta main_module)"
 BENCH="$(read_meta benchmark)"
 ISSUE="$(read_meta source_issue)"
+DEFERRED="$(read_meta deferred)"   # json list of facts a SUBSET proof left for follow-up (or "")
 [ -n "$MODULE" ] && [ -n "$BENCH" ] || {
   echo "[open-pr] target $ID missing main_module/benchmark metadata" >&2; exit 1; }
+
+# A SUBSET proof (its `-- deferred:` header → manifest `deferred` list) must NOT
+# auto-close its multi-part parent issue on merge: use `refs` (not `closes`) in the
+# commit + PR body, and surface the deferred facts as a suggested-follow-up section
+# for R to open. Absent/empty deferred → the usual `closes #N` full-issue proof.
+FOLLOWUPS="$(python3 - "$DEFERRED" "$ISSUE" <<'PY'
+import json, sys
+raw, issue = sys.argv[1].strip(), sys.argv[2]
+try:
+    items = json.loads(raw) if raw else []
+except ValueError:
+    items = []
+if items:
+    out = ["", f"this pr is a faithful SUBSET of #{issue}; the drafter deferred the rest.",
+           "suggested follow-up issues (open one per remaining fact, then close the parent):"]
+    out += [f"- [ ] {it}" for it in items]
+    print("\n".join(out))
+PY
+)"
+if [ -n "$FOLLOWUPS" ]; then
+  CLOSE_KW="refs"; CLOSE_LINE="refs #$ISSUE (subset — see follow-ups below)"
+  TITLE_SUFFIX="(subset of #$ISSUE)"
+else
+  CLOSE_KW="closes"; CLOSE_LINE="closes #$ISSUE"; TITLE_SUFFIX="(closes #$ISSUE)"
+fi
 
 FOUNDRY_SLUG="${FOUNDRY_REPO:-raphaelrrcoelho/mathfin-foundry}"
 
@@ -140,7 +166,7 @@ git add MathFin/AxiomAuditGen.lean verification_ledger.json 2>/dev/null || true
 # that Claude / the coding assistant is never attributed anywhere.
 git -c user.name="mathfin-autoform" -c user.email="autoform@users.noreply.github.com" \
     commit -q \
-    -m "feat(autoform): $ID — prove $(basename "$MODULE" .lean) (closes #$ISSUE)" \
+    -m "feat(autoform): $ID — prove $(basename "$MODULE" .lean) ($CLOSE_KW #$ISSUE)" \
     -m "Proved by Leanstral (${MODEL}) via the mathfin-foundry autoform pipeline; human-reviewed before merge." \
     -m "Co-Authored-By: Leanstral <${MODEL}@users.noreply.mistral.ai>"
 git push -f origin "$BRANCH"
@@ -156,8 +182,9 @@ except OSError: pass
 print(tok)
 PY
 )"
+
 BODY="$(cat <<EOF
-this pr was produced by the autoform pipeline (leanstral $MODEL), then assembled and validated green in ci. closes #$ISSUE.
+this pr was produced by the autoform pipeline (leanstral $MODEL), then assembled and validated green in ci. $CLOSE_LINE.
 
 what it adds:
 - \`$MODULE\` — the proof (axioms-clean; the probe's axiom guard passed).
@@ -167,15 +194,15 @@ what it adds:
 provenance: leanstral, run tag \`$TAG\`, ~$TOKENS tokens.
 
 review checklist (8-lens, before merge):
-- [ ] the statement faithfully formalizes issue #$ISSUE (no vacuity, no weaker restatement).
+- [ ] the statement faithfully formalizes (its stated subset of) issue #$ISSUE — no vacuity, no weaker restatement of what it states; a declared subset is fine (see follow-ups).
 - [ ] the proof is idiomatic and consumes existing lemmas, not a wrapper.
 - [ ] ledger row present (run \`ledger verify\` if ci is red on it).
-- [ ] axioms clean; no slop.
+- [ ] axioms clean; no slop.$FOLLOWUPS
 EOF
 )"
 gh label create autoform --repo "$SLUG" --color 0E8A16 \
   --description "opened by the autoform pipeline; review before merge" 2>/dev/null || true
 gh pr create --repo "$SLUG" --head "$BRANCH" --label autoform \
-  --title "autoform: $(basename "$MODULE" .lean) (closes #$ISSUE)" \
+  --title "autoform: $(basename "$MODULE" .lean) $TITLE_SUFFIX" \
   --body "$BODY" || blocked "gh pr create failed"
-echo "[open-pr] PR opened for $ID (closes #$ISSUE)" >&2
+echo "[open-pr] PR opened for $ID ($CLOSE_KW #$ISSUE)" >&2

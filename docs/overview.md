@@ -166,7 +166,10 @@ faithfulness-gates a stub from the next ready issue (`autoformalize.py`) — the
 proves the target and, on a pass, opens a *ready-for-review* PR on `formal-mathfin`
 that closes the source issue (assembling the proof into its module + a re-export
 benchmark entry, regenerating the audit, and building green-or-abort in the
-verify image). The first such PR (#120, a contango result) opened 2026-07-11 —
+verify image). A multi-part issue may be answered by a faithful **subset**: the
+drafter declares the remaining facts (`deferred`), the PR `refs` (not `closes`) the
+parent and lists the remainder as **suggested follow-up issues** for R to open —
+the gate rejects a *silent* gap, never a *declared* one. The first such PR (#120, a contango result) opened 2026-07-11 —
 CI-green but **unmerged** (both early autoform PRs are now conflicting as `main`
 moved on). An opened PR is a *proposal* R reviews + revises before merge, not proof
 of quality; the merge is. (Likewise the Magistral judge is a *soft self-check*; the

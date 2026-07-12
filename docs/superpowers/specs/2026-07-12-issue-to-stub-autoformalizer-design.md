@@ -30,8 +30,14 @@ judging NL-equivalence, and the roundtrip check are not proving tasks.
    API shows access, not price; **one-line fallback to labs-only** if a bill appears.
 3. **Faithfulness:** the full suite — **kernel gates (hypothesis-rejection +
    disproof) + semantic judge + roundtrip**. The judge catches *gross* failures
-   (missing conjuncts, wrong direction, vacuity); R's 8-lens PR review stays the
-   authority on stylistic-faithfulness nuance.
+   in what a statement asserts (a stated fact wrong/weaker/vacuous, wrong
+   direction, or a *silently* missing conjunct — an undeclared gap). **Honest
+   subsetting is allowed:** the drafter may formalize a coherent SUBSET of a
+   multi-part issue and DECLARE the remainder (json `deferred` → a `-- deferred:`
+   header → a "suggested follow-up issues" section in the PR body, and `refs`
+   rather than `closes` so a subset never auto-closes its parent). A *declared*
+   subset is not a failure; only an undeclared gap is. R's 8-lens PR review stays
+   the authority on stylistic-faithfulness nuance and opens the follow-ups.
 4. **Integration:** **refill-at-start-of-tick** (Approach 1). One workflow,
    one self-feeding loop, reusing the daemon the tick already boots.
 

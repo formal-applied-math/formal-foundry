@@ -37,6 +37,9 @@ _META_KEYS = {
     "benchmark": ("benchmark", str),
     "benchmark-id": ("benchmark_id", str),
     "source-issue": ("source_issue", lambda s: int(s.lstrip("#"))),
+    # a `-- deferred: fact a; fact b` header (present only on a SUBSET proof) lists
+    # the issue's facts this proof does NOT cover; open-pr surfaces them as follow-ups.
+    "deferred": ("deferred", lambda s: [p.strip() for p in s.split(";") if p.strip()]),
 }
 
 
@@ -58,7 +61,9 @@ def parse_meta(code: str) -> dict:
         -- benchmark: benchmarks/mathematical_finance.json
         -- benchmark-id: mf-fx-interest-rate-parity
         -- source-issue: 108
-    Returns only the keys present."""
+        -- deferred: covered-interest parity band; the forward-points sign   (SUBSET only)
+    Returns only the keys present (`deferred` is a list; absent when the proof
+    covers the whole issue)."""
     out: dict = {}
     for raw_key, (dest, cast) in _META_KEYS.items():
         m = re.search(rf"--\s*{re.escape(raw_key)}:\s*(.+)", code)

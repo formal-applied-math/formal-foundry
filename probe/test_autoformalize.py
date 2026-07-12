@@ -157,6 +157,75 @@ def test_emit_stub_roundtrips_through_build_manifest():
     assert meta["benchmark_id"] == "mf-fi-fra"
     assert meta["source_issue"] == 67
     assert bm.parse_pointers(lean_text) == _ISSUE["pointers"]
+
+
+# --- honest subsetting: declared `deferred` remainder ------------------------
+
+_DEFERRED_FACT = "term-structure monotonicity: T ↦ F(T) increasing iff r > δ"
+_META_SUBSET = {**_META, "deferred": [_DEFERRED_FACT]}
+
+
+def test_normalize_deferred_cleans_and_coerces():
+    assert af.normalize_deferred(None) == []
+    assert af.normalize_deferred([]) == []
+    assert af.normalize_deferred(["a", " b ", "", "  "]) == ["a", "b"]
+    assert af.normalize_deferred("solo fact") == ["solo fact"]   # bare string → one item
+    assert af.normalize_deferred(["x", 3]) == ["x", "3"]         # non-str coerced
+
+
+def test_draft_system_documents_subset_and_deferred_contract():
+    joined = " ".join(m["content"] for m in af.draft_messages(
+        {"number": 88, "title": "t", "body": "b", "pointers": []}, "", ""))
+    assert "deferred" in joined      # the json field the drafter must emit on a subset
+    assert "SUBSET" in joined         # subsetting is explicitly allowed
+    assert ":= by sorry" in joined    # unchanged stub-format contract still present
+
+
+def test_judge_messages_includes_declared_deferred():
+    msgs = af.judge_messages({"number": 88, "title": "t", "body": "b"},
+                             "theorem foo : True := by sorry",
+                             ["monotonicity in T", "basis → 0"])
+    joined = " ".join(m["content"] for m in msgs)
+    assert "DECLARED DEFERRED" in joined
+    assert "monotonicity in T" in joined and "basis → 0" in joined
+
+
+def test_judge_messages_no_deferred_section_when_full_issue():
+    msgs = af.judge_messages({"number": 1, "title": "t", "body": "b"},
+                             "theorem foo : True := by sorry")
+    assert "DECLARED DEFERRED" not in " ".join(m["content"] for m in msgs)
+
+
+def test_judge_faithfulness_threads_deferred_to_the_judge():
+    seen = {}
+    def chat(msgs):
+        seen["msgs"] = msgs
+        return ('{"faithful": true, "verdict": "subset ok", "issues": []}', 5)
+    r = af.judge_faithfulness({"number": 88, "title": "t", "body": "b"},
+                              "theorem foo : True := by sorry",
+                              chat_fn=chat, deferred=[_DEFERRED_FACT])
+    assert r["faithful"] is True and r["tokens"] == 5
+    assert _DEFERRED_FACT in " ".join(m["content"] for m in seen["msgs"])
+
+
+def test_emit_carries_declared_deferred():
+    lean_text, entry, placement = af.emit_target_files(_ISSUE, _STUB, _META_SUBSET)
+    assert f"-- deferred: {_DEFERRED_FACT}" in lean_text        # header build_manifest reads
+    assert placement["deferred"] == [_DEFERRED_FACT]
+    scope = entry["metadata"]["formalization_scope"]
+    assert "SUBSET of issue #67" in scope and "term-structure monotonicity" in scope
+    assert entry["metadata"]["provenance"]["deferred"] == [_DEFERRED_FACT]
+    # and it round-trips through the real manifest parser (→ open-pr's follow-ups)
+    assert bm.parse_meta(lean_text)["deferred"] == [_DEFERRED_FACT]
+    assert lean_text.count("sorry") == 1                        # still a well-formed stub
+
+
+def test_emit_full_issue_has_no_deferred_noise():
+    lean_text, entry, placement = af.emit_target_files(_ISSUE, _STUB, _META)
+    assert "-- deferred:" not in lean_text
+    assert placement["deferred"] == []
+    assert "SUBSET" not in entry["metadata"]["formalization_scope"]
+    assert "deferred" not in entry["metadata"]["provenance"]
     name, _b, _c = af.split_statement(lean_text)
     assert name == "fra_value"
 
@@ -187,6 +256,7 @@ def test_emit_placement_dict():
         "benchmark": "benchmarks/mathematical_finance.json",
         "benchmark_id": "mf-fi-fra",
         "source_issue": 67,
+        "deferred": [],        # full-issue proof carries an empty deferred list
     }
 
 
@@ -436,7 +506,8 @@ def _good_dwr(i, cp, p, *, chat_fn, check_fn, emit_fn, rounds):
 def _pass_gates(monkeypatch):
     monkeypatch.setattr(af, "hypothesis_rejection", lambda *a, **k: {"vacuous": False, "tokens": 1})
     monkeypatch.setattr(af, "disproof", lambda *a, **k: {"false": False, "tokens": 1})
-    monkeypatch.setattr(af, "judge_faithfulness", lambda i, s, chat_fn: {"faithful": True, "tokens": 1})
+    monkeypatch.setattr(af, "judge_faithfulness",
+                        lambda i, s, chat_fn, deferred=None: {"faithful": True, "tokens": 1})
     monkeypatch.setattr(af, "roundtrip_check", lambda i, s, *, reason_fn, prove_fn: {"faithful": True, "tokens": 1})
 
 
@@ -457,7 +528,8 @@ def test_refill_stages_a_good_issue(monkeypatch, tmp_path):
 def test_refill_skips_vacuous_then_stages_next(monkeypatch, tmp_path):
     monkeypatch.setattr(af, "draft_with_repair", _good_dwr)
     monkeypatch.setattr(af, "disproof", lambda *a, **k: {"false": False, "tokens": 1})
-    monkeypatch.setattr(af, "judge_faithfulness", lambda i, s, chat_fn: {"faithful": True, "tokens": 1})
+    monkeypatch.setattr(af, "judge_faithfulness",
+                        lambda i, s, chat_fn, deferred=None: {"faithful": True, "tokens": 1})
     monkeypatch.setattr(af, "roundtrip_check", lambda i, s, *, reason_fn, prove_fn: {"faithful": True, "tokens": 1})
     # issue 1's stub is vacuous, issue 2's is not
     monkeypatch.setattr(af, "hypothesis_rejection",
@@ -474,7 +546,7 @@ def test_refill_skips_unfaithful_judge(monkeypatch, tmp_path):
     monkeypatch.setattr(af, "hypothesis_rejection", lambda *a, **k: {"vacuous": False, "tokens": 1})
     monkeypatch.setattr(af, "disproof", lambda *a, **k: {"false": False, "tokens": 1})
     monkeypatch.setattr(af, "judge_faithfulness",
-                        lambda i, s, chat_fn: {"faithful": False, "verdict": "weaker", "tokens": 1})
+                        lambda i, s, chat_fn, deferred=None: {"faithful": False, "verdict": "weaker", "tokens": 1})
     monkeypatch.setattr(af, "roundtrip_check", lambda i, s, *, reason_fn, prove_fn: {"faithful": True, "tokens": 1})
     res = af.refill([_issue(7)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
                     context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
@@ -508,7 +580,7 @@ def test_refill_wires_reason_and_prove_fns(monkeypatch, tmp_path):
                         lambda lt, nm, **k: seen.update(gate=k["chat_fn"]) or {"vacuous": False, "tokens": 1})
     monkeypatch.setattr(af, "disproof", lambda *a, **k: {"false": False, "tokens": 1})
     monkeypatch.setattr(af, "judge_faithfulness",
-                        lambda i, s, chat_fn: seen.update(judge=chat_fn) or {"faithful": True, "tokens": 1})
+                        lambda i, s, chat_fn, deferred=None: seen.update(judge=chat_fn) or {"faithful": True, "tokens": 1})
     monkeypatch.setattr(af, "roundtrip_check", lambda i, s, *, reason_fn, prove_fn: {"faithful": True, "tokens": 1})
     R = lambda m: ("R", 0)
     P = lambda m: ("P", 0)
