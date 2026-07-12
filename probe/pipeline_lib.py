@@ -73,7 +73,7 @@ class AutoformalizeConfig:
     gate_budget: int = 20_000
     draft_model: str = "magistral-medium-latest"
     prover_model: str = "labs-leanstral-1-5"
-    draft_max_tokens: int = 8_000
+    draft_max_tokens: int = 16_000   # reasoning headroom (magistral emits a think trace)
 
     @staticmethod
     def load(path: str | None) -> "AutoformalizeConfig":

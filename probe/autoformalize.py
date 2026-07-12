@@ -23,6 +23,7 @@ import sys
 
 from house_context import build_system_prompt, extract_signatures, read_pins
 from issues import select_issues
+from pipeline_lib import AutoformalizeConfig
 from probe import daemon_check, mistral_chat, run_target
 from probe_lib import extract_lean_code
 
@@ -403,21 +404,28 @@ def _already_seeded(queue_dir: str) -> set[int]:
     return nums
 
 
+def _foundry_root() -> str:
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("refill", help="draft+gate+stage the next ready issue")
     p.add_argument("--main-repo", required=True)
+    p.add_argument("--config", default=None,
+                   help="pipeline.toml for [autoformalize] defaults (default: <foundry>/pipeline.toml)")
     p.add_argument("--slug", default="raphaelrrcoelho/formal-mathfin")
-    p.add_argument("--queue-dir", default=None,
-                   help="default: <foundry>/targets/queue")
-    p.add_argument("--budget", type=int, default=200_000)
-    p.add_argument("--max-issues", type=int, default=1)
-    p.add_argument("--max-attempt-issues", type=int, default=3)
-    p.add_argument("--gate-budget", type=int, default=20_000)
-    p.add_argument("--draft-model", default="magistral-medium-latest")
-    p.add_argument("--prover-model", default="labs-leanstral-1-5")
-    p.add_argument("--draft-max-tokens", type=int, default=8_000)
+    p.add_argument("--queue-dir", default=None, help="default: <foundry>/targets/queue")
+    p.add_argument("--only", type=int, default=None, help="attempt only this issue number")
+    # the rest override the [autoformalize] config only when given (default: None)
+    p.add_argument("--budget", type=int, default=None)
+    p.add_argument("--max-issues", type=int, default=None)
+    p.add_argument("--max-attempt-issues", type=int, default=None)
+    p.add_argument("--gate-budget", type=int, default=None)
+    p.add_argument("--draft-model", default=None)
+    p.add_argument("--prover-model", default=None)
+    p.add_argument("--draft-max-tokens", type=int, default=None)
     args = ap.parse_args()
 
     api_key = os.environ.get("MISTRAL_API_KEY")
@@ -425,12 +433,23 @@ def main() -> int:
         print("MISTRAL_API_KEY not set", file=sys.stderr)
         return 2
 
-    queue_dir = args.queue_dir or os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "targets", "queue")
+    # pipeline.toml [autoformalize] is authoritative; CLI flags override per-field.
+    cfg = AutoformalizeConfig.load(args.config or os.path.join(_foundry_root(), "pipeline.toml"))
+    pick = lambda a, c: a if a is not None else c
+    budget = pick(args.budget, cfg.budget)
+    max_issues = pick(args.max_issues, cfg.max_issues)
+    max_attempt = pick(args.max_attempt_issues, cfg.max_attempt_issues)
+    gate_budget = pick(args.gate_budget, cfg.gate_budget)
+    draft_model = pick(args.draft_model, cfg.draft_model)
+    prover_model = pick(args.prover_model, cfg.prover_model)
+    draft_max_tokens = pick(args.draft_max_tokens, cfg.draft_max_tokens)
+
+    queue_dir = args.queue_dir or os.path.join(_foundry_root(), "targets", "queue")
 
     seeded_nums = _already_seeded(queue_dir)
     issues = [i for i in prepare_issues(_fetch_issues(args.slug))
-              if i["number"] not in seeded_nums]
+              if i["number"] not in seeded_nums
+              and (args.only is None or i["number"] == args.only)]
     if not issues:
         print(json.dumps({"seeded": [], "tokens": 0, "reason": "no unseeded ready issues"}))
         return 0
@@ -441,11 +460,11 @@ def main() -> int:
     prove_system = build_system_prompt(args.main_repo)   # the leaf-prover gate doctrine
 
     def reason_fn(msgs):
-        return mistral_chat(msgs, api_key=api_key, model=args.draft_model,
-                            max_tokens=args.draft_max_tokens)
+        return mistral_chat(msgs, api_key=api_key, model=draft_model,
+                            max_tokens=draft_max_tokens)
 
     def prove_fn(msgs):
-        return mistral_chat(msgs, api_key=api_key, model=args.prover_model,
+        return mistral_chat(msgs, api_key=api_key, model=prover_model,
                             reasoning_effort="high")
 
     def context_fn(issue):
@@ -453,10 +472,9 @@ def main() -> int:
         return extract_signatures(args.main_repo, ptrs) if ptrs else ""
 
     res = refill(issues, reason_fn=reason_fn, prove_fn=prove_fn, check_fn=daemon_check,
-                 context_fn=context_fn, queue_dir=queue_dir, budget=args.budget, pins=pins,
-                 max_issues=args.max_issues, max_attempt_issues=args.max_attempt_issues,
-                 gate_budget=args.gate_budget, system_prompt=prove_system,
-                 log=lambda m: print(f"[refill] {m}", file=sys.stderr))
+                 context_fn=context_fn, queue_dir=queue_dir, budget=budget, pins=pins,
+                 max_issues=max_issues, max_attempt_issues=max_attempt, gate_budget=gate_budget,
+                 system_prompt=prove_system, log=lambda m: print(f"[refill] {m}", file=sys.stderr))
     print(json.dumps(res))
     return 0
 

@@ -47,4 +47,4 @@ max_attempt_issues = 3
 gate_budget = 20000
 draft_model = "magistral-medium-latest"
 prover_model = "labs-leanstral-1-5"
-draft_max_tokens = 8000
+draft_max_tokens = 16000   # reasoning headroom — magistral emits a think trace before the code
