@@ -166,8 +166,13 @@ faithfulness-gates a stub from the next ready issue (`autoformalize.py`) — the
 proves the target and, on a pass, opens a *ready-for-review* PR on `formal-mathfin`
 that closes the source issue (assembling the proof into its module + a re-export
 benchmark entry, regenerating the audit, and building green-or-abort in the
-verify image). The first fully-autonomous green PR (#120, a contango result)
-landed 2026-07-11. A candidate that won't assemble green files a blocked issue on
+verify image). The first such PR (#120, a contango result) opened 2026-07-11 —
+CI-green but **unmerged** (both early autoform PRs are now conflicting as `main`
+moved on). An opened PR is a *proposal* R reviews + revises before merge, not proof
+of quality; the merge is. (Likewise the Magistral judge + roundtrip are *soft
+self-checks* — magistral grading its own draft — not a faithfulness guarantee; the
+kernel gates + human review are the rigorous ones.) A candidate that won't assemble
+green files a blocked issue on
 the foundry instead of opening a red PR. The one credential that grants write
 access to main is a fine-grained PAT (`MAIN_PR_TOKEN`); revoking it fully disables
 auto-PR. Details in `docs/PROVER_SETUP.md`.

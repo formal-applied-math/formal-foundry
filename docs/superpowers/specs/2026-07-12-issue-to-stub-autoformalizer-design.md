@@ -236,6 +236,17 @@ judge, ~45k tokens) exercised every stage correctly. The pipeline is **safe by
 construction** — it stages only a draft that elaborates AND passes all gates, and
 skips transient failures without crashing.
 
+**On self-reference + PR status (do NOT overclaim):** the *independent*, rigorous
+checks are the Lean kernel (elaboration), the Leanstral probes (a different model +
+the kernel), the full `lake build` + axiom-clean, and **R's merge review**. The
+Magistral **judge + roundtrip are soft SELF-checks** (magistral grading its own
+draft — same model that drafted it), useful as budget pre-filters, NOT faithfulness
+guarantees; the roundtrip largely overlaps the judge (a drop candidate). An opened
+autoform PR is a **proposal** that passed CI and is *unmerged* (and can go
+stale/conflicting as `main` moves) — never proof of quality. The merge, with
+changes, is the bar. Do not few-shot the drafter on the pipeline's own unmerged
+output (a self-referential trap — reverted 2026-07-12).
+
 **Open (yield, not correctness):** across local smokes the free tier throttled hard
 (empty bodies) and the judge↔draft calibration on a few issues is still finding its
 level, so no stub *staged* locally yet. Getting a first stage is a tuning matter

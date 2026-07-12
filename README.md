@@ -33,7 +33,11 @@ guard faithfulness before any proving budget is spent: elaboration, two
 kernel-grade Leanstral probes (**hypothesis-rejection** ⊢ False and **disproof**
 ⊢ ¬Concl → retire if provable), a Magistral **semantic judge**, and a **roundtrip**
 check. A passing draft is staged as a validated target; a rejected issue stays
-`status:ready`, never auto-closed.
+`status:ready`, never auto-closed. Honest caveat: elaboration + the Leanstral
+probes are *independent, kernel-grade* checks, but the judge and roundtrip are
+*soft magistral self-checks* (magistral grading its own draft) — they cut wasted
+proving budget, they are not a faithfulness guarantee. The real faithfulness
+authority is the human review at merge.
 
 **Prove + ship.** A queued target is a stub plus pointers to the modules it should
 reuse. The house doctrine — values gate · **the live `docs/patterns.md` injected in
@@ -106,8 +110,11 @@ scripts/leanstral-vibe.sh --agent lean -p "prove the sorry in MathFin/…; use l
 
 On a pass, the scheduled workflow assembles the proof and — **only with the
 `MAIN_PR_TOKEN` foundry secret set** — opens a ready-for-review PR on
-`formal-mathfin` that closes the source issue (first fully-autonomous green PR:
+`formal-mathfin` that closes the source issue (the first was
 [#120](https://github.com/raphaelrrcoelho/formal-mathfin/pull/120), contango,
-2026-07-11). Without the token it stops at candidate-notify and opens no PR.
-Either way a human runs the refinery and owns the merge. Activation + the PAT
-scoping: [`docs/PROVER_SETUP.md`](docs/PROVER_SETUP.md).
+opened 2026-07-11). Without the token it stops at candidate-notify and opens no
+PR. **An opened PR is a *proposal*, not a finished contribution** — it passes CI
+but is unmerged, R reviews it under the 8-lens bar and revises before merge (both
+early autoform PRs are currently CONFLICTING as `main` moved on). A green,
+opened, or even conflicting PR is not proof of quality; the merge is. Activation +
+the PAT scoping: [`docs/PROVER_SETUP.md`](docs/PROVER_SETUP.md).
