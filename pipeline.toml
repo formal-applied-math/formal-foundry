@@ -41,11 +41,12 @@ tokens_per_attempt = 120000
 # Design: docs/superpowers/specs/2026-07-12-issue-to-stub-autoformalizer-design.md.
 [autoformalize]
 enabled = true
-budget = 200000
+budget = 400000
 max_issues = 1
 max_attempt_issues = 3
 gate_budget = 20000
-draft_rounds = 2         # compiler-feedback repair rounds on a drafted stub
+draft_rounds = 5         # draft attempts w/ compiler feedback — magistral drafts are
+                         # stochastic (some elaborate, some don't), so resample deeper
 draft_model = "magistral-medium-latest"
 prover_model = "labs-leanstral-1-5"
 draft_max_tokens = 16000   # reasoning headroom — magistral emits a think trace before the code
