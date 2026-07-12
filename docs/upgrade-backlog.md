@@ -15,6 +15,12 @@ targets, never chapters").
 reasoner]** items; keep the **[needs general reasoner]** items designed and ready
 for when we add a second engine.
 
+**Targets** are the `status:ready` + `type:proof` issues R authors in
+`formal-mathfin` — the pipeline follows R's issue backlog, *not* an autonomous
+textbook-autoformalization stream (that design-of-record mode is not on the current
+roadmap). So every statement is R-curated and faithfulness stays human-at-merge
+(this parks §C).
+
 ---
 
 ## Already shipped — don't re-do
@@ -50,20 +56,19 @@ Two of the survey's harness levers are pure config in the vibe path, no new mode
   the footprint against the one-Lean-process memory doctrine before standing it up
   (it is host-side, not a Lean env, so it should be fine, but measure).
 
-### B. Budget shape — recommended tuning (R's call; `pipeline.toml`, one-line revert)
+### B. Budget shape — APPLIED 2026-07-11 (`pipeline.toml`)
 
-Currently `fanout=8 × tokens_per_attempt=60_000 ≈ 480k` against a 500k cap. The
-research says **tokens-per-attempt is Leanstral's dominant lever**: its PutnamBench
-curve climbs 44 → 244 → 493 → 587 solves at 50k → 200k → 1M → 4M tokens/attempt.
-60k sits near the weak end of that curve. The survey's own #2: *"our 500k/issue cap
-likely serves better as 2–4 attempts × high reasoning budget than many small
-rounds."*
+Was `fanout=8 × tokens_per_attempt=60_000`; now **`fanout=4 × tokens_per_attempt=120_000`**
+(≈ the 500k cap in the primary round). **Rationale:** tokens-per-attempt is
+Leanstral's dominant lever — its PutnamBench curve climbs 44 → 244 → 493 → 587
+solves at 50k → 200k → 1M → 4M tokens/attempt — and 60k sat near the weak end; this
+doubles the per-attempt budget while keeping pass@4 diversity. Repair
+(`repair_rounds=2`) still funds escalated hard targets (2M cap). The survey's #2:
+*"2–4 attempts × high reasoning budget."*
 
-- **Suggested default:** shift toward `fanout=4 × tokens_per_attempt=120_000` (or
-  `2 × 250_000`) — same cap, far more reasoning per attempt.
-- **Caveat:** the survey says *measure on MathFin-Bench before hard-coding*, and
-  we deferred that bench. Absent it, this is an informed default from Leanstral's
-  published curve, not a measured optimum. Trivially revertable.
+- **Caveat (unchanged):** absent MathFin-Bench this is an informed default from
+  Leanstral's curve, not a measured optimum. Retune toward `2 × 250k` to push the
+  per-attempt lever harder once the bench exists. One-line revert.
 - Sources: [Leanstral 1.5](https://mistral.ai/news/leanstral-1-5/), survey #2.
 
 ### C. Statement-side faithfulness filters — Leanstral-native; DESIGNED, ready to build
@@ -89,14 +94,15 @@ from `probe.py`:
 3. On a clean proof of either, mark the target `retired: vacuous|false` and skip
    the full proving budget; else pass through.
 
-**Status:** designed, not built. **Payoff is deferred** — statements are currently
-R-curated stubs, so faithfulness is human-at-merge and these filters are a safety
-net (against an accidentally-vacuous stub), not load-bearing. They become
-load-bearing the moment we autoformalize *textbook* statements (Saporito/Shreve/
-Björk on the roadmap) instead of hand-authoring them. Build them **before** that
-switch, not after. Wire **opt-in** (off in the default tick; on for
-`source: autoform` targets) so we don't spend tokens on human-verified stubs.
-Needs one live daemon+Leanstral validation pass before enabling.
+**Status:** designed, **parked**. Targets are always R-authored `formal-mathfin`
+issues (R writes the statement; the stub states it exactly), so faithfulness is
+human-at-merge and these filters are only a safety net against an accidentally
+vacuous R stub — low value now. They become load-bearing **only** if the pipeline
+is ever pointed at *un-curated* statements (the autonomous-textbook-factory mode
+from the design-of-record, **not on the current roadmap** — 2026-07-11, R). Kept
+designed so that switch would be a build, not a re-discovery: wire **opt-in** (on
+for `source: autoform` targets), and it needs one live daemon+Leanstral validation
+pass before enabling.
 
 Sources: [Autoformalization with LLMs (Wu 2022)](https://arxiv.org/abs/2205.12615),
 AlphaProof disprove-and-retire ([Nature](https://www.nature.com/articles/s41586-025-09833-y)),
@@ -160,9 +166,9 @@ existence run on ([Gauss](https://www.math.inc/gauss), Aristotle).
 Beyond the two kernel-grade filters in C, the LLM-mediated faithfulness checks:
 formalize → informalize → re-formalize → equivalence-check, and an LLM
 faithfulness judge that filters unaligned statements. **Why the reasoner:**
-informalization and semantic-equivalence judgment are not proving tasks. Pairs
-with C when textbook autoformalization turns on. Sources: survey #6 (faithfulness
-metrics), Harmonic's judge (Aristotle).
+informalization and semantic-equivalence judgment are not proving tasks. Parked on
+the same condition as C (un-curated statements; not on the current roadmap).
+Sources: survey #6 (faithfulness metrics), Harmonic's judge (Aristotle).
 
 ### H. Variant warm-up (cheap TTRL analogue) — partial reasoner
 
@@ -180,6 +186,8 @@ survey #8.
 Items F/G/H all hinge on a single decision: **add a general reasoning model as a
 second engine, or keep R as the decomposer/judge?** Adding one unlocks
 DSP/DeepSeek-scale decomposition (the biggest capability jump) at the cost of a new
-model dependency, cost, and API-traffic surface. Until then, the frontier is the
-**[no reasoner]** work above — with C (faithfulness filters) as the highest-value
-build the moment we point the pipeline at un-curated textbook statements.
+model dependency, cost, and API-traffic surface. Until then — with targets coming
+from R's curated `formal-mathfin` issues — the frontier is the **[no reasoner]**
+work above: budget shape (applied), then CI-side verification throughput (D) and
+learned retrieval (E) as the pipeline scales. C and G stay parked unless we ever
+autoformalize un-curated statements.

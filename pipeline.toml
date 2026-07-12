@@ -21,7 +21,13 @@ reasoning_effort = "high"
 # attempts x `tokens_per_attempt`, then <=`repair_rounds` compiler-feedback
 # repairs on the best failure. Research basis: Kimina sample-efficiency knee at
 # ~pass@32, Goedel self-correction ablation at ~2 repair rounds, Leanstral's
-# dominant lever is tokens-per-attempt (PutnamBench 44→587 solves at 50k→4M).
-fanout = 8
+# dominant lever is tokens-per-attempt (PutnamBench 44→244→493→587 solves at
+# 50k→200k→1M→4M).
+# Shape (2026-07-11): fewer, bigger attempts. 4 x 120k ≈ the 500k cap in the
+# primary round (was 8 x 60k), shifting weight onto the tokens-per-attempt lever
+# per Leanstral's curve while keeping pass@4 diversity; repair still funds
+# escalated hard targets (2M cap). Retune toward 2 x 250k to push the per-attempt
+# lever harder once MathFin-Bench measures the knee on our distribution.
+fanout = 4
 repair_rounds = 2
-tokens_per_attempt = 60000
+tokens_per_attempt = 120000
