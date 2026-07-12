@@ -6,26 +6,44 @@ from house_context import (
     HOUSE_DOCTRINE,
     build_system_prompt,
     extract_signatures,
+    read_patterns,
     read_pins,
 )
 
 MAIN = "/home/rapha/code/automated_proofs_quantfin"
 
 
-def test_doctrine_covers_values_and_idioms():
+def test_doctrine_covers_values_and_coherence():
+    # HOUSE_DOCTRINE now carries only the foundry-specific doctrine (values gate +
+    # coherence + output rules); the house idioms/patterns are injected LIVE from
+    # docs/patterns.md by build_system_prompt (first-class, always current).
     d = HOUSE_DOCTRINE
-    # values gate
     assert "native_decide" in d and "propext" in d and "COMPLETE file" in d
-    # coherence-first / anti-wrapper
     assert "CONSUME" in d and "loogle" in d
-    # house idioms
-    assert "grind" in d and "nlinarith" in d and "field_simp" in d
-    assert "Real.exp (-(r * τ))" in d
-    assert "This IS already that" in d
-    # mathlib house-style golf (BM PR #484 maintainer review)
-    assert "bare proof term" in d.lower()
-    assert "reusable abstraction" in d.lower()
-    assert "SigmaFiniteFiltration" in d
+    assert "docs/patterns.md" in d          # points at the live, authoritative source
+
+
+def test_read_patterns_reads_the_live_file():
+    if not os.path.exists(MAIN):
+        return  # host-only
+    p = read_patterns(MAIN)
+    assert "Structural patterns" in p       # a real heading in docs/patterns.md
+    assert len(p) > 2000
+
+
+def test_read_patterns_missing_is_empty_not_raise():
+    with tempfile.TemporaryDirectory() as d:
+        assert read_patterns(d) == ""       # no docs/patterns.md → empty, no raise
+
+
+def test_system_prompt_injects_live_patterns():
+    if not os.path.exists(MAIN):
+        return  # host-only
+    sp = build_system_prompt(MAIN)
+    assert "docs/patterns.md" in sp
+    # LIVE content from the file, not a hardcoded snapshot:
+    assert "Structural patterns" in sp
+    assert "grind" in sp and "nlinarith" in sp
 
 
 def test_system_prompt_injects_live_pins():

@@ -42,6 +42,18 @@ def read_pins(main_repo: str) -> dict:
     }
 
 
+def read_patterns(main_repo: str) -> str:
+    """The LIVE, first-class house patterns doc from the main repo
+    (`docs/patterns.md`), read fresh on every prompt so the foundry always applies
+    its CURRENT form (a first-class requirement, not a snapshot). '' if absent — the
+    doctrine summary still carries the essentials."""
+    try:
+        with open(os.path.join(main_repo, "docs", "patterns.md"), encoding="utf-8") as f:
+            return f.read()
+    except OSError:
+        return ""
+
+
 # --- The house doctrine (values + idioms + strategy) ---------------------------
 # Distilled from CLAUDE.md's values contract + automation gate and docs/patterns.md.
 
@@ -71,7 +83,7 @@ imports, or anything else.
   even when both are kernel-accepted. Aim for the proof a careful author would
   keep, not merely one the kernel swallows.
 
-── HOUSE LEAN IDIOMS (from docs/patterns.md — use these) ──
+── HOUSE LEAN IDIOMS (a quick summary — the LIVE docs/patterns.md injected below is authoritative) ──
 - Tactic order for algebra/arithmetic: try `grind` FIRST (it wins on field
   identities with `≠ 0` side-conditions, ℕ/cast arithmetic, and goals linear in
   nonlinear atoms). For nonlinear REAL inequalities `grind` loses — use
@@ -140,7 +152,17 @@ def build_system_prompt(main_repo: str) -> str:
         "newer or older Mathlib API. If unsure a lemma exists at this pin, prefer "
         "a first-principles step over a guessed name.\n"
     )
-    return HOUSE_DOCTRINE + "\n" + pin_block
+    # The LIVE docs/patterns.md is a FIRST-CLASS requirement: inject its current
+    # form in full so the foundry always proves to the library's latest patterns.
+    patterns = read_patterns(main_repo)
+    patterns_block = (
+        "\n── docs/patterns.md — FIRST-CLASS, LIVE, AUTHORITATIVE ──\n"
+        "The following is the CURRENT contents of the library's patterns doc. It is a "
+        "first-class requirement: study and apply it, and prefer it over the quick "
+        "summary above wherever they differ.\n\n"
+        f"{patterns}\n"
+    ) if patterns.strip() else ""
+    return HOUSE_DOCTRINE + "\n" + patterns_block + pin_block
 
 
 # --- Per-target context pack (consume-don't-reprove) --------------------------
