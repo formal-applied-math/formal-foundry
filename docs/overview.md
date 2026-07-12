@@ -247,7 +247,33 @@ reprove"). These are how:
 - **[Lean Zulip](https://leanprover.zulipchat.com/)** — the community chat.
   Astonishingly responsive; the `#new members` stream expects beginner questions.
 
-### Going deeper — the prover research (optional, for the internals)
+### Going deeper — the architectures (optional, for the internals)
+
+The system designs the field is built on. Read these for the *shape* of an
+autoformalizer, not the latest leaderboard number — each introduced a pattern
+still in use:
+
+- **[Autoformalization with Large Language Models](https://arxiv.org/abs/2205.12615)**
+  (Wu et al., NeurIPS 2022) — the seminal result that LLMs can translate
+  natural-language math into formal statements (few-shot). The origin of
+  "autoformalization" as an LLM task; it is the *statement*-side problem our
+  targets sidestep by starting from R-curated stubs.
+- **[Draft, Sketch, and Prove](https://arxiv.org/abs/2210.12283)** (Jiang et al.,
+  ICLR 2023) — informal proof → formal *sketch* → let an automated prover fill the
+  gaps. The decomposition pattern Aristotle and Gauss still run on, and the
+  blueprint for our roadmap's subgoal-decomposition step.
+- **[LeanDojo / ReProver](https://arxiv.org/abs/2306.15626)** (Yang et al., NeurIPS
+  2023; [leandojo.org](https://leandojo.org/)) — the open Lean-interaction
+  environment plus **retrieval-augmented** proving (pull the right premises from
+  the library before generating a tactic). That retrieval idea is our
+  "consume-don't-reprove" context pack, mechanized.
+- **[AlphaGeometry](https://deepmind.google/blog/alphageometry-an-olympiad-level-ai-system-for-geometry/)**
+  (DeepMind; [Nature, 2024](https://www.nature.com/articles/s41586-023-06747-5)) —
+  the **neuro-symbolic** design: a language model proposes constructions, a sound
+  symbolic engine deduces. The clearest case study in trading neural search
+  against a symbolic core, and a contrast to the LLM-only shape we run.
+
+### The recent open provers (our pipeline's shape)
 
 Our loop is the "whole-proof sampling + compiler-feedback repair" pattern shared
 by every state-of-the-art open prover. The full, adversarially-verified survey is
