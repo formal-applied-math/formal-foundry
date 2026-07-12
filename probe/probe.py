@@ -99,6 +99,18 @@ def mistral_chat(messages, *, api_key, model=DEFAULT_MODEL,
     raise RuntimeError("unreachable")
 
 
+def _parse_daemon_response(raw: bytes) -> dict:
+    """Parse the daemon's JSON reply. A degraded daemon (OOM-restarted mid-request
+    under load) can return an empty or truncated payload — surface that as an error
+    dict rather than raising, so callers (run_target / draft_with_repair) treat it
+    as a failed check and retry instead of crashing the target."""
+    try:
+        return json.loads(raw.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError) as e:
+        return {"success": False, "sorry_count": 0,
+                "errors": [f"daemon returned an empty or malformed response: {e}"]}
+
+
 def daemon_check(code: str, *, host="127.0.0.1", port=7878, timeout=600) -> dict:
     with socket.create_connection((host, port), timeout=30) as sock:
         sock.settimeout(timeout)
@@ -110,7 +122,7 @@ def daemon_check(code: str, *, host="127.0.0.1", port=7878, timeout=600) -> dict
             if not data:
                 break
             chunks.append(data)
-    return json.loads(b"".join(chunks).decode("utf-8"))
+    return _parse_daemon_response(b"".join(chunks))
 
 
 def run_target(target: dict, *, budget: int, max_rounds: int,

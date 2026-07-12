@@ -1,4 +1,19 @@
-from probe import run_target
+from probe import _parse_daemon_response, run_target
+
+
+def test_parse_daemon_response_valid():
+    r = _parse_daemon_response(b'{"success": true, "errors": [], "sorry_count": 1}')
+    assert r["success"] is True and r["sorry_count"] == 1
+
+
+def test_parse_daemon_response_empty_is_error_not_raise():
+    # a degraded daemon can return an empty/truncated payload — surface it as an
+    # error dict (so run_target / draft_with_repair retries), never raise.
+    r = _parse_daemon_response(b"")
+    assert r["success"] is False
+    assert r["errors"]
+    assert r["sorry_count"] == 0
+
 
 TARGET = {
     "id": "cal-x",
