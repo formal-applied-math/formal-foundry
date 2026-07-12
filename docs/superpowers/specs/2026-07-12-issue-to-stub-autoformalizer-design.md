@@ -126,7 +126,11 @@ fully unit-testable):
 
 Run in increasing cost, cheapest-rejects-first:
 
-1. **build_manifest elaboration** (kernel, ~free) — statement is well-formed, 1 `sorry`.
+1. **draft_with_repair elaboration** (kernel, ~free) — the drafted statement is
+   well-formed: **empty `errors` and exactly one `sorry`** (gate on `errors`, NOT the
+   daemon's `success` — a valid stub whose `sorry` remains reports `success=False`;
+   this bit us, see Build log). On a Lean error, feed it back (+ a `^`-not-`²` hint)
+   and re-draft up to `draft_rounds` (default 2) times — the compiler-feedback lever.
 2. **hypothesis_rejection** (leaf-prover, small budget) — `⊢ False` from the
    hypotheses ⇒ vacuous ⇒ retire.
 3. **disproof** (leaf-prover, small budget) — `⊢ ¬ Concl` ⇒ false ⇒ retire.
@@ -206,3 +210,36 @@ no API, no network), matching the existing `test_*.py` style:
 - The statement is machine-authored but **gated 5 ways + human-reviewed at merge**;
   a rejected issue is never auto-closed.
 - No new credential; main-repo independence unchanged; one Lean process preserved.
+
+## Build log (2026-07-12) — built + validated; yield-tuning is open
+
+Implemented Phases 1–5 TDD (120 tests). Phase 5 (`draft_with_repair`, a
+compiler-feedback loop on the draft + a `^`-not-`²` hygiene rule) was added after
+the live smokes; `draft_stub` was subsumed and removed. The **live smoke earned its
+keep — it caught five things unit tests structurally could not:**
+
+1. the `if __name__ == "__main__"` guard landed BEFORE the `emit_target_files` defs
+   → `NameError` when run as a script (import-only tests skip the guard). Moved to EOF.
+2. the elaboration gate keyed on the daemon's `success`, which is `False` for a
+   valid stub whose `sorry` remains → every valid draft was rejected. Gate on
+   `errors` (like `build_manifest`).
+3. `mistral_chat` didn't retry an empty/truncated response body (free tier under
+   load) → now retried.
+4. `daemon_check` raised `JSONDecodeError` on a degraded-daemon reply → now returns
+   an error dict so the repair loop retries.
+5. the judge over-enforced formality (rejected a correct #85 draft for abstracting
+   `E[X]` as a real) → recalibrated to a gross-failure net; drafter now names
+   defined quantities explicitly.
+
+**Validated end-to-end:** a full cascade run (draft → elaborate → kernel gates →
+judge, ~45k tokens) exercised every stage correctly. The pipeline is **safe by
+construction** — it stages only a draft that elaborates AND passes all gates, and
+skips transient failures without crashing.
+
+**Open (yield, not correctness):** across local smokes the free tier throttled hard
+(empty bodies) and the judge↔draft calibration on a few issues is still finding its
+level, so no stub *staged* locally yet. Getting a first stage is a tuning matter
+(calibration is R's faithfulness-bar call; the free-tier flakiness is now
+retry-hardened) — the machinery, gates, and safety are proven. Deployment note:
+the refill's `gh issue list` needs **issues:read** on `formal-mathfin`; the
+`MAIN_PR_TOKEN` PAT is currently Contents+PRs only.
