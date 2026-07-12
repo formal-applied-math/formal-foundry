@@ -163,6 +163,8 @@ DRAFT_SYSTEM = (
     '{"module_name": "<CamelCase>", "benchmark_id": "mf-<area>-<slug>", "docstring": "<one line>"}.\n'
     "- Use Mathlib conventions (ℝ, Real.exp, …). CONSUME the existing declarations "
     "shown below rather than reproving them.\n"
+    "- Use ASCII-parseable Lean operators: `^` for powers (write `σ^2`, NEVER the "
+    "Unicode superscript `σ²`); `*` for products; `Real.exp`/`Real.log`/`Real.sqrt`.\n"
     "- State EXACTLY what the issue asks: no vacuity, no weaker restatement. Prefer a "
     "conjunction when the issue lists a small cluster of facts.\n"
     "- Take givens as hypotheses (positive reals, nonneg loadings, …)."
@@ -212,17 +214,6 @@ def roundtrip_messages(issue: dict, stub: str) -> list[dict]:
              "content": f"ISSUE:\n{_issue_prose(issue)}\n\nLEAN:\n```lean\n{stub}\n```"}]
 
 
-def draft_stub(issue: dict, context_pack: str, pins: str, *, chat_fn) -> dict:
-    """Draft a stub from the issue. Returns `{stub, meta, tokens}` (stub/meta None
-    if the reply had no lean block or lacked naming metadata)."""
-    content, tokens = chat_fn(draft_messages(issue, context_pack, pins))
-    parsed = parse_draft(content)
-    if parsed is None:
-        return {"stub": None, "meta": None, "tokens": tokens}
-    stub, meta = parsed
-    return {"stub": stub, "meta": meta, "tokens": tokens}
-
-
 def judge_faithfulness(issue: dict, stub: str, *, chat_fn) -> dict:
     """Semantic judge: does the stub say what the issue asks? Returns the verdict
     dict plus `tokens`."""
@@ -239,6 +230,54 @@ def roundtrip_check(issue: dict, stub: str, *, chat_fn) -> dict:
     v = parse_verdict(content)
     v["tokens"] = tokens
     return v
+
+
+def draft_with_repair(issue: dict, context_pack: str, pins: str, *, chat_fn, check_fn,
+                      emit_fn, rounds: int = 2) -> dict:
+    """Draft a stub and repair it against the elaborator (compiler feedback, the
+    lever that makes autoformalization work): draft → emit → elaborate; on a parse
+    failure or an elaboration error, feed the reason back — with a `^`-not-`²`
+    syntax hint — and re-draft, up to `rounds` times. Returns
+    `{ok, stub, meta, lean_text, entry, tokens}`."""
+    messages = draft_messages(issue, context_pack, pins)
+    tokens = 0
+    for _ in range(max(1, rounds)):
+        content, tk = chat_fn(messages)
+        tokens += tk
+        parsed = parse_draft(content)
+        if parsed is None:
+            messages += [
+                {"role": "assistant", "content": content},
+                {"role": "user", "content":
+                 "Output exactly one ```lean block with a single "
+                 "`theorem NAME <binders> : <conclusion> := by sorry`, then one ```json "
+                 '{"module_name", "benchmark_id", "docstring"} block.'}]
+            continue
+        stub, meta = parsed
+        try:
+            lean_text, entry, _placement = emit_fn(issue, stub, meta)
+        except Exception as e:  # noqa: BLE001 — surface the assembly failure to the model
+            messages += [
+                {"role": "assistant", "content": content},
+                {"role": "user", "content":
+                 f"The theorem could not be assembled ({e}). Re-output a single "
+                 "well-formed `theorem … := by sorry`."}]
+            continue
+        elab = check_fn(lean_text)
+        if elab.get("success") and elab.get("sorry_count", 0) == 1:
+            return {"ok": True, "stub": stub, "meta": meta,
+                    "lean_text": lean_text, "entry": entry, "tokens": tokens}
+        errs = "\n".join(str(e) for e in elab.get("errors", [])[:8])
+        messages += [
+            {"role": "assistant", "content": content},
+            {"role": "user", "content":
+             f"That statement does not elaborate in Lean:\n```\n{errs}\n```\n"
+             "Fix ONLY the statement, keeping it faithful to the issue and still "
+             "ending in `:= by sorry`. Use `^` for powers (write `x^2`, never the "
+             "Unicode superscript `x²`); use `Real.exp`/`Real.log`/`Real.sqrt`. "
+             "Re-output the ```lean and ```json blocks."}]
+    return {"ok": False, "stub": None, "meta": None,
+            "lean_text": None, "entry": None, "tokens": tokens}
 
 
 # --- kernel-grade faithfulness gates (labs-leanstral via run_target) ----------
@@ -323,16 +362,17 @@ def _write_target(queue_dir: str, n: int, lean_text: str, entry: dict) -> list[s
 
 def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn,
            queue_dir: str, budget: int, pins: str = "", max_issues: int = 1,
-           max_attempt_issues: int = 3, gate_budget: int = 20_000,
+           max_attempt_issues: int = 3, gate_budget: int = 20_000, draft_rounds: int = 2,
            system_prompt=None, log=lambda m: None) -> dict:
     """Draft + gate + stage up to `max_issues` targets from `issues`.
 
     For each candidate (up to `max_attempt_issues`), the gate cascade runs
-    cheapest-first: draft (magistral `reason_fn`) → emit → elaboration (`check_fn`)
-    → hypothesis-rejection + disproof (leanstral `prove_fn`) → semantic judge +
-    roundtrip (magistral). Any reject logs the reason and skips to the next issue
-    (the issue stays `status:ready` — never auto-closed). A passing target's stub +
-    `.entry.json` are written to `queue_dir`. Returns `{seeded, tokens}`."""
+    cheapest-first: draft-with-repair (magistral `reason_fn`, elaboration-checked
+    with compiler feedback) → hypothesis-rejection + disproof (leanstral `prove_fn`)
+    → semantic judge + roundtrip (magistral). Any reject logs the reason and skips
+    to the next issue (the issue stays `status:ready` — never auto-closed). A passing
+    target's stub + `.entry.json` are written to `queue_dir`. Returns
+    `{seeded, tokens}`."""
     seeded, spent = [], 0
     for issue in issues[:max_attempt_issues]:
         if len(seeded) >= max_issues or spent >= budget:
@@ -342,16 +382,13 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn,
         # a daemon hiccup, a malformed draft) must not kill the tick — log it and
         # move to the next candidate.
         try:
-            d = draft_stub(issue, context_fn(issue), pins, chat_fn=reason_fn)
-            spent += d["tokens"]
-            if not d["stub"]:
-                log(f"#{n}: no draft"); continue
-            lean_text, entry, _placement = emit_target_files(issue, d["stub"], d["meta"])
-
-            elab = check_fn(lean_text)
-            if not elab.get("success") or elab.get("sorry_count", 0) != 1:
-                log(f"#{n}: does not elaborate ({elab.get('errors', [])[:1]})"); continue
-            name = split_statement(d["stub"])[0]
+            dr = draft_with_repair(issue, context_fn(issue), pins, chat_fn=reason_fn,
+                                   check_fn=check_fn, emit_fn=emit_target_files, rounds=draft_rounds)
+            spent += dr["tokens"]
+            if not dr["ok"]:
+                log(f"#{n}: no elaborating draft after {draft_rounds} rounds"); continue
+            stub, lean_text, entry = dr["stub"], dr["lean_text"], dr["entry"]
+            name = split_statement(stub)[0]
 
             vac = hypothesis_rejection(lean_text, name, chat_fn=prove_fn, check_fn=check_fn,
                                        budget=gate_budget, system_prompt=system_prompt)
@@ -365,12 +402,12 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn,
             if dis["false"]:
                 log(f"#{n}: retired — false as written"); continue
 
-            j = judge_faithfulness(issue, d["stub"], chat_fn=reason_fn)
+            j = judge_faithfulness(issue, stub, chat_fn=reason_fn)
             spent += j["tokens"]
             if not j.get("faithful"):
                 log(f"#{n}: unfaithful — {j.get('verdict', '')}"); continue
 
-            rt = roundtrip_check(issue, d["stub"], chat_fn=reason_fn)
+            rt = roundtrip_check(issue, stub, chat_fn=reason_fn)
             spent += rt["tokens"]
             if not rt.get("faithful"):
                 log(f"#{n}: roundtrip drift — {rt.get('verdict', '')}"); continue
@@ -426,6 +463,7 @@ def main() -> int:
     p.add_argument("--draft-model", default=None)
     p.add_argument("--prover-model", default=None)
     p.add_argument("--draft-max-tokens", type=int, default=None)
+    p.add_argument("--draft-rounds", type=int, default=None)
     args = ap.parse_args()
 
     api_key = os.environ.get("MISTRAL_API_KEY")
@@ -443,6 +481,7 @@ def main() -> int:
     draft_model = pick(args.draft_model, cfg.draft_model)
     prover_model = pick(args.prover_model, cfg.prover_model)
     draft_max_tokens = pick(args.draft_max_tokens, cfg.draft_max_tokens)
+    draft_rounds = pick(args.draft_rounds, cfg.draft_rounds)
 
     queue_dir = args.queue_dir or os.path.join(_foundry_root(), "targets", "queue")
 
@@ -474,7 +513,8 @@ def main() -> int:
     res = refill(issues, reason_fn=reason_fn, prove_fn=prove_fn, check_fn=daemon_check,
                  context_fn=context_fn, queue_dir=queue_dir, budget=budget, pins=pins,
                  max_issues=max_issues, max_attempt_issues=max_attempt, gate_budget=gate_budget,
-                 system_prompt=prove_system, log=lambda m: print(f"[refill] {m}", file=sys.stderr))
+                 draft_rounds=draft_rounds, system_prompt=prove_system,
+                 log=lambda m: print(f"[refill] {m}", file=sys.stderr))
     print(json.dumps(res))
     return 0
 

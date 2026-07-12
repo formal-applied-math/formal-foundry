@@ -266,21 +266,6 @@ def test_draft_messages_includes_issue_context_and_contract():
     assert ":= by sorry" in joined                    # the stub-format contract
 
 
-def test_draft_stub_returns_parsed_and_charges_tokens():
-    r = af.draft_stub({"number": 1, "title": "t", "body": "task", "pointers": []},
-                      "", "pins", chat_fn=_canned_chat(_DRAFT_REPLY, 123))
-    assert r["stub"].startswith("theorem foo")
-    assert r["meta"]["module_name"] == "Foo"
-    assert r["tokens"] == 123
-
-
-def test_draft_stub_none_stub_on_bad_reply_still_charges():
-    r = af.draft_stub({"number": 1, "title": "t", "body": "b", "pointers": []},
-                      "", "p", chat_fn=_canned_chat("no code", 77))
-    assert r["stub"] is None
-    assert r["tokens"] == 77
-
-
 def test_judge_faithfulness_parses_verdict():
     chat = _canned_chat('```json\n{"faithful": true, "verdict": "ok", "issues": []}\n```', 42)
     r = af.judge_faithfulness({"number": 1, "title": "t", "body": "b"},
@@ -295,6 +280,58 @@ def test_roundtrip_check_parses_verdict():
                            "theorem foo : True := by sorry", chat_fn=chat)
     assert r["faithful"] is False
     assert r["tokens"] == 30
+
+
+# --- draft-repair loop (compiler feedback on the draft) ----------------------
+
+def _script_chat(replies, tokens=10):
+    it = iter(replies)
+    return lambda msgs: (next(it), tokens)
+
+
+def _draft_reply(concl="x = x", name="foo", mod="Foo", bid="mf-fi-foo"):
+    return (f"```lean\ntheorem {name} (x : ℝ) : {concl} := by sorry\n```\n"
+            f'```json\n{{"module_name": "{mod}", "benchmark_id": "{bid}", "docstring": "d"}}\n```')
+
+
+def test_draft_with_repair_succeeds_first_round():
+    r = af.draft_with_repair(_issue(5), "", "", chat_fn=_script_chat([_draft_reply()]),
+                             check_fn=_ELAB_OK, emit_fn=af.emit_target_files, rounds=2)
+    assert r["ok"] is True
+    assert "theorem foo" in r["lean_text"]
+    assert r["tokens"] == 10
+
+
+def test_draft_with_repair_repairs_on_elaboration_failure():
+    replies = [_draft_reply(concl="x ²"), _draft_reply(concl="x = x")]
+    checks = iter([{"success": False, "errors": ["unexpected token '²'"], "sorry_count": 1},
+                   {"success": True, "errors": [], "sorry_count": 1}])
+    r = af.draft_with_repair(_issue(5), "", "", chat_fn=_script_chat(replies),
+                             check_fn=lambda c: next(checks), emit_fn=af.emit_target_files, rounds=2)
+    assert r["ok"] is True
+    assert "x = x" in r["lean_text"]        # the corrected statement is returned
+    assert r["tokens"] == 20                # both attempts charged
+
+
+def test_draft_with_repair_gives_up_after_rounds():
+    replies = [_draft_reply(concl="bad ²"), _draft_reply(concl="worse ²")]
+    r = af.draft_with_repair(_issue(5), "", "", chat_fn=_script_chat(replies),
+                             check_fn=lambda c: {"success": False, "errors": ["e"], "sorry_count": 1},
+                             emit_fn=af.emit_target_files, rounds=2)
+    assert r["ok"] is False
+
+
+def test_draft_with_repair_feedback_carries_error_and_caret_hint():
+    seen = []
+    def chat(msgs):
+        seen.append(msgs)
+        return (_draft_reply(concl="x ²"), 10)
+    af.draft_with_repair(_issue(5), "", "", chat_fn=chat,
+                         check_fn=lambda c: {"success": False, "errors": ["unexpected token '²'"], "sorry_count": 1},
+                         emit_fn=af.emit_target_files, rounds=2)
+    round2 = " ".join(m["content"] for m in seen[1])
+    assert "unexpected token '²'" in round2      # the compiler error is fed back
+    assert "^" in round2                         # the "use ^ not ²" hint
 
 
 # --- kernel-gate runners (drive run_target with injected chat_fn/check_fn) ----
@@ -345,11 +382,15 @@ def _issue(n, **kw):
     return d
 
 
-def _good_draft(i, cp, p, chat_fn):
+def _good_dwr(i, cp, p, *, chat_fn, check_fn, emit_fn, rounds):
+    """A stand-in for draft_with_repair that returns an ok result with a real
+    emitted lean_text/entry (so refill's _write_target produces valid files)."""
     n = i["number"]
-    return {"stub": f"theorem t{n} (h : p) : q := by sorry",
-            "meta": {"module_name": f"T{n}", "benchmark_id": f"mf-fi-t{n}", "docstring": "d"},
-            "tokens": 10}
+    stub = f"theorem t{n} (h : p) : q := by sorry"
+    meta = {"module_name": f"T{n}", "benchmark_id": f"mf-fi-t{n}", "docstring": "d"}
+    lean_text, entry, _ = emit_fn(i, stub, meta)
+    return {"ok": True, "stub": stub, "meta": meta, "lean_text": lean_text,
+            "entry": entry, "tokens": 10}
 
 
 def _pass_gates(monkeypatch):
@@ -364,7 +405,7 @@ _ELAB_OK = lambda c: {"success": True, "sorry_count": 1, "errors": []}
 
 
 def test_refill_stages_a_good_issue(monkeypatch, tmp_path):
-    monkeypatch.setattr(af, "draft_stub", _good_draft)
+    monkeypatch.setattr(af, "draft_with_repair", _good_dwr)
     _pass_gates(monkeypatch)
     res = af.refill([_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
                     context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
@@ -374,7 +415,7 @@ def test_refill_stages_a_good_issue(monkeypatch, tmp_path):
 
 
 def test_refill_skips_vacuous_then_stages_next(monkeypatch, tmp_path):
-    monkeypatch.setattr(af, "draft_stub", _good_draft)
+    monkeypatch.setattr(af, "draft_with_repair", _good_dwr)
     monkeypatch.setattr(af, "disproof", lambda *a, **k: {"false": False, "tokens": 1})
     monkeypatch.setattr(af, "judge_faithfulness", lambda i, s, chat_fn: {"faithful": True, "tokens": 1})
     monkeypatch.setattr(af, "roundtrip_check", lambda i, s, chat_fn: {"faithful": True, "tokens": 1})
@@ -389,7 +430,7 @@ def test_refill_skips_vacuous_then_stages_next(monkeypatch, tmp_path):
 
 
 def test_refill_skips_unfaithful_judge(monkeypatch, tmp_path):
-    monkeypatch.setattr(af, "draft_stub", _good_draft)
+    monkeypatch.setattr(af, "draft_with_repair", _good_dwr)
     monkeypatch.setattr(af, "hypothesis_rejection", lambda *a, **k: {"vacuous": False, "tokens": 1})
     monkeypatch.setattr(af, "disproof", lambda *a, **k: {"false": False, "tokens": 1})
     monkeypatch.setattr(af, "judge_faithfulness",
@@ -404,11 +445,11 @@ def test_refill_skips_unfaithful_judge(monkeypatch, tmp_path):
 def test_refill_skips_issue_on_step_exception(monkeypatch, tmp_path):
     # a transient error (e.g. HTTP 429 exhaustion) on one issue must not crash the
     # whole refill — log it and skip to the next issue.
-    def boom(i, cp, p, chat_fn):
+    def boom(i, cp, p, *, chat_fn, check_fn, emit_fn, rounds):
         if i["number"] == 1:
             raise RuntimeError("HTTP 429 from Mistral API")
-        return _good_draft(i, cp, p, chat_fn)
-    monkeypatch.setattr(af, "draft_stub", boom)
+        return _good_dwr(i, cp, p, chat_fn=chat_fn, check_fn=check_fn, emit_fn=emit_fn, rounds=rounds)
+    monkeypatch.setattr(af, "draft_with_repair", boom)
     _pass_gates(monkeypatch)
     res = af.refill([_issue(1), _issue(2)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
                     context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
@@ -418,8 +459,11 @@ def test_refill_skips_issue_on_step_exception(monkeypatch, tmp_path):
 
 def test_refill_wires_reason_and_prove_fns(monkeypatch, tmp_path):
     seen = {}
-    monkeypatch.setattr(af, "draft_stub",
-                        lambda i, cp, p, chat_fn: seen.update(draft=chat_fn) or _good_draft(i, cp, p, chat_fn))
+    monkeypatch.setattr(
+        af, "draft_with_repair",
+        lambda i, cp, p, *, chat_fn, check_fn, emit_fn, rounds:
+        seen.update(draft=chat_fn) or _good_dwr(i, cp, p, chat_fn=chat_fn,
+                                                check_fn=check_fn, emit_fn=emit_fn, rounds=rounds))
     monkeypatch.setattr(af, "hypothesis_rejection",
                         lambda lt, nm, **k: seen.update(gate=k["chat_fn"]) or {"vacuous": False, "tokens": 1})
     monkeypatch.setattr(af, "disproof", lambda *a, **k: {"false": False, "tokens": 1})
