@@ -4,8 +4,29 @@ injected chat_fn/check_fn, temp trees; no Lean, no API, no network."""
 from __future__ import annotations
 
 import build_manifest as bm
+import pipeline_lib as pl
 
 import autoformalize as af
+
+
+# --- AutoformalizeConfig -----------------------------------------------------
+
+def test_autoformalize_config_defaults():
+    cfg = pl.AutoformalizeConfig.load(None)
+    assert cfg.enabled is True
+    assert cfg.budget > 0
+    assert cfg.draft_model == "magistral-medium-latest"
+    assert cfg.prover_model == "labs-leanstral-1-5"
+
+
+def test_autoformalize_config_reads_toml(tmp_path):
+    toml = tmp_path / "pipeline.toml"
+    toml.write_text("[autoformalize]\nenabled = false\nbudget = 123456\nmax_issues = 2\n")
+    cfg = pl.AutoformalizeConfig.load(str(toml))
+    assert cfg.enabled is False
+    assert cfg.budget == 123456
+    assert cfg.max_issues == 2
+    assert cfg.gate_budget == 20_000        # unspecified keys keep defaults
 
 
 # --- split_statement ---------------------------------------------------------
@@ -313,3 +334,120 @@ def test_disproof_passes_when_negation_unprovable():
                     chat_fn=_canned_chat("```lean\nattempt\n```", 50),
                     check_fn=_FAILS, budget=20000)
     assert r["false"] is False
+
+
+# --- refill orchestrator (monkeypatched steps; control flow only) ------------
+
+def _issue(n, **kw):
+    d = {"number": n, "area": "fixed-income", "title": f"t{n}", "body": "b",
+         "pointers": [], "difficulty": "small"}
+    d.update(kw)
+    return d
+
+
+def _good_draft(i, cp, p, chat_fn):
+    n = i["number"]
+    return {"stub": f"theorem t{n} (h : p) : q := by sorry",
+            "meta": {"module_name": f"T{n}", "benchmark_id": f"mf-fi-t{n}", "docstring": "d"},
+            "tokens": 10}
+
+
+def _pass_gates(monkeypatch):
+    monkeypatch.setattr(af, "hypothesis_rejection", lambda *a, **k: {"vacuous": False, "tokens": 1})
+    monkeypatch.setattr(af, "disproof", lambda *a, **k: {"false": False, "tokens": 1})
+    monkeypatch.setattr(af, "judge_faithfulness", lambda i, s, chat_fn: {"faithful": True, "tokens": 1})
+    monkeypatch.setattr(af, "roundtrip_check", lambda i, s, chat_fn: {"faithful": True, "tokens": 1})
+
+
+_NOOP = lambda m: ("", 0)
+_ELAB_OK = lambda c: {"success": True, "sorry_count": 1, "errors": []}
+
+
+def test_refill_stages_a_good_issue(monkeypatch, tmp_path):
+    monkeypatch.setattr(af, "draft_stub", _good_draft)
+    _pass_gates(monkeypatch)
+    res = af.refill([_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
+                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
+    assert [s["issue"] for s in res["seeded"]] == [5]
+    assert (tmp_path / "cal-bk-5.lean").exists()
+    assert (tmp_path / "cal-bk-5.entry.json").exists()
+
+
+def test_refill_skips_vacuous_then_stages_next(monkeypatch, tmp_path):
+    monkeypatch.setattr(af, "draft_stub", _good_draft)
+    monkeypatch.setattr(af, "disproof", lambda *a, **k: {"false": False, "tokens": 1})
+    monkeypatch.setattr(af, "judge_faithfulness", lambda i, s, chat_fn: {"faithful": True, "tokens": 1})
+    monkeypatch.setattr(af, "roundtrip_check", lambda i, s, chat_fn: {"faithful": True, "tokens": 1})
+    # issue 1's stub is vacuous, issue 2's is not
+    monkeypatch.setattr(af, "hypothesis_rejection",
+                        lambda lt, nm, **k: {"vacuous": "theorem t1 " in lt, "tokens": 1})
+    res = af.refill([_issue(1), _issue(2)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
+                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
+    assert [s["issue"] for s in res["seeded"]] == [2]
+    assert not (tmp_path / "cal-bk-1.lean").exists()
+    assert (tmp_path / "cal-bk-2.lean").exists()
+
+
+def test_refill_skips_unfaithful_judge(monkeypatch, tmp_path):
+    monkeypatch.setattr(af, "draft_stub", _good_draft)
+    monkeypatch.setattr(af, "hypothesis_rejection", lambda *a, **k: {"vacuous": False, "tokens": 1})
+    monkeypatch.setattr(af, "disproof", lambda *a, **k: {"false": False, "tokens": 1})
+    monkeypatch.setattr(af, "judge_faithfulness",
+                        lambda i, s, chat_fn: {"faithful": False, "verdict": "weaker", "tokens": 1})
+    monkeypatch.setattr(af, "roundtrip_check", lambda i, s, chat_fn: {"faithful": True, "tokens": 1})
+    res = af.refill([_issue(7)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
+                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
+    assert res["seeded"] == []
+    assert not (tmp_path / "cal-bk-7.lean").exists()
+
+
+def test_refill_wires_reason_and_prove_fns(monkeypatch, tmp_path):
+    seen = {}
+    monkeypatch.setattr(af, "draft_stub",
+                        lambda i, cp, p, chat_fn: seen.update(draft=chat_fn) or _good_draft(i, cp, p, chat_fn))
+    monkeypatch.setattr(af, "hypothesis_rejection",
+                        lambda lt, nm, **k: seen.update(gate=k["chat_fn"]) or {"vacuous": False, "tokens": 1})
+    monkeypatch.setattr(af, "disproof", lambda *a, **k: {"false": False, "tokens": 1})
+    monkeypatch.setattr(af, "judge_faithfulness",
+                        lambda i, s, chat_fn: seen.update(judge=chat_fn) or {"faithful": True, "tokens": 1})
+    monkeypatch.setattr(af, "roundtrip_check", lambda i, s, chat_fn: {"faithful": True, "tokens": 1})
+    R = lambda m: ("R", 0)
+    P = lambda m: ("P", 0)
+    af.refill([_issue(9)], reason_fn=R, prove_fn=P, check_fn=_ELAB_OK,
+              context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
+    assert seen["draft"] is R and seen["judge"] is R    # magistral drafts + judges
+    assert seen["gate"] is P                            # leanstral runs the kernel gates
+
+
+# --- issue preparation (pointers extraction + filter/enrich) -----------------
+
+def test_extract_pointers_finds_dedups_orders_mathfin_paths():
+    body = ("## Pointers\n- `MathFin/FixedIncome/ZCB.lean` (zcb)\n"
+            "- MathFin/FixedIncome/ForwardRate.lean\n"
+            "again MathFin/FixedIncome/ZCB.lean and MathFin/Foo/Bar.lean")
+    assert af.extract_pointers(body) == [
+        "MathFin/FixedIncome/ZCB.lean",
+        "MathFin/FixedIncome/ForwardRate.lean",
+        "MathFin/Foo/Bar.lean",
+    ]
+
+
+def test_extract_pointers_empty():
+    assert af.extract_pointers("no lean paths here") == []
+
+
+def test_prepare_issues_filters_and_enriches():
+    raw = [
+        {"number": 67, "title": "FRA",
+         "body": "## Task\nfoo\n## Pointers\nMathFin/FixedIncome/ZCB.lean",
+         "labels": [{"name": "status:ready"}, {"name": "type:proof"},
+                    {"name": "area:fixed-income"}, {"name": "difficulty:small"}]},
+        {"number": 99, "title": "research",
+         "body": "x", "labels": [{"name": "status:blocked-research"},
+                                  {"name": "type:research"}]},
+    ]
+    out = af.prepare_issues(raw)
+    assert [i["number"] for i in out] == [67]        # 99 (not ready+proof) filtered
+    assert out[0]["area"] == "fixed-income"
+    assert out[0]["pointers"] == ["MathFin/FixedIncome/ZCB.lean"]
+    assert out[0]["body"].startswith("## Task")

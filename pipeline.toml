@@ -31,3 +31,20 @@ reasoning_effort = "high"
 fanout = 4
 repair_rounds = 2
 tokens_per_attempt = 120000
+
+# Issue -> stub autoformalizer (the self-feeding refill phase). When the queue has
+# no unattempted target, the tick drafts one from the next `status:ready`+`type:proof`
+# issue: magistral drafts+judges+roundtrips a faithful stub, leanstral runs the
+# kernel gates (hypothesis-rejection + disproof), the existing prover proves it.
+# `enabled = false` reverts to a hand-seeded queue. `budget` caps the magistral +
+# gate tokens per refill; `max_attempt_issues` bounds skip-to-next on rejects.
+# Design: docs/superpowers/specs/2026-07-12-issue-to-stub-autoformalizer-design.md.
+[autoformalize]
+enabled = true
+budget = 200000
+max_issues = 1
+max_attempt_issues = 3
+gate_budget = 20000
+draft_model = "magistral-medium-latest"
+prover_model = "labs-leanstral-1-5"
+draft_max_tokens = 8000

@@ -58,6 +58,34 @@ class PipelineConfig:
         return PipelineConfig(**{k: v for k, v in section.items() if k in fields})
 
 
+@dataclasses.dataclass(frozen=True)
+class AutoformalizeConfig:
+    """Config for the issue->stub refill phase (the `[autoformalize]` block).
+
+    The tick runs `refill` when the queue has no unattempted target: magistral
+    drafts+judges+roundtrips a stub from the next ready issue, leanstral gates it.
+    `enabled=false` reverts the pipeline to a hand-seeded queue.
+    """
+    enabled: bool = True
+    budget: int = 200_000
+    max_issues: int = 1
+    max_attempt_issues: int = 3
+    gate_budget: int = 20_000
+    draft_model: str = "magistral-medium-latest"
+    prover_model: str = "labs-leanstral-1-5"
+    draft_max_tokens: int = 8_000
+
+    @staticmethod
+    def load(path: str | None) -> "AutoformalizeConfig":
+        if not path or not os.path.isfile(path) or tomllib is None:
+            return AutoformalizeConfig()
+        with open(path, "rb") as f:
+            data = tomllib.load(f)
+        section = data.get("autoformalize", {})
+        fields = {f.name for f in dataclasses.fields(AutoformalizeConfig)}
+        return AutoformalizeConfig(**{k: v for k, v in section.items() if k in fields})
+
+
 def new_state(now_ym: str = "", now_epoch: int = 0) -> dict:
     return {
         "month": now_ym,

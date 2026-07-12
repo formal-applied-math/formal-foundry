@@ -13,10 +13,17 @@ Stdlib only.
 
 from __future__ import annotations
 
+import argparse
+import glob
 import json
+import os
 import re
+import subprocess
+import sys
 
-from probe import run_target
+from house_context import build_system_prompt, extract_signatures, read_pins
+from issues import select_issues
+from probe import daemon_check, mistral_chat, run_target
 from probe_lib import extract_lean_code
 
 # theorem/lemma decl, line-anchored so prose "theorem ..." in a docstring never
@@ -266,6 +273,193 @@ def disproof(lean_text: str, sorry_name: str, *, chat_fn, check_fn,
     proved, tokens = _try_prove(disproof_goal(lean_text), sorry_name, chat_fn=chat_fn,
                                 check_fn=check_fn, budget=budget, system_prompt=system_prompt)
     return {"false": proved, "tokens": tokens}
+
+
+# --- issue preparation --------------------------------------------------------
+
+_POINTER_RE = re.compile(r"MathFin/[\w/]+\.lean")
+
+
+def extract_pointers(body: str) -> list[str]:
+    """Repo-relative `MathFin/…/X.lean` paths named in an issue body (its Pointers
+    section), de-duplicated in first-seen order."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for p in _POINTER_RE.findall(body or ""):
+        if p not in seen:
+            seen.add(p)
+            out.append(p)
+    return out
+
+
+def prepare_issues(raw: list[dict], *, max_difficulty: str = "medium") -> list[dict]:
+    """Filter+order the raw `gh issue list` output to the tractable
+    `status:ready`+`type:proof` queue (via `issues.select_issues`) and enrich each
+    with its `body` + extracted `pointers` for drafting."""
+    by_num = {r.get("number"): r for r in raw}
+    out = []
+    for s in select_issues(raw, max_difficulty=max_difficulty):
+        body = by_num.get(s["number"], {}).get("body") or ""
+        out.append({**s, "body": body, "pointers": extract_pointers(body)})
+    return out
+
+
+# --- the refill orchestrator --------------------------------------------------
+
+def _write_target(queue_dir: str, n: int, lean_text: str, entry: dict) -> list[str]:
+    """Write the stub + its `.entry.json` sidecar into the queue dir. Returns the
+    two paths written."""
+    os.makedirs(queue_dir, exist_ok=True)
+    stub_path = os.path.join(queue_dir, f"cal-bk-{n}.lean")
+    entry_path = os.path.join(queue_dir, f"cal-bk-{n}.entry.json")
+    with open(stub_path, "w", encoding="utf-8") as f:
+        f.write(lean_text)
+    with open(entry_path, "w", encoding="utf-8") as f:
+        json.dump(entry, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+    return [stub_path, entry_path]
+
+
+def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn,
+           queue_dir: str, budget: int, pins: str = "", max_issues: int = 1,
+           max_attempt_issues: int = 3, gate_budget: int = 20_000,
+           system_prompt=None, log=lambda m: None) -> dict:
+    """Draft + gate + stage up to `max_issues` targets from `issues`.
+
+    For each candidate (up to `max_attempt_issues`), the gate cascade runs
+    cheapest-first: draft (magistral `reason_fn`) → emit → elaboration (`check_fn`)
+    → hypothesis-rejection + disproof (leanstral `prove_fn`) → semantic judge +
+    roundtrip (magistral). Any reject logs the reason and skips to the next issue
+    (the issue stays `status:ready` — never auto-closed). A passing target's stub +
+    `.entry.json` are written to `queue_dir`. Returns `{seeded, tokens}`."""
+    seeded, spent = [], 0
+    for issue in issues[:max_attempt_issues]:
+        if len(seeded) >= max_issues or spent >= budget:
+            break
+        n = issue.get("number")
+
+        d = draft_stub(issue, context_fn(issue), pins, chat_fn=reason_fn)
+        spent += d["tokens"]
+        if not d["stub"]:
+            log(f"#{n}: no draft"); continue
+        try:
+            lean_text, entry, _placement = emit_target_files(issue, d["stub"], d["meta"])
+        except ValueError as e:
+            log(f"#{n}: emit failed ({e})"); continue
+
+        elab = check_fn(lean_text)
+        if not elab.get("success") or elab.get("sorry_count", 0) != 1:
+            log(f"#{n}: does not elaborate ({elab.get('errors', [])[:1]})"); continue
+        name = split_statement(d["stub"])[0]
+
+        vac = hypothesis_rejection(lean_text, name, chat_fn=prove_fn, check_fn=check_fn,
+                                   budget=gate_budget, system_prompt=system_prompt)
+        spent += vac["tokens"]
+        if vac["vacuous"]:
+            log(f"#{n}: retired — vacuous (hypotheses contradictory)"); continue
+
+        dis = disproof(lean_text, name, chat_fn=prove_fn, check_fn=check_fn,
+                       budget=gate_budget, system_prompt=system_prompt)
+        spent += dis["tokens"]
+        if dis["false"]:
+            log(f"#{n}: retired — false as written"); continue
+
+        j = judge_faithfulness(issue, d["stub"], chat_fn=reason_fn)
+        spent += j["tokens"]
+        if not j.get("faithful"):
+            log(f"#{n}: unfaithful — {j.get('verdict', '')}"); continue
+
+        rt = roundtrip_check(issue, d["stub"], chat_fn=reason_fn)
+        spent += rt["tokens"]
+        if not rt.get("faithful"):
+            log(f"#{n}: roundtrip drift — {rt.get('verdict', '')}"); continue
+
+        paths = _write_target(queue_dir, n, lean_text, entry)
+        seeded.append({"id": f"cal-bk-{n}", "issue": n, "paths": paths})
+        log(f"#{n}: staged cal-bk-{n}")
+    return {"seeded": seeded, "tokens": spent}
+
+
+# --- CLI (the refill entrypoint pipeline-tick.sh calls) -----------------------
+
+def _fetch_issues(slug: str) -> list[dict]:
+    out = subprocess.run(
+        ["gh", "issue", "list", "--repo", slug, "--state", "open", "--limit", "100",
+         "--json", "number,title,labels,body"],
+        capture_output=True, text=True, check=True).stdout
+    return json.loads(out)
+
+
+def _already_seeded(queue_dir: str) -> set[int]:
+    """Issue numbers already staged as `cal-*-<N>.lean` in the queue."""
+    nums: set[int] = set()
+    for p in glob.glob(os.path.join(queue_dir, "cal-*.lean")):
+        m = re.search(r"cal-\w+-(\d+)\.lean$", os.path.basename(p))
+        if m:
+            nums.add(int(m.group(1)))
+    return nums
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    p = sub.add_parser("refill", help="draft+gate+stage the next ready issue")
+    p.add_argument("--main-repo", required=True)
+    p.add_argument("--slug", default="raphaelrrcoelho/formal-mathfin")
+    p.add_argument("--queue-dir", default=None,
+                   help="default: <foundry>/targets/queue")
+    p.add_argument("--budget", type=int, default=200_000)
+    p.add_argument("--max-issues", type=int, default=1)
+    p.add_argument("--max-attempt-issues", type=int, default=3)
+    p.add_argument("--gate-budget", type=int, default=20_000)
+    p.add_argument("--draft-model", default="magistral-medium-latest")
+    p.add_argument("--prover-model", default="labs-leanstral-1-5")
+    p.add_argument("--draft-max-tokens", type=int, default=8_000)
+    args = ap.parse_args()
+
+    api_key = os.environ.get("MISTRAL_API_KEY")
+    if not api_key:
+        print("MISTRAL_API_KEY not set", file=sys.stderr)
+        return 2
+
+    queue_dir = args.queue_dir or os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "targets", "queue")
+
+    seeded_nums = _already_seeded(queue_dir)
+    issues = [i for i in prepare_issues(_fetch_issues(args.slug))
+              if i["number"] not in seeded_nums]
+    if not issues:
+        print(json.dumps({"seeded": [], "tokens": 0, "reason": "no unseeded ready issues"}))
+        return 0
+
+    pins_d = read_pins(args.main_repo)
+    pins = (f"── PINS ──\nLean {pins_d['toolchain']}, Mathlib @ {pins_d['mathlib']}, "
+            f"BrownianMotion @ {pins_d['brownianmotion']}. Target this API surface exactly.")
+    prove_system = build_system_prompt(args.main_repo)   # the leaf-prover gate doctrine
+
+    def reason_fn(msgs):
+        return mistral_chat(msgs, api_key=api_key, model=args.draft_model,
+                            max_tokens=args.draft_max_tokens)
+
+    def prove_fn(msgs):
+        return mistral_chat(msgs, api_key=api_key, model=args.prover_model,
+                            reasoning_effort="high")
+
+    def context_fn(issue):
+        ptrs = issue.get("pointers", [])
+        return extract_signatures(args.main_repo, ptrs) if ptrs else ""
+
+    res = refill(issues, reason_fn=reason_fn, prove_fn=prove_fn, check_fn=daemon_check,
+                 context_fn=context_fn, queue_dir=queue_dir, budget=args.budget, pins=pins,
+                 max_issues=args.max_issues, max_attempt_issues=args.max_attempt_issues,
+                 gate_budget=args.gate_budget, system_prompt=prove_system,
+                 log=lambda m: print(f"[refill] {m}", file=sys.stderr))
+    print(json.dumps(res))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
 
 
 def explicit_arg_names(binders: str) -> list[str]:
