@@ -110,8 +110,10 @@ jobs:
         run: |
           git config user.name "pipeline-bot"
           git config user.email "pipeline@users.noreply.github.com"
-          git add pipeline_state.json runs 2>/dev/null || true
-          git diff --cached --quiet || git commit -m "pipeline: state + telemetry [skip ci]"
+          # targets/queue: a self-feeding tick autoformalizes a new stub + entry +
+          # manifest into the queue; commit those alongside the state + telemetry.
+          git add pipeline_state.json runs targets/queue 2>/dev/null || true
+          git diff --cached --quiet || git commit -m "pipeline: state + telemetry + autoformalized targets [skip ci]"
           git push || true
 
       - name: Upload telemetry

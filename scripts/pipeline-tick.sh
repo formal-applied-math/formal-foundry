@@ -25,11 +25,35 @@ cd "$FOUNDRY/probe"
 if [ -f "$MAIN/.env" ]; then set -a; . "$MAIN/.env"; set +a; fi
 [ -n "${MISTRAL_API_KEY:-}" ] || { echo "[tick] MISTRAL_API_KEY not set" >&2; exit 2; }
 
-# 1. Plan.
-DEC="$(python3 pipeline.py plan --config "$CFG" --state "$STATE" --queue "$QUEUE" ${FORCE:+--force})"
-ACTION="$(printf '%s' "$DEC" | python3 -c 'import sys,json;print(json.load(sys.stdin)["action"])')"
+# 1. Plan (a helper, so we can re-plan after a refill).
+plan() { python3 pipeline.py plan --config "$CFG" --state "$STATE" --queue "$QUEUE" ${FORCE:+--force}; }
+jget() { printf '%s' "$1" | python3 -c "import sys,json;print(json.load(sys.stdin).get('$2',''))" 2>/dev/null || true; }
+DEC="$(plan)"
+ACTION="$(jget "$DEC" action)"
+REASON="$(jget "$DEC" reason)"
+
+# 1b. Self-feeding refill: when the queue has no unattempted target, autoformalize
+# one from the next `status:ready`+`type:proof` issue — magistral drafts + judges +
+# roundtrips a faithful stub, leanstral runs the kernel gates — then rebuild the
+# manifest and re-plan. Needs the daemon (up) + MISTRAL_API_KEY (sourced above);
+# gated on [autoformalize].enabled. On any failure it falls through to the skip.
+if [ "$ACTION" = "skip" ] && [ "$REASON" = "no_unattempted_targets" ]; then
+  AF="$(python3 -c "import sys,json,pipeline_lib as p; c=p.AutoformalizeConfig.load(sys.argv[1]); print(json.dumps({'enabled':c.enabled,'budget':c.budget,'max_issues':c.max_issues}))" "$CFG" 2>/dev/null || echo '{}')"
+  if [ "$(jget "$AF" enabled)" = "True" ]; then
+    echo "[tick] queue has no unattempted target → autoformalize refill…" >&2
+    REFILL="$(GH_TOKEN="${MAIN_PR_TOKEN:-${GH_TOKEN:-}}" python3 autoformalize.py refill \
+      --main-repo "$MAIN" --budget "$(jget "$AF" budget)" --max-issues "$(jget "$AF" max_issues)" \
+      2>>/dev/stderr || echo '{"seeded":[]}')"
+    SEEDED="$(printf '%s' "$REFILL" | python3 -c 'import sys,json;print(len(json.load(sys.stdin).get("seeded",[])))' 2>/dev/null || echo 0)"
+    echo "[tick] refill seeded=$SEEDED" >&2
+    if [ "$SEEDED" != "0" ]; then
+      python3 build_manifest.py --main-repo "$MAIN" >&2 || echo "[tick] build_manifest failed post-refill" >&2
+      DEC="$(plan)"; ACTION="$(jget "$DEC" action)"; REASON="$(jget "$DEC" reason)"
+    fi
+  fi
+fi
+
 if [ "$ACTION" != "run" ]; then
-  REASON="$(printf '%s' "$DEC" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("reason",""))')"
   echo "[tick] skip: $REASON" >&2
   exit 0
 fi
