@@ -247,7 +247,31 @@ reprove"). These are how:
 - **[Lean Zulip](https://leanprover.zulipchat.com/)** — the community chat.
   Astonishingly responsive; the `#new members` stream expects beginner questions.
 
-### Going deeper — the architectures (optional, for the internals)
+### Going deeper — technical blogs & tutorials (start here for the internals)
+
+More accessible than the papers below, and often clearer on the engineering.
+Read these first:
+
+- **[Machine Learning for Theorem Proving](https://machine-learning-for-theorem-proving.github.io/)**
+  (Sean Welleck et al., NeurIPS tutorial) — the field's best teaching resource:
+  how neural provers, autoformalization, and premise retrieval actually work, with
+  runnable notebooks ([ntptutorial](https://github.com/wellecks/ntptutorial)). The
+  single best "learn the whole space" link.
+- **[AlphaProof, by one of its authors](https://www.julian.ac/blog/2025/11/13/alphaproof-paper/)**
+  (Julian Schrittwieser, DeepMind) — the AlphaProof Nature paper in plain
+  engineering terms, by someone who built it. Much faster than the paper.
+- **[Kimina-Prover RL](https://huggingface.co/blog/AI-MO/kimina-prover-rl)**
+  (Project Numina, HF blog) — a hands-on writeup of the RL recipe and the
+  reasoning-then-generation design, with the open training pipeline attached.
+- **[Introducing Gauss](https://www.math.inc/gauss)** (Math Inc.) — the
+  autoformalization agent that formalized the strong Prime Number Theorem in ~3
+  weeks. The clearest window into a production formalization op, and it runs the
+  same scout-not-author shape we do: human decomposition + review above the fleet.
+- **[Lean community blog](https://leanprover-community.github.io/blog/)** — ongoing
+  technical posts from the people who build Mathlib (proof automation, large
+  formalization projects, tooling).
+
+### The architectures — the primary sources
 
 The system designs the field is built on. Read these for the *shape* of an
 autoformalizer, not the latest leaderboard number — each introduced a pattern
