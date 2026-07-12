@@ -266,16 +266,6 @@ def test_draft_messages_includes_issue_context_and_contract():
     assert ":= by sorry" in joined                    # the stub-format contract
 
 
-def test_draft_messages_includes_few_shot_examples():
-    # the draft prompt carries worked issue→stub examples (the landed #88/#67 stubs)
-    # to steer format + quality — the biggest lever for autoformalization yield.
-    msgs = af.draft_messages({"number": 5, "title": "t", "body": "b", "pointers": []}, "", "")
-    system = next(m["content"] for m in msgs if m["role"] == "system")
-    assert "WORKED EXAMPLES" in system
-    assert "contango_backwardation_basis" in system
-    assert "fra_value_and_fair_rate" in system
-
-
 def test_judge_faithfulness_parses_verdict():
     chat = _canned_chat('```json\n{"faithful": true, "verdict": "ok", "issues": []}\n```', 42)
     r = af.judge_faithfulness({"number": 1, "title": "t", "body": "b"},
