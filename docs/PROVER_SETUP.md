@@ -116,9 +116,28 @@ Note: the first `up` pip-installs `lean-lsp-mcp` in the container (~30 s); to sk
 that, bake it into the image via CI (`publish-image.yml`), never a local
 `docker compose build` (memory doctrine).
 
+## Harness tuning — no new model (see `docs/upgrade-backlog.md` §A/§B)
+
+Two lean-lsp-mcp levers speed the vibe path with zero new dependencies:
+
+- **`lean_multi_attempt`** — lean-lsp-mcp exposes a REPL-backed multi-candidate
+  tool (~5× faster than paste-and-recheck, maintainer estimate). Tell the vibe
+  agent to use it for cheap candidate fan-out on hard targets (add it to the task
+  prompt or the agent's standing instructions).
+- **Self-hosted search endpoints** — the bundled LeanSearch/Loogle/State-Search
+  hit hosted services rate-limited to ~3 req/30s and send queries off-box. Point
+  `LOOGLE_URL`, `LEAN_STATE_SEARCH_URL`, `LEAN_HAMMER_URL` at local instances (in
+  the `lean-lsp` service env) to remove the limit and keep queries private. A local
+  Loogle build is ~2 GB; it is host-side (not a Lean env), but verify the footprint
+  against the one-Lean-process memory doctrine before standing it up.
+
+The other no-model lever is the **budget shape** (`fanout` vs `tokens_per_attempt`
+in `pipeline.toml`) — Leanstral's dominant one; the recommended tuning is in
+`docs/upgrade-backlog.md` §B.
+
 ## References
 
-- [Leanstral 1.5 — Mistral AI](https://mistral.ai/news/leanstral/)
+- [Leanstral 1.5 — Mistral AI](https://mistral.ai/news/leanstral-1-5/)
 - [mistralai/Leanstral-1.5-119B-A6B — Hugging Face](https://huggingface.co/mistralai/Leanstral-1.5-119B-A6B)
 - [oOo0oOo/lean-lsp-mcp](https://github.com/oOo0oOo/lean-lsp-mcp)
 - house idioms: `formal-mathfin/docs/patterns.md`; values: `docs/values-review.md`.
