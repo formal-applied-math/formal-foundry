@@ -274,12 +274,41 @@ def test_judge_faithfulness_parses_verdict():
     assert r["tokens"] == 42
 
 
-def test_roundtrip_check_parses_verdict():
-    chat = _canned_chat('```json\n{"faithful": false, "verdict": "drift", "issues": ["x"]}\n```', 30)
-    r = af.roundtrip_check({"number": 1, "title": "t", "body": "b"},
-                           "theorem foo : True := by sorry", chat_fn=chat)
+def _lean_reply(concl="x = x", name="foo"):
+    return f"```lean\ntheorem {name} (x : ℝ) : {concl} := by sorry\n```"
+
+
+def test_roundtrip_is_cross_model_reformalize_uses_prove_fn():
+    # the point of (b): informalize (magistral reason_fn) → RE-FORMALIZE (LEANSTRAL
+    # prove_fn, independent of the drafter) → compare (magistral reason_fn).
+    order = []
+    reason_replies = iter(["prose describing the theorem", '{"faithful": true, "verdict": "same"}'])
+    def reason(m):
+        order.append("reason"); return (next(reason_replies), 5)
+    def prove(m):
+        order.append("prove"); return (_lean_reply(), 7)
+    r = af.roundtrip_check(_issue(5), "theorem foo (x : ℝ) : x = x := by sorry",
+                           reason_fn=reason, prove_fn=prove)
+    assert order == ["reason", "prove", "reason"]     # magistral → LEANSTRAL → magistral
+    assert r["faithful"] is True
+    assert r["tokens"] == 17                           # 5 + 7 + 5, all charged
+
+
+def test_roundtrip_flags_cross_model_divergence():
+    reason = _script_chat(["prose", '{"faithful": false, "verdict": "differ"}'])
+    r = af.roundtrip_check(_issue(5), "theorem foo (x : ℝ) : x = x := by sorry",
+                           reason_fn=reason, prove_fn=_script_chat([_lean_reply("x = y")]))
     assert r["faithful"] is False
-    assert r["tokens"] == 30
+
+
+def test_roundtrip_inconclusive_when_leanstral_gives_no_statement():
+    # leanstral re-formalize produced no Lean block → inconclusive → do NOT block
+    # the draft (a soft signal that could not run is not a rejection).
+    reason = _script_chat(["prose"])                   # compare is never reached
+    r = af.roundtrip_check(_issue(5), "theorem foo : True := by sorry",
+                           reason_fn=reason, prove_fn=_script_chat(["I cannot formalize this."]))
+    assert r["faithful"] is True
+    assert r.get("inconclusive") is True
 
 
 # --- draft-repair loop (compiler feedback on the draft) ----------------------
@@ -408,7 +437,7 @@ def _pass_gates(monkeypatch):
     monkeypatch.setattr(af, "hypothesis_rejection", lambda *a, **k: {"vacuous": False, "tokens": 1})
     monkeypatch.setattr(af, "disproof", lambda *a, **k: {"false": False, "tokens": 1})
     monkeypatch.setattr(af, "judge_faithfulness", lambda i, s, chat_fn: {"faithful": True, "tokens": 1})
-    monkeypatch.setattr(af, "roundtrip_check", lambda i, s, chat_fn: {"faithful": True, "tokens": 1})
+    monkeypatch.setattr(af, "roundtrip_check", lambda i, s, *, reason_fn, prove_fn: {"faithful": True, "tokens": 1})
 
 
 _NOOP = lambda m: ("", 0)
@@ -429,7 +458,7 @@ def test_refill_skips_vacuous_then_stages_next(monkeypatch, tmp_path):
     monkeypatch.setattr(af, "draft_with_repair", _good_dwr)
     monkeypatch.setattr(af, "disproof", lambda *a, **k: {"false": False, "tokens": 1})
     monkeypatch.setattr(af, "judge_faithfulness", lambda i, s, chat_fn: {"faithful": True, "tokens": 1})
-    monkeypatch.setattr(af, "roundtrip_check", lambda i, s, chat_fn: {"faithful": True, "tokens": 1})
+    monkeypatch.setattr(af, "roundtrip_check", lambda i, s, *, reason_fn, prove_fn: {"faithful": True, "tokens": 1})
     # issue 1's stub is vacuous, issue 2's is not
     monkeypatch.setattr(af, "hypothesis_rejection",
                         lambda lt, nm, **k: {"vacuous": "theorem t1 " in lt, "tokens": 1})
@@ -446,7 +475,7 @@ def test_refill_skips_unfaithful_judge(monkeypatch, tmp_path):
     monkeypatch.setattr(af, "disproof", lambda *a, **k: {"false": False, "tokens": 1})
     monkeypatch.setattr(af, "judge_faithfulness",
                         lambda i, s, chat_fn: {"faithful": False, "verdict": "weaker", "tokens": 1})
-    monkeypatch.setattr(af, "roundtrip_check", lambda i, s, chat_fn: {"faithful": True, "tokens": 1})
+    monkeypatch.setattr(af, "roundtrip_check", lambda i, s, *, reason_fn, prove_fn: {"faithful": True, "tokens": 1})
     res = af.refill([_issue(7)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
                     context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
     assert res["seeded"] == []
@@ -480,7 +509,7 @@ def test_refill_wires_reason_and_prove_fns(monkeypatch, tmp_path):
     monkeypatch.setattr(af, "disproof", lambda *a, **k: {"false": False, "tokens": 1})
     monkeypatch.setattr(af, "judge_faithfulness",
                         lambda i, s, chat_fn: seen.update(judge=chat_fn) or {"faithful": True, "tokens": 1})
-    monkeypatch.setattr(af, "roundtrip_check", lambda i, s, chat_fn: {"faithful": True, "tokens": 1})
+    monkeypatch.setattr(af, "roundtrip_check", lambda i, s, *, reason_fn, prove_fn: {"faithful": True, "tokens": 1})
     R = lambda m: ("R", 0)
     P = lambda m: ("P", 0)
     af.refill([_issue(9)], reason_fn=R, prove_fn=P, check_fn=_ELAB_OK,

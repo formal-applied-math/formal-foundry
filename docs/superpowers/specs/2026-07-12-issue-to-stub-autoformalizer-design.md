@@ -84,8 +84,9 @@ injected `chat_fn`/`check_fn`. Reuses `mistral_chat`, `daemon_check`,
   ⇒ **retire (false-as-written)**.
 - `judge_faithfulness(issue, stub, *, chat_fn) → {faithful, verdict, issues}` —
   magistral, JSON verdict. `faithful=false` ⇒ reject.
-- `roundtrip_check(issue, stub, *, chat_fn) → {consistent, note}` — magistral:
-  informalize the stub → re-formalize the prose → judge the two Lean statements
+- `roundtrip_check(issue, stub, *, reason_fn, prove_fn) → {faithful, tokens}` —
+  CROSS-MODEL: magistral (`reason_fn`) informalizes → **Leanstral** (`prove_fn`)
+  independently re-formalizes → magistral compares the two Lean statements
   agree. `consistent=false` ⇒ reject.
 - `emit_target_files(issue, stub, meta) → (lean_text, entry_json, placement)` —
   **mechanical, no model** (see next section).
@@ -137,8 +138,11 @@ Run in increasing cost, cheapest-rejects-first:
 4. **judge_faithfulness** (magistral) — statement says what the issue asks; catches
    the *gross* semantic failures the kernel can't (missing conjunct, weaker
    restatement, wrong hypothesis).
-5. **roundtrip_check** (magistral) — informalize→re-formalize agrees; a second,
-   independent semantic signal.
+5. **roundtrip_check** (CROSS-MODEL back-translation) — magistral informalizes the
+   draft → **Leanstral independently re-formalizes** the prose → magistral compares
+   the two Lean statements. The independence (a different model re-formalizes) makes it
+   a genuine consistency cross-check, not a self-check; soft + lenient (rejects only on
+   an explicit divergence; a failed Leanstral re-formalize is inconclusive, not a reject).
 
 All five pass ⇒ stage the target. Any reject ⇒ log the reason, skip the issue
 (it stays `status:ready` on GitHub — never auto-closed on a reject — so R or a
@@ -239,9 +243,13 @@ skips transient failures without crashing.
 **On self-reference + PR status (do NOT overclaim):** the *independent*, rigorous
 checks are the Lean kernel (elaboration), the Leanstral probes (a different model +
 the kernel), the full `lake build` + axiom-clean, and **R's merge review**. The
-Magistral **judge + roundtrip are soft SELF-checks** (magistral grading its own
-draft — same model that drafted it), useful as budget pre-filters, NOT faithfulness
-guarantees; the roundtrip largely overlaps the judge (a drop candidate). An opened
+Magistral **judge is a soft SELF-check** (magistral grading its own draft), useful as
+a budget pre-filter, NOT a faithfulness guarantee. The **roundtrip is now CROSS-MODEL**
+(R's call 2026-07-12): magistral informalizes the draft → **Leanstral independently
+re-formalizes** the prose → magistral compares — a genuine back-translation cross-check
+(a different model does the critical re-formalize), the research-ideal form, though
+still soft + `[unverified]` per the survey (efficacy TBD; Leanstral's statement-
+autoformalization ability is the live unknown). An opened
 autoform PR is a **proposal** that passed CI and is *unmerged* (and can go
 stale/conflicting as `main` moves) — never proof of quality. The merge, with
 changes, is the bar. Do not few-shot the drafter on the pipeline's own unmerged

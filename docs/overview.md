@@ -169,9 +169,10 @@ benchmark entry, regenerating the audit, and building green-or-abort in the
 verify image). The first such PR (#120, a contango result) opened 2026-07-11 —
 CI-green but **unmerged** (both early autoform PRs are now conflicting as `main`
 moved on). An opened PR is a *proposal* R reviews + revises before merge, not proof
-of quality; the merge is. (Likewise the Magistral judge + roundtrip are *soft
-self-checks* — magistral grading its own draft — not a faithfulness guarantee; the
-kernel gates + human review are the rigorous ones.) A candidate that won't assemble
+of quality; the merge is. (Likewise the Magistral judge is a *soft self-check*; the
+roundtrip is a *cross-model back-translation* — Leanstral independently re-formalizes —
+genuinely independent but still soft. Neither soft check is a faithfulness guarantee;
+the kernel gates + human review are the rigorous ones.) A candidate that won't assemble
 green files a blocked issue on
 the foundry instead of opening a red PR. The one credential that grants write
 access to main is a fine-grained PAT (`MAIN_PR_TOKEN`); revoking it fully disables

@@ -189,13 +189,32 @@ JUDGE_SYSTEM = (
     '{"faithful": true|false, "verdict": "<one line>", "issues": ["<gross gap>", ...]}.'
 )
 
-ROUNDTRIP_SYSTEM = (
-    "You are checking an autoformalized Lean statement by round-trip. In your reasoning: "
-    "(1) describe the given Lean theorem in plain mathematical prose; (2) from ONLY that "
-    "prose, re-derive what the Lean statement should be; (3) judge whether your "
-    "re-derivation matches the original (same hypotheses and conclusion, no drift), and "
-    "whether it matches the issue's intent. Respond with ONLY a JSON object: "
-    '{"faithful": true|false, "verdict": "<one line>", "issues": ["<drift>", ...]}.'
+# The round-trip is a CROSS-MODEL back-translation: magistral informalizes the draft,
+# LEANSTRAL independently re-formalizes the prose, magistral compares the two. The
+# independence (a different model re-formalizes) is what makes it a genuine consistency
+# check rather than a self-check.
+INFORMALIZE_SYSTEM = (
+    "You are given a Lean 4 theorem. Describe EXACTLY what it states in precise plain "
+    "mathematical prose — every hypothesis and the full conclusion — as a mathematician "
+    "would read it off the Lean. Do not judge, prove, or improve it; render its meaning "
+    "faithfully in words. Output only the prose."
+)
+
+REFORMALIZE_SYSTEM = (
+    "You are an autoformalization model. Given a mathematical statement in plain prose, "
+    "produce ONE Lean 4 theorem that formalizes it, ending in `:= by sorry` (state only, "
+    "no proof). Output exactly one ```lean block with a single "
+    "`theorem NAME <binders> : <conclusion> := by sorry`. Mathlib conventions; "
+    "ASCII-parseable operators (`^`, `Real.exp`)."
+)
+
+COMPARE_SYSTEM = (
+    "You are given TWO Lean 4 theorems produced by DIFFERENT models from the same "
+    "mathematics. Decide whether they state the SAME result (same hypotheses and "
+    "conclusion up to trivial renaming/reordering/rephrasing). Agreement is evidence the "
+    "statement is unambiguous and faithful; a genuine divergence is a flag for review. "
+    "Respond with ONLY a JSON object: "
+    '{"faithful": true|false, "verdict": "<one line>", "issues": ["<difference>", ...]}.'
 )
 
 
@@ -219,10 +238,20 @@ def judge_messages(issue: dict, stub: str) -> list[dict]:
              "content": f"ISSUE:\n{_issue_prose(issue)}\n\nCANDIDATE:\n```lean\n{stub}\n```"}]
 
 
-def roundtrip_messages(issue: dict, stub: str) -> list[dict]:
-    return [{"role": "system", "content": ROUNDTRIP_SYSTEM},
+def informalize_messages(stub: str) -> list[dict]:
+    return [{"role": "system", "content": INFORMALIZE_SYSTEM},
+            {"role": "user", "content": f"```lean\n{stub}\n```"}]
+
+
+def reformalize_messages(prose: str) -> list[dict]:
+    return [{"role": "system", "content": REFORMALIZE_SYSTEM},
+            {"role": "user", "content": prose}]
+
+
+def compare_messages(stub_a: str, stub_b: str) -> list[dict]:
+    return [{"role": "system", "content": COMPARE_SYSTEM},
             {"role": "user",
-             "content": f"ISSUE:\n{_issue_prose(issue)}\n\nLEAN:\n```lean\n{stub}\n```"}]
+             "content": f"THEOREM A:\n```lean\n{stub_a}\n```\n\nTHEOREM B:\n```lean\n{stub_b}\n```"}]
 
 
 def judge_faithfulness(issue: dict, stub: str, *, chat_fn) -> dict:
@@ -234,13 +263,29 @@ def judge_faithfulness(issue: dict, stub: str, *, chat_fn) -> dict:
     return v
 
 
-def roundtrip_check(issue: dict, stub: str, *, chat_fn) -> dict:
-    """Round-trip check: informalize → re-formalize → agree? Returns the verdict
-    dict plus `tokens` (`faithful=False` means the round-trip drifted)."""
-    content, tokens = chat_fn(roundtrip_messages(issue, stub))
-    v = parse_verdict(content)
-    v["tokens"] = tokens
-    return v
+def roundtrip_check(issue: dict, stub: str, *, reason_fn, prove_fn) -> dict:
+    """CROSS-MODEL round-trip (back-translation): magistral (`reason_fn`) informalizes
+    the draft to prose → **Leanstral** (`prove_fn`) INDEPENDENTLY re-formalizes that
+    prose → magistral compares the two Lean statements. Agreement is evidence the
+    statement is unambiguous + faithful; an explicit divergence flags it. It is a SOFT,
+    lenient signal: it rejects ONLY on a clear "these disagree" verdict, and if Leanstral
+    yields no statement the check is inconclusive (not a rejection). Returns
+    `{faithful, tokens, [inconclusive], verdict}`.
+
+    (`issue` is unused — the round-trip checks the stub's self-consistency, not its
+    issue-alignment, which is `judge_faithfulness`. The independence — Leanstral, a
+    different model, does the re-formalize — is what makes this a genuine cross-check
+    rather than the earlier magistral-grades-magistral self-check.)"""
+    prose, t1 = reason_fn(informalize_messages(stub))
+    reply, t2 = prove_fn(reformalize_messages(prose))
+    stub2 = extract_lean_code(reply)
+    if stub2 is None:
+        return {"faithful": True, "inconclusive": True, "tokens": t1 + t2,
+                "verdict": "leanstral re-formalize produced no statement"}
+    content, t3 = reason_fn(compare_messages(stub, stub2))
+    v = _extract_json(content) or {}
+    return {"faithful": v.get("faithful") is not False,   # reject ONLY on an explicit false
+            "verdict": v.get("verdict", ""), "tokens": t1 + t2 + t3}
 
 
 def draft_with_repair(issue: dict, context_pack: str, pins: str, *, chat_fn, check_fn,
@@ -422,7 +467,7 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn,
             if not j.get("faithful"):
                 log(f"#{n}: unfaithful — {j.get('verdict', '')}"); continue
 
-            rt = roundtrip_check(issue, stub, chat_fn=reason_fn)
+            rt = roundtrip_check(issue, stub, reason_fn=reason_fn, prove_fn=prove_fn)
             spent += rt["tokens"]
             if not rt.get("faithful"):
                 log(f"#{n}: roundtrip drift — {rt.get('verdict', '')}"); continue
