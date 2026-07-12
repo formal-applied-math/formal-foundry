@@ -85,6 +85,17 @@ def mistral_chat(messages, *, api_key, model=DEFAULT_MODEL,
                 time.sleep(wait)
                 continue
             raise RuntimeError(f"HTTP {e.code} from Mistral API: {body}") from e
+        except (ValueError, KeyError) as e:
+            # empty / truncated / malformed response body (seen on the free tier
+            # under rate pressure: a 200 with an empty payload → json.loads(''))
+            # — treat like a transient 5xx and retry with backoff.
+            if attempt < 3:
+                wait = 5 * (2 ** attempt)
+                print(f"  [chat] bad response body ({type(e).__name__}), retry in {wait}s",
+                      file=sys.stderr)
+                time.sleep(wait)
+                continue
+            raise RuntimeError(f"unparseable Mistral response after retries: {e}") from e
     raise RuntimeError("unreachable")
 
 
