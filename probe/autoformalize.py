@@ -263,8 +263,12 @@ def draft_with_repair(issue: dict, context_pack: str, pins: str, *, chat_fn, che
                  f"The theorem could not be assembled ({e}). Re-output a single "
                  "well-formed `theorem … := by sorry`."}]
             continue
+        # a well-formed stub elaborates with NO errors and exactly one `sorry`.
+        # (the daemon reports success=False whenever a `sorry` remains — the sorry
+        # is a warning, not an error — so gate on `errors`, like build_manifest does,
+        # NOT on `success`.)
         elab = check_fn(lean_text)
-        if elab.get("success") and elab.get("sorry_count", 0) == 1:
+        if not elab.get("errors") and elab.get("sorry_count", 0) == 1:
             return {"ok": True, "stub": stub, "meta": meta,
                     "lean_text": lean_text, "entry": entry, "tokens": tokens}
         errs = "\n".join(str(e) for e in elab.get("errors", [])[:8])

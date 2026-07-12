@@ -313,6 +313,17 @@ def test_draft_with_repair_repairs_on_elaboration_failure():
     assert r["tokens"] == 20                # both attempts charged
 
 
+def test_draft_with_repair_accepts_valid_stub_despite_success_false():
+    # the daemon reports success=False for a well-formed statement that still has
+    # its `sorry` (the sorry is a warning, not an error). A stub with EMPTY errors
+    # and exactly one sorry IS elaborating — accept it (regression: an earlier check
+    # keyed on `success` and rejected every valid draft).
+    r = af.draft_with_repair(_issue(5), "", "", chat_fn=_script_chat([_draft_reply()]),
+                             check_fn=lambda c: {"success": False, "errors": [], "sorry_count": 1},
+                             emit_fn=af.emit_target_files, rounds=2)
+    assert r["ok"] is True
+
+
 def test_draft_with_repair_gives_up_after_rounds():
     replies = [_draft_reply(concl="bad ²"), _draft_reply(concl="worse ²")]
     r = af.draft_with_repair(_issue(5), "", "", chat_fn=_script_chat(replies),
