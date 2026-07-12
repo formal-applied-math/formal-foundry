@@ -71,7 +71,7 @@ class AutoformalizeConfig:
     max_issues: int = 1
     max_attempt_issues: int = 3
     gate_budget: int = 20_000
-    draft_rounds: int = 2   # compiler-feedback repair rounds on the draft
+    draft_rounds: int = 3   # compiler-feedback repair rounds on the draft
     draft_model: str = "magistral-medium-latest"
     prover_model: str = "labs-leanstral-1-5"
     draft_max_tokens: int = 16_000   # reasoning headroom (magistral emits a think trace)

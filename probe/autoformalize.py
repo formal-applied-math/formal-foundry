@@ -199,6 +199,43 @@ ROUNDTRIP_SYSTEM = (
 )
 
 
+# Worked issue→stub examples (the landed #88 contango + #67 FRA stubs) — the single
+# biggest lever for autoformalization yield. They demonstrate the ```lean + ```json
+# format, the ℝ-abstraction (no measure theory), a named quantity introduced as a
+# defining hypothesis (`hF : F = …`), a conjunction for a small cluster, and
+# ASCII-safe operators (`^`, `Real.exp`).
+FEW_SHOT = """\
+── WORKED EXAMPLES (issue → the ideal stub; match this format and quality) ──
+
+EXAMPLE 1 — cost-of-carry forward (contango/backwardation):
+ISSUE: characterize contango/backwardation and basis convergence for the forward
+F(T) = S·e^{(r−δ)T}: F>S iff r>δ, F<S iff r<δ, and F(0)=S. S>0, T>0.
+```lean
+theorem contango_backwardation_basis {S r δ T : ℝ} (hS : 0 < S) (hT : 0 < T) :
+    (S < S * Real.exp ((r - δ) * T) ↔ δ < r) ∧
+    (S * Real.exp ((r - δ) * T) < S ↔ r < δ) ∧
+    S * Real.exp ((r - δ) * 0) = S := by sorry
+```
+```json
+{"module_name": "Contango", "benchmark_id": "mf-futures-contango", "docstring": "Contango/backwardation sign structure + basis convergence for F(T)=S·exp((r−δ)T)."}
+```
+
+EXAMPLE 2 — forward-rate agreement (a named quantity as a defining hypothesis):
+ISSUE: the FRA value V = δ·P₂·(F−K) and the simple forward rate F = (P₁/P₂−1)/δ;
+V = 0 exactly at K = F. Discount factors positive, δ ≠ 0.
+```lean
+theorem fra_value_and_fair_rate {P₁ P₂ δ K F : ℝ} (hP₂ : 0 < P₂) (hδ : δ ≠ 0)
+    (hF : F = (P₁ / P₂ - 1) / δ) :
+    P₁ = P₂ * (1 + δ * F) ∧
+    δ * P₂ * (F - K) = (P₁ - P₂) - δ * K * P₂ ∧
+    (δ * P₂ * (F - K) = 0 ↔ K = F) := by sorry
+```
+```json
+{"module_name": "FRA", "benchmark_id": "mf-fi-fra", "docstring": "FRA value and the fair simple forward rate."}
+```
+"""
+
+
 def _issue_prose(issue: dict) -> str:
     return f"{issue.get('title', '')}\n{issue.get('body', '')}"
 
@@ -209,7 +246,7 @@ def draft_messages(issue: dict, context_pack: str, pins: str) -> list[dict]:
         user += "\n" + context_pack
     if pins:
         user += "\n" + pins
-    return [{"role": "system", "content": DRAFT_SYSTEM},
+    return [{"role": "system", "content": DRAFT_SYSTEM + "\n\n" + FEW_SHOT},
             {"role": "user", "content": user}]
 
 
