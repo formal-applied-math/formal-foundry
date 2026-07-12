@@ -43,7 +43,7 @@ DEFAULT_BASE_URL = "https://api.mistral.ai/v1"
 
 def mistral_chat(messages, *, api_key, model=DEFAULT_MODEL,
                  base_url=DEFAULT_BASE_URL, max_tokens=16384,
-                 temperature=0.7, timeout=600, reasoning_effort=None):
+                 temperature=0.7, timeout=240, reasoning_effort=None):
     payload = {
         "model": model,
         "messages": messages,
@@ -96,6 +96,16 @@ def mistral_chat(messages, *, api_key, model=DEFAULT_MODEL,
                 time.sleep(wait)
                 continue
             raise RuntimeError(f"unparseable Mistral response after retries: {e}") from e
+        except (TimeoutError, urllib.error.URLError) as e:
+            # a hung / timed-out call or transient network error — retry with backoff,
+            # so ONE slow call can't stall the whole tick (a hard issue must fail fast
+            # and yield to easier ones, not eat the run).
+            if attempt < 3:
+                wait = 5 * (2 ** attempt)
+                print(f"  [chat] {type(e).__name__}, retry in {wait}s", file=sys.stderr)
+                time.sleep(wait)
+                continue
+            raise RuntimeError(f"Mistral API {type(e).__name__} after retries: {e}") from e
     raise RuntimeError("unreachable")
 
 
@@ -111,7 +121,7 @@ def _parse_daemon_response(raw: bytes) -> dict:
                 "errors": [f"daemon returned an empty or malformed response: {e}"]}
 
 
-def daemon_check(code: str, *, host="127.0.0.1", port=7878, timeout=600) -> dict:
+def daemon_check(code: str, *, host="127.0.0.1", port=7878, timeout=300) -> dict:
     with socket.create_connection((host, port), timeout=30) as sock:
         sock.settimeout(timeout)
         sock.sendall(code.encode("utf-8"))
