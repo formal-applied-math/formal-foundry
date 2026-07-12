@@ -1,0 +1,1 @@
+{"target": "cal-bk-67", "stream": "backlog", "outcome": "pass", "rounds": 1, "tokens": 13777, "budget": 500000, "wall_s": 164.7, "axioms_clean": true, "slop": {"forbidden": [], "line_count": 81, "max_bracket_args": 2}, "model": "labs-leanstral-1-5", "ts": "2026-07-12T02:27:25"}
