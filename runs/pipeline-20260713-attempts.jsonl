@@ -1,0 +1,3 @@
+{"target": "cal-bk-67", "stream": "backlog", "round": 1, "tokens_cum": 16665, "success": false, "errors_head": ["daemon check did not complete: TimeoutError: timed out"], "sorry_count": 0}
+{"target": "cal-bk-67", "stream": "backlog", "round": 1, "tokens_cum": 33293, "success": false, "errors_head": ["line 32:9: Unknown identifier `V`", "line 32:12: Unknown identifier `F`", "line 32:15: Unknown identifier `δ`"], "sorry_count": 0}
+{"target": "cal-bk-67", "stream": "backlog", "round": 1, "tokens_cum": 50124, "success": true, "errors_head": [], "sorry_count": 0}
