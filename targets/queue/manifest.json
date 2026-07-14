@@ -1,45 +1,5 @@
 {
   "toolchain": "leanprover/lean4:v4.31.0",
-  "main_commit": "25473166302368b7a53e7cdd67c3eef86c337c40",
-  "targets": [
-    {
-      "id": "cal-bk-67",
-      "stream": "backlog",
-      "kind": "prove",
-      "sorry_name": "fra_value_zero_iff_fair",
-      "file": "cal-bk-67.lean",
-      "pointers": [
-        "MathFin/FixedIncome/ForwardRate.lean",
-        "MathFin/FixedIncome/ZCB.lean"
-      ],
-      "input_hash": "fe3160b8967741076c3a1ccb0f751c1936e7570662c5f75c930a058702b60523",
-      "main_module": "MathFin/FixedIncome/MathFin.FixedIncome.ForwardRate.lean",
-      "benchmark": "benchmarks/mathematical_finance.json",
-      "benchmark_id": "mf-fra-value_and_fair_rate",
-      "source_issue": 67,
-      "benchmark_entry": {
-        "id": "mf-fra-value_and_fair_rate",
-        "name": "Formalize the FRA value \u03b4\u00b7P(0,T\u2082)\u00b7(F\u2212K) and simple forward rate F = (P(0,T\u2081)/P(0,T\u2082)\u22121)/\u03b4",
-        "description": "FRA value is zero exactly when the strike equals the simple forward rate.",
-        "domain": "mathematical_finance",
-        "code": {
-          "lean": "import MathFin.FixedIncome.MathFin.FixedIncome.ForwardRate\n\nopen MathFin\n\n/-- FRA value is zero exactly when the strike equals the simple forward rate. -/\ntheorem mf_fra_value_and_fair_rate (T\u2081 T\u2082 : \u211d) (P\u2081 P\u2082 : \u211d) (h\u03b4 : T\u2082 - T\u2081 \u2260 0) (K : \u211d)\n  (h_pos : P\u2081 > 0 \u2227 P\u2082 > 0) :\n  let \u03b4 :=\n  MathFin.fra_value_zero_iff_fair T\u2081 T\u2082 P\u2081 P\u2082 h\u03b4 K h_pos\n"
-        },
-        "metadata": {
-          "chapter": 0,
-          "reference": "Formalize the FRA value \u03b4\u00b7P(0,T\u2082)\u00b7(F\u2212K) and simple forward rate F = (P(0,T\u2081)/P(0,T\u2082)\u22121)/\u03b4",
-          "difficulty": "good-first",
-          "formalization_status": "full",
-          "formalization_scope": "Full formal proof in MathFin/FixedIncome/MathFin.FixedIncome.ForwardRate.lean (magistral-drafted statement, leanstral proof). Re-export from MathFin. Axioms-clean.",
-          "provenance": {
-            "statement_source": "magistral-autoform",
-            "statement_model": "magistral-medium",
-            "source": "leanstral-autoform",
-            "model": "labs-leanstral-1-5",
-            "issue": 67
-          }
-        }
-      }
-    }
-  ]
+  "main_commit": "3b314de921a37a3cd3d7048815dc913ed90db628",
+  "targets": []
 }
