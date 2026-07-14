@@ -72,13 +72,20 @@ class AutoformalizeConfig:
     max_attempt_issues: int = 3
     gate_budget: int = 20_000
     draft_rounds: int = 2   # compiler-feedback repair rounds on the draft
-    draft_model: str = "magistral-medium-latest"
+    draft_model: str = "magistral-medium-latest"   # legacy single-stage drafter (eval baseline)
     prover_model: str = "labs-leanstral-1-5"
     draft_max_tokens: int = 16_000   # reasoning headroom (magistral emits a think trace)
     # pointers-scoped depth gate: reject a true-but-shallow stub whose TYPE consumes
     # no def from its `-- pointers:` MathFin modules (a Mathlib identity in domain
     # clothing). `false` disables it (rely on the kernel/judge gates + human merge).
     depth_gate: bool = True
+    # two-stage draft: magistral SPECIFIES the intended statement (its strength), leanstral
+    # FORMALIZES it into elaborating Lean (its strength). intent_model is the strongest
+    # Magistral reasoning tier (Medium 1.2); formalize_model is the Lean prover.
+    intent_model: str = "magistral-medium-latest"
+    formalize_model: str = "labs-leanstral-1-5"
+    formalize_rounds: int = 3   # leanstral formalize + compiler-feedback repair rounds
+    retrieval: bool = True      # loogle-augmented repair on `unknown identifier X`
 
     @staticmethod
     def load(path: str | None) -> "AutoformalizeConfig":

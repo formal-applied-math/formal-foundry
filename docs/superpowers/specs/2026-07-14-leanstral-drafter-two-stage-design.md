@@ -1,8 +1,12 @@
 # Two-stage drafting: Leanstral formalizes, Magistral specifies
 
-Status: approved design (2026-07-14), pre-implementation.
-Supersedes the single-stage magistral drafter in
-`2026-07-12-issue-to-stub-autoformalizer-design.md` (§ draft_with_repair).
+Status: IMPLEMENTED (2026-07-14). Supersedes the single-stage magistral drafter in
+`2026-07-12-issue-to-stub-autoformalizer-design.md` (§ draft_with_repair) — which is kept
+only as the eval baseline. Landed: `draft_intent` + `formalize_with_repair` (leanstral,
+loogle-augmented repair) + `intent_fidelity_check` (folded roundtrip) in
+`probe/autoformalize.py`; two-stage rewire of `refill`; config (`intent_model`,
+`formalize_model`, `formalize_rounds`, `retrieval`); `probe/eval_draft.py`. 165 tests green.
+Next: run `eval_draft.py` for the baseline vs two-stage numbers.
 
 ## Problem
 

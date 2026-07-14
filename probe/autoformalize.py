@@ -367,6 +367,185 @@ def draft_with_repair(issue: dict, context_pack: str, pins: str, *, chat_fn, che
             "lean_text": None, "entry": None, "tokens": tokens}
 
 
+# --- two-stage draft: intent (magistral) + formalize (leanstral) --------------
+#
+# Draft failures are LEAN failures (unknown identifiers, `let`-scoping, coercions), not math
+# failures — Leanstral's home turf, magistral's weak spot. So split the draft: magistral
+# SPECIFIES the intended statement in precise prose (its strength, no Lean), Leanstral
+# FORMALIZES it into elaborating Lean (its strength). See
+# docs/superpowers/specs/2026-07-14-leanstral-drafter-two-stage-design.md.
+
+INTENT_SYSTEM = (
+    "You are a mathematical-finance specifier for MathFin (a Lean 4 library on Mathlib). "
+    "Given a GitHub issue (Task + Pointers), produce a PRECISE natural-language statement of the "
+    "ONE theorem to formalize — every hypothesis and the full conclusion, unambiguous enough that "
+    "a Lean expert could formalize it without seeing the issue. Do NOT write Lean. Name the exact "
+    "MathFin/Mathlib objects it should be built from (e.g. `MathFin.zcb`), drawn from the "
+    "declarations shown. Respond with ONLY a JSON object: "
+    '{"statement": "<precise prose>", "objects": ["MathFin.zcb", ...], "module_name": "<CamelCase>", '
+    '"benchmark_id": "mf-<area>-<slug>", "docstring": "<one line>", "deferred": ["<fact left out>", ...]}. '
+    "`deferred` is [] when the statement covers the whole issue; when you specify a faithful SUBSET, "
+    "list the omitted facts (each a short phrase) so they become follow-up issues. Never weaken or "
+    "silently drop a fact you state."
+)
+
+FORMALIZE_SYSTEM = (
+    "You are an autoformalization model for MathFin (Lean 4 on Mathlib). Given a precise INTENDED "
+    "STATEMENT in prose plus the available declarations, produce ONE Lean 4 theorem that formalizes "
+    "it EXACTLY, ending in `:= by sorry` (state only — no proof). Requirements:\n"
+    "- Output exactly one ```lean block: a single `theorem NAME <binders> : <conclusion> := by sorry`.\n"
+    "- CONSUME the named MathFin/Mathlib declarations rather than reproving or inlining them (e.g. use "
+    "`MathFin.zcb r t T`, do not re-derive the bond price).\n"
+    "- ASCII-parseable operators: `^` for powers (write `σ^2`, never the Unicode superscript `σ²`); "
+    "`*` for products; `Real.exp`/`Real.log`/`Real.sqrt`.\n"
+    "- Render every hypothesis and the full conclusion of the intended statement — do not weaken, "
+    "drop a hypothesis, or flip an inequality."
+)
+
+FIDELITY_SYSTEM = (
+    "You are given an INTENDED STATEMENT in prose and a candidate Lean 4 theorem meant to formalize "
+    "it. Decide whether the Lean faithfully renders the intent: same hypotheses, same conclusion, "
+    "nothing weakened, dropped, or flipped. This is a SAFETY NET for gross formalization failures, "
+    "not a maximal-formality check (a human makes the final call at merge); accept reasonable "
+    "abstractions. Respond with ONLY a JSON object: "
+    '{"faithful": true|false, "verdict": "<one line>", "issues": ["<gross divergence>", ...]}.'
+)
+
+
+def intent_messages(issue: dict, context_pack: str) -> list[dict]:
+    user = f"ISSUE #{issue.get('number')}: {_issue_prose(issue)}\n"
+    if context_pack:
+        user += "\nAvailable declarations you may reference:\n" + context_pack
+    return [{"role": "system", "content": INTENT_SYSTEM}, {"role": "user", "content": user}]
+
+
+def parse_intent(reply: str) -> dict | None:
+    """Parse a magistral intent reply into a dict. None unless it carries a `statement` plus the
+    naming meta (`module_name`, `benchmark_id`) the mechanical emit needs."""
+    v = _extract_json(reply)
+    if not isinstance(v, dict) or not v.get("statement") or not v.get("module_name") \
+            or not v.get("benchmark_id"):
+        return None
+    v.setdefault("objects", [])
+    v.setdefault("docstring", "")
+    v.setdefault("deferred", [])
+    return v
+
+
+def draft_intent(issue: dict, context_pack: str, *, chat_fn) -> dict:
+    """Stage 1: magistral SPECIFIES the intended statement (prose + objects + naming meta) from the
+    issue. No Lean. Returns `{ok, intent, tokens}`."""
+    content, tokens = chat_fn(intent_messages(issue, context_pack))
+    intent = parse_intent(content)
+    return {"ok": intent is not None, "intent": intent, "tokens": tokens}
+
+
+def formalize_messages(intent: dict, grounding: str) -> list[dict]:
+    objs = ", ".join(intent.get("objects") or []) or "(none named)"
+    user = (f"INTENDED STATEMENT:\n{intent['statement']}\n\n"
+            f"CONSUME THESE DECLARATIONS: {objs}\n")
+    if grounding:
+        user += "\nAVAILABLE SIGNATURES:\n" + grounding
+    return [{"role": "system", "content": FORMALIZE_SYSTEM}, {"role": "user", "content": user}]
+
+
+_UNKNOWN_RE = re.compile(r"unknown (?:identifier|constant) '([^']+)'")
+
+
+def _unknown_identifiers(errors) -> list[str]:
+    """The `X` in `unknown identifier 'X'` / `unknown constant 'X'` elaboration errors, deduped —
+    the names to retrieve real candidates for during repair."""
+    out, seen = [], set()
+    for e in errors:
+        for m in _UNKNOWN_RE.findall(str(e)):
+            if m not in seen:
+                seen.add(m)
+                out.append(m)
+    return out
+
+
+def loogle_candidates(name: str, *, main_repo: str, run_fn=None) -> str:
+    """Loogle hits for `name` via `scripts/loogle.sh` — UNVERIFIED candidates (the public index
+    tracks a newer Mathlib than our pin; the elaborator gates bad ones). Returns candidate text or
+    ''. `run_fn` injectable for tests."""
+    if run_fn is None:
+        def run_fn(nm):
+            try:
+                out = subprocess.run([os.path.join(main_repo, "scripts", "loogle.sh"), nm],
+                                     capture_output=True, text=True, timeout=20)
+                return out.stdout.strip()
+            except (OSError, subprocess.SubprocessError):
+                return ""
+    return run_fn(name)
+
+
+def formalize_with_repair(intent: dict, grounding: str, *, issue: dict, chat_fn, check_fn,
+                          emit_fn, rounds: int = 3, retrieve_fn=None) -> dict:
+    """Stage 2: Leanstral FORMALIZES `intent` into an elaborating stub, repairing against the
+    elaborator. On an error the compiler message is fed back to Leanstral; for `unknown identifier
+    X`, `retrieve_fn(X)` (loogle) candidates are appended. The naming meta rides from `intent`.
+    Returns `{ok, stub, meta, lean_text, entry, tokens}`."""
+    meta = {"module_name": intent["module_name"], "benchmark_id": intent["benchmark_id"],
+            "docstring": intent.get("docstring", ""), "deferred": intent.get("deferred", [])}
+    messages = formalize_messages(intent, grounding)
+    tokens = 0
+    for _ in range(max(1, rounds)):
+        content, tk = chat_fn(messages)
+        tokens += tk
+        stub = extract_lean_code(content)
+        if stub is None:
+            messages += [
+                {"role": "assistant", "content": content},
+                {"role": "user", "content":
+                 "Output exactly one ```lean block: a single "
+                 "`theorem NAME <binders> : <conclusion> := by sorry`."}]
+            continue
+        try:
+            lean_text, entry, _placement = emit_fn(issue, stub, meta)
+        except Exception as e:  # noqa: BLE001 — surface the assembly failure to the model
+            messages += [
+                {"role": "assistant", "content": content},
+                {"role": "user", "content":
+                 f"The theorem could not be assembled ({e}). Re-output a single "
+                 "well-formed `theorem … := by sorry`."}]
+            continue
+        elab = check_fn(lean_text)
+        if not elab.get("errors") and elab.get("sorry_count", 0) == 1:
+            return {"ok": True, "stub": stub, "meta": meta,
+                    "lean_text": lean_text, "entry": entry, "tokens": tokens}
+        errs = elab.get("errors", [])
+        feedback = ("That statement does not elaborate in Lean:\n```\n"
+                    + "\n".join(str(e) for e in errs[:8]) + "\n```\n"
+                    "Fix ONLY the statement, keep it faithful to the intended statement and still "
+                    "ending in `:= by sorry`. Use `^` for powers (never Unicode `²`); "
+                    "`Real.exp`/`Real.log`/`Real.sqrt`.")
+        if retrieve_fn:
+            for nm in _unknown_identifiers(errs):
+                cand = retrieve_fn(nm)
+                if cand:
+                    feedback += f"\n\nCandidates for `{nm}` (verify they elaborate under our pin):\n{cand}"
+        messages += [{"role": "assistant", "content": content},
+                     {"role": "user", "content": feedback}]
+    return {"ok": False, "stub": None, "meta": None,
+            "lean_text": None, "entry": None, "tokens": tokens}
+
+
+def fidelity_messages(intent: dict, stub: str) -> list[dict]:
+    return [{"role": "system", "content": FIDELITY_SYSTEM},
+            {"role": "user",
+             "content": f"INTENDED STATEMENT:\n{intent['statement']}\n\nLEAN:\n```lean\n{stub}\n```"}]
+
+
+def intent_fidelity_check(intent: dict, stub: str, *, reason_fn) -> dict:
+    """The folded roundtrip: does Leanstral's Lean faithfully render magistral's intent? Magistral
+    compares the stub against its own step-1 intended statement. Soft + lenient — reject ONLY on an
+    explicit `faithful: false`. Returns `{faithful, verdict, tokens}`."""
+    content, tokens = reason_fn(fidelity_messages(intent, stub))
+    v = _extract_json(content) or {}
+    return {"faithful": v.get("faithful") is not False,
+            "verdict": v.get("verdict", ""), "tokens": tokens}
+
+
 # --- kernel-grade faithfulness gates (labs-leanstral via run_target) ----------
 
 # Lightened gates. Each faithfulness-gate attempt is a Lean daemon elaboration, and
@@ -527,18 +706,21 @@ def _write_target(queue_dir: str, n: int, lean_text: str, entry: dict) -> list[s
 
 def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn,
            queue_dir: str, budget: int, pins: str = "", max_issues: int = 1,
-           max_attempt_issues: int = 3, gate_budget: int = 20_000, draft_rounds: int = 2,
-           depth_gate: bool = True, system_prompt=None, log=lambda m: None) -> dict:
+           max_attempt_issues: int = 3, gate_budget: int = 20_000, formalize_rounds: int = 3,
+           formalize_fn=None, retrieve_fn=None, depth_gate: bool = True,
+           system_prompt=None, log=lambda m: None) -> dict:
     """Draft + gate + stage up to `max_issues` targets from `issues`.
 
-    For each candidate (up to `max_attempt_issues`), the gate cascade runs
-    cheapest-first: draft-with-repair (magistral `reason_fn`, elaboration-checked
-    with compiler feedback) → depth gate (structural: the type must consume a
-    pointer-module def) → hypothesis-rejection + disproof (leanstral `prove_fn`) →
-    semantic judge + roundtrip (magistral). Any reject logs the reason and skips
-    to the next issue (the issue stays `status:ready` — never auto-closed). A passing
-    target's stub + `.entry.json` are written to `queue_dir`. Returns
-    `{seeded, tokens}`."""
+    For each candidate (up to `max_attempt_issues`), the cascade runs cheapest-first:
+    intent (magistral `reason_fn` SPECIFIES the statement) → formalize-with-repair
+    (leanstral `formalize_fn` writes elaborating Lean, retrieval-augmented) → depth gate
+    (structural: the type must consume a pointer-module def) → hypothesis-rejection +
+    disproof (leanstral `prove_fn`) → semantic judge (magistral) → intent-fidelity
+    (magistral: does the Lean render the intent). Any reject logs the reason and skips to
+    the next issue (it stays `status:ready` — never auto-closed). A passing target's stub +
+    `.entry.json` are written to `queue_dir`. `formalize_fn` defaults to `prove_fn` (both
+    leanstral). Returns `{seeded, tokens}`."""
+    formalize_fn = formalize_fn or prove_fn
     seeded, spent = [], 0
     for issue in issues[:max_attempt_issues]:
         if len(seeded) >= max_issues or spent >= budget:
@@ -548,14 +730,22 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn,
         # a daemon hiccup, a malformed draft) must not kill the tick — log it and
         # move to the next candidate.
         try:
-            dr = draft_with_repair(issue, context_fn(issue), pins, chat_fn=reason_fn,
-                                   check_fn=check_fn, emit_fn=emit_target_files, rounds=draft_rounds)
-            spent += dr["tokens"]
-            if not dr["ok"]:
-                log(f"#{n}: no elaborating draft after {draft_rounds} rounds"); continue
-            stub, lean_text, entry = dr["stub"], dr["lean_text"], dr["entry"]
+            ctx = context_fn(issue)
+            di = draft_intent(issue, ctx, chat_fn=reason_fn)
+            spent += di["tokens"]
+            if not di["ok"]:
+                log(f"#{n}: no parseable intent"); continue
+            intent = di["intent"]
+
+            fr = formalize_with_repair(intent, ctx, issue=issue, chat_fn=formalize_fn,
+                                       check_fn=check_fn, emit_fn=emit_target_files,
+                                       rounds=formalize_rounds, retrieve_fn=retrieve_fn)
+            spent += fr["tokens"]
+            if not fr["ok"]:
+                log(f"#{n}: no elaborating formalization after {formalize_rounds} rounds"); continue
+            stub, lean_text, entry = fr["stub"], fr["lean_text"], fr["entry"]
             name = split_statement(stub)[0]
-            deferred = normalize_deferred((dr.get("meta") or {}).get("deferred"))
+            deferred = normalize_deferred((fr.get("meta") or {}).get("deferred"))
 
             if depth_gate:
                 dep = depth_rejection(lean_text, name, issue.get("pointers", []), check_fn=check_fn)
@@ -580,10 +770,10 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn,
             if not j.get("faithful"):
                 log(f"#{n}: unfaithful — {j.get('verdict', '')}"); continue
 
-            rt = roundtrip_check(issue, stub, reason_fn=reason_fn, prove_fn=prove_fn)
-            spent += rt["tokens"]
-            if not rt.get("faithful"):
-                log(f"#{n}: roundtrip drift — {rt.get('verdict', '')}"); continue
+            fid = intent_fidelity_check(intent, stub, reason_fn=reason_fn)
+            spent += fid["tokens"]
+            if not fid.get("faithful"):
+                log(f"#{n}: intent drift — {fid.get('verdict', '')}"); continue
 
             paths = _write_target(queue_dir, n, lean_text, entry)
             seeded.append({"id": f"cal-bk-{n}", "issue": n, "paths": paths})
@@ -634,11 +824,16 @@ def main() -> int:
     p.add_argument("--max-attempt-issues", type=int, default=None)
     p.add_argument("--gate-budget", type=int, default=None)
     p.add_argument("--draft-model", default=None)
+    p.add_argument("--intent-model", default=None, help="magistral: stage-1 intent (default: config)")
+    p.add_argument("--formalize-model", default=None, help="leanstral: stage-2 formalize (default: config)")
     p.add_argument("--prover-model", default=None)
     p.add_argument("--draft-max-tokens", type=int, default=None)
     p.add_argument("--draft-rounds", type=int, default=None)
+    p.add_argument("--formalize-rounds", type=int, default=None)
     p.add_argument("--depth-gate", dest="depth_gate", action=argparse.BooleanOptionalAction,
                    default=None, help="pointers-scoped depth gate (default: config)")
+    p.add_argument("--retrieval", dest="retrieval", action=argparse.BooleanOptionalAction,
+                   default=None, help="loogle-augmented repair retrieval (default: config)")
     args = ap.parse_args()
 
     api_key = os.environ.get("MISTRAL_API_KEY")
@@ -653,11 +848,13 @@ def main() -> int:
     max_issues = pick(args.max_issues, cfg.max_issues)
     max_attempt = pick(args.max_attempt_issues, cfg.max_attempt_issues)
     gate_budget = pick(args.gate_budget, cfg.gate_budget)
-    draft_model = pick(args.draft_model, cfg.draft_model)
     prover_model = pick(args.prover_model, cfg.prover_model)
     draft_max_tokens = pick(args.draft_max_tokens, cfg.draft_max_tokens)
-    draft_rounds = pick(args.draft_rounds, cfg.draft_rounds)
     depth_gate = pick(args.depth_gate, cfg.depth_gate)
+    intent_model = pick(args.intent_model, cfg.intent_model)
+    formalize_model = pick(args.formalize_model, cfg.formalize_model)
+    formalize_rounds = pick(args.formalize_rounds, cfg.formalize_rounds)
+    retrieval = pick(args.retrieval, cfg.retrieval)
 
     queue_dir = args.queue_dir or os.path.join(_foundry_root(), "targets", "queue")
 
@@ -674,11 +871,15 @@ def main() -> int:
             f"BrownianMotion @ {pins_d['brownianmotion']}. Target this API surface exactly.")
     prove_system = build_system_prompt(args.main_repo)   # the leaf-prover gate doctrine
 
-    def reason_fn(msgs):
-        return mistral_chat(msgs, api_key=api_key, model=draft_model,
+    def reason_fn(msgs):   # magistral: stage-1 intent + judge + intent-fidelity
+        return mistral_chat(msgs, api_key=api_key, model=intent_model,
                             max_tokens=draft_max_tokens)
 
-    def prove_fn(msgs):
+    def formalize_fn(msgs):   # leanstral: stage-2 formalize
+        return mistral_chat(msgs, api_key=api_key, model=formalize_model,
+                            reasoning_effort="high")
+
+    def prove_fn(msgs):   # leanstral: kernel gates
         return mistral_chat(msgs, api_key=api_key, model=prover_model,
                             reasoning_effort="high")
 
@@ -686,10 +887,13 @@ def main() -> int:
         ptrs = issue.get("pointers", [])
         return extract_signatures(args.main_repo, ptrs) if ptrs else ""
 
+    retrieve_fn = (lambda nm: loogle_candidates(nm, main_repo=args.main_repo)) if retrieval else None
+
     res = refill(issues, reason_fn=reason_fn, prove_fn=prove_fn, check_fn=daemon_check,
                  context_fn=context_fn, queue_dir=queue_dir, budget=budget, pins=pins,
                  max_issues=max_issues, max_attempt_issues=max_attempt, gate_budget=gate_budget,
-                 draft_rounds=draft_rounds, depth_gate=depth_gate, system_prompt=prove_system,
+                 formalize_rounds=formalize_rounds, formalize_fn=formalize_fn, retrieve_fn=retrieve_fn,
+                 depth_gate=depth_gate, system_prompt=prove_system,
                  log=lambda m: print(f"[refill] {m}", file=sys.stderr))
     print(json.dumps(res))
     return 0

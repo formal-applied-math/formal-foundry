@@ -39,6 +39,14 @@ def test_autoformalize_config_depth_gate_reads_toml(tmp_path):
     assert pl.AutoformalizeConfig.load(str(toml)).depth_gate is False
 
 
+def test_autoformalize_config_two_stage_defaults():
+    cfg = pl.AutoformalizeConfig.load(None)
+    assert cfg.intent_model == "magistral-medium-latest"    # strongest Magistral reasoning tier
+    assert cfg.formalize_model == "labs-leanstral-1-5"      # leanstral formalizes the Lean
+    assert cfg.formalize_rounds == 3
+    assert cfg.retrieval is True
+
+
 # --- split_statement ---------------------------------------------------------
 
 def test_split_statement_simple():
@@ -581,15 +589,28 @@ def _issue(n, **kw):
     return d
 
 
-def _good_dwr(i, cp, p, *, chat_fn, check_fn, emit_fn, rounds):
-    """A stand-in for draft_with_repair that returns an ok result with a real
-    emitted lean_text/entry (so refill's _write_target produces valid files)."""
+def _good_intent(i, ctx, *, chat_fn):
+    """Stand-in for draft_intent — a parseable intent with naming meta."""
     n = i["number"]
+    return {"ok": True, "tokens": 5, "intent": {
+        "statement": f"stmt {n}", "objects": [], "module_name": f"T{n}",
+        "benchmark_id": f"mf-fi-t{n}", "docstring": "d", "deferred": []}}
+
+
+def _good_formalize(intent, grounding, *, issue, chat_fn, check_fn, emit_fn, rounds, retrieve_fn=None):
+    """Stand-in for formalize_with_repair — emits a real lean_text/entry from the intent meta."""
+    n = issue["number"]
     stub = f"theorem t{n} (h : p) : q := by sorry"
-    meta = {"module_name": f"T{n}", "benchmark_id": f"mf-fi-t{n}", "docstring": "d"}
-    lean_text, entry, _ = emit_fn(i, stub, meta)
+    meta = {"module_name": intent["module_name"], "benchmark_id": intent["benchmark_id"],
+            "docstring": "d", "deferred": []}
+    lean_text, entry, _ = emit_fn(issue, stub, meta)
     return {"ok": True, "stub": stub, "meta": meta, "lean_text": lean_text,
             "entry": entry, "tokens": 10}
+
+
+def _two_stage_ok(monkeypatch):
+    monkeypatch.setattr(af, "draft_intent", _good_intent)
+    monkeypatch.setattr(af, "formalize_with_repair", _good_formalize)
 
 
 def _pass_gates(monkeypatch):
@@ -598,7 +619,8 @@ def _pass_gates(monkeypatch):
     monkeypatch.setattr(af, "disproof", lambda *a, **k: {"false": False, "tokens": 1})
     monkeypatch.setattr(af, "judge_faithfulness",
                         lambda i, s, chat_fn, deferred=None: {"faithful": True, "tokens": 1})
-    monkeypatch.setattr(af, "roundtrip_check", lambda i, s, *, reason_fn, prove_fn: {"faithful": True, "tokens": 1})
+    monkeypatch.setattr(af, "intent_fidelity_check",
+                        lambda intent, s, *, reason_fn: {"faithful": True, "tokens": 1})
 
 
 _NOOP = lambda m: ("", 0)
@@ -606,7 +628,7 @@ _ELAB_OK = lambda c: {"success": True, "sorry_count": 1, "errors": []}
 
 
 def test_refill_stages_a_good_issue(monkeypatch, tmp_path):
-    monkeypatch.setattr(af, "draft_with_repair", _good_dwr)
+    _two_stage_ok(monkeypatch)
     _pass_gates(monkeypatch)
     res = af.refill([_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
                     context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
@@ -615,10 +637,33 @@ def test_refill_stages_a_good_issue(monkeypatch, tmp_path):
     assert (tmp_path / "cal-bk-5.entry.json").exists()
 
 
+def test_refill_skips_when_intent_unparseable(monkeypatch, tmp_path):
+    # stage 1 (magistral) fails to produce a parseable intent → skip before formalizing.
+    monkeypatch.setattr(af, "draft_intent",
+                        lambda i, ctx, *, chat_fn: {"ok": False, "intent": None, "tokens": 3})
+    _pass_gates(monkeypatch)
+    res = af.refill([_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
+                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
+    assert res["seeded"] == []
+
+
+def test_refill_skips_when_formalization_fails(monkeypatch, tmp_path):
+    # stage 2 (leanstral) cannot produce an elaborating statement → skip.
+    monkeypatch.setattr(af, "draft_intent", _good_intent)
+    monkeypatch.setattr(af, "formalize_with_repair",
+                        lambda *a, **k: {"ok": False, "stub": None, "meta": None,
+                                         "lean_text": None, "entry": None, "tokens": 20})
+    _pass_gates(monkeypatch)
+    res = af.refill([_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
+                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
+    assert res["seeded"] == []
+    assert not (tmp_path / "cal-bk-5.lean").exists()
+
+
 def test_refill_skips_shallow_statement(monkeypatch, tmp_path):
     # a true-but-shallow draft (consumes no pointer-module def) is rejected by the
     # depth gate before the expensive prover gates — never staged.
-    monkeypatch.setattr(af, "draft_with_repair", _good_dwr)
+    _two_stage_ok(monkeypatch)
     _pass_gates(monkeypatch)
     monkeypatch.setattr(af, "depth_rejection",
                         lambda lt, nm, ptr, **k: {"shallow": True, "verdict": "no domain def", "tokens": 0})
@@ -630,7 +675,7 @@ def test_refill_skips_shallow_statement(monkeypatch, tmp_path):
 
 def test_refill_depth_gate_can_be_disabled(monkeypatch, tmp_path):
     # depth_gate=False bypasses the gate entirely — it is not even invoked.
-    monkeypatch.setattr(af, "draft_with_repair", _good_dwr)
+    _two_stage_ok(monkeypatch)
     _pass_gates(monkeypatch)
     calls = {"n": 0}
 
@@ -645,11 +690,12 @@ def test_refill_depth_gate_can_be_disabled(monkeypatch, tmp_path):
 
 
 def test_refill_skips_vacuous_then_stages_next(monkeypatch, tmp_path):
-    monkeypatch.setattr(af, "draft_with_repair", _good_dwr)
+    _two_stage_ok(monkeypatch)
+    monkeypatch.setattr(af, "depth_rejection", lambda lt, nm, ptr, **k: {"shallow": False, "tokens": 0})
     monkeypatch.setattr(af, "disproof", lambda *a, **k: {"false": False, "tokens": 1})
     monkeypatch.setattr(af, "judge_faithfulness",
                         lambda i, s, chat_fn, deferred=None: {"faithful": True, "tokens": 1})
-    monkeypatch.setattr(af, "roundtrip_check", lambda i, s, *, reason_fn, prove_fn: {"faithful": True, "tokens": 1})
+    monkeypatch.setattr(af, "intent_fidelity_check", lambda intent, s, *, reason_fn: {"faithful": True, "tokens": 1})
     # issue 1's stub is vacuous, issue 2's is not
     monkeypatch.setattr(af, "hypothesis_rejection",
                         lambda lt, nm, **k: {"vacuous": "theorem t1 " in lt, "tokens": 1})
@@ -661,26 +707,42 @@ def test_refill_skips_vacuous_then_stages_next(monkeypatch, tmp_path):
 
 
 def test_refill_skips_unfaithful_judge(monkeypatch, tmp_path):
-    monkeypatch.setattr(af, "draft_with_repair", _good_dwr)
+    _two_stage_ok(monkeypatch)
+    monkeypatch.setattr(af, "depth_rejection", lambda lt, nm, ptr, **k: {"shallow": False, "tokens": 0})
     monkeypatch.setattr(af, "hypothesis_rejection", lambda *a, **k: {"vacuous": False, "tokens": 1})
     monkeypatch.setattr(af, "disproof", lambda *a, **k: {"false": False, "tokens": 1})
     monkeypatch.setattr(af, "judge_faithfulness",
                         lambda i, s, chat_fn, deferred=None: {"faithful": False, "verdict": "weaker", "tokens": 1})
-    monkeypatch.setattr(af, "roundtrip_check", lambda i, s, *, reason_fn, prove_fn: {"faithful": True, "tokens": 1})
+    monkeypatch.setattr(af, "intent_fidelity_check", lambda intent, s, *, reason_fn: {"faithful": True, "tokens": 1})
     res = af.refill([_issue(7)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
                     context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
     assert res["seeded"] == []
     assert not (tmp_path / "cal-bk-7.lean").exists()
 
 
+def test_refill_skips_intent_drift(monkeypatch, tmp_path):
+    # the folded roundtrip: leanstral's Lean does not render magistral's intent → skip.
+    _two_stage_ok(monkeypatch)
+    monkeypatch.setattr(af, "depth_rejection", lambda lt, nm, ptr, **k: {"shallow": False, "tokens": 0})
+    monkeypatch.setattr(af, "hypothesis_rejection", lambda *a, **k: {"vacuous": False, "tokens": 1})
+    monkeypatch.setattr(af, "disproof", lambda *a, **k: {"false": False, "tokens": 1})
+    monkeypatch.setattr(af, "judge_faithfulness", lambda i, s, chat_fn, deferred=None: {"faithful": True, "tokens": 1})
+    monkeypatch.setattr(af, "intent_fidelity_check",
+                        lambda intent, s, *, reason_fn: {"faithful": False, "verdict": "dropped hyp", "tokens": 1})
+    res = af.refill([_issue(7)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
+                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
+    assert res["seeded"] == []
+
+
 def test_refill_skips_issue_on_step_exception(monkeypatch, tmp_path):
     # a transient error (e.g. HTTP 429 exhaustion) on one issue must not crash the
     # whole refill — log it and skip to the next issue.
-    def boom(i, cp, p, *, chat_fn, check_fn, emit_fn, rounds):
+    def boom(i, ctx, *, chat_fn):
         if i["number"] == 1:
             raise RuntimeError("HTTP 429 from Mistral API")
-        return _good_dwr(i, cp, p, chat_fn=chat_fn, check_fn=check_fn, emit_fn=emit_fn, rounds=rounds)
-    monkeypatch.setattr(af, "draft_with_repair", boom)
+        return _good_intent(i, ctx, chat_fn=chat_fn)
+    monkeypatch.setattr(af, "draft_intent", boom)
+    monkeypatch.setattr(af, "formalize_with_repair", _good_formalize)
     _pass_gates(monkeypatch)
     res = af.refill([_issue(1), _issue(2)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
                     context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
@@ -688,25 +750,147 @@ def test_refill_skips_issue_on_step_exception(monkeypatch, tmp_path):
     assert (tmp_path / "cal-bk-2.lean").exists()
 
 
-def test_refill_wires_reason_and_prove_fns(monkeypatch, tmp_path):
+def test_refill_wires_intent_formalize_prove_fns(monkeypatch, tmp_path):
     seen = {}
     monkeypatch.setattr(
-        af, "draft_with_repair",
-        lambda i, cp, p, *, chat_fn, check_fn, emit_fn, rounds:
-        seen.update(draft=chat_fn) or _good_dwr(i, cp, p, chat_fn=chat_fn,
-                                                check_fn=check_fn, emit_fn=emit_fn, rounds=rounds))
+        af, "draft_intent",
+        lambda i, ctx, *, chat_fn: seen.update(intent=chat_fn) or _good_intent(i, ctx, chat_fn=chat_fn))
+    monkeypatch.setattr(
+        af, "formalize_with_repair",
+        lambda intent, g, *, issue, chat_fn, check_fn, emit_fn, rounds, retrieve_fn=None:
+        seen.update(formalize=chat_fn) or _good_formalize(intent, g, issue=issue, chat_fn=chat_fn,
+                                                          check_fn=check_fn, emit_fn=emit_fn, rounds=rounds))
+    monkeypatch.setattr(af, "depth_rejection", lambda lt, nm, ptr, **k: {"shallow": False, "tokens": 0})
     monkeypatch.setattr(af, "hypothesis_rejection",
                         lambda lt, nm, **k: seen.update(gate=k["chat_fn"]) or {"vacuous": False, "tokens": 1})
     monkeypatch.setattr(af, "disproof", lambda *a, **k: {"false": False, "tokens": 1})
     monkeypatch.setattr(af, "judge_faithfulness",
                         lambda i, s, chat_fn, deferred=None: seen.update(judge=chat_fn) or {"faithful": True, "tokens": 1})
-    monkeypatch.setattr(af, "roundtrip_check", lambda i, s, *, reason_fn, prove_fn: {"faithful": True, "tokens": 1})
+    monkeypatch.setattr(af, "intent_fidelity_check", lambda intent, s, *, reason_fn: {"faithful": True, "tokens": 1})
     R = lambda m: ("R", 0)
     P = lambda m: ("P", 0)
-    af.refill([_issue(9)], reason_fn=R, prove_fn=P, check_fn=_ELAB_OK,
+    F = lambda m: ("F", 0)
+    af.refill([_issue(9)], reason_fn=R, prove_fn=P, formalize_fn=F, check_fn=_ELAB_OK,
               context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
-    assert seen["draft"] is R and seen["judge"] is R    # magistral drafts + judges
-    assert seen["gate"] is P                            # leanstral runs the kernel gates
+    assert seen["intent"] is R and seen["judge"] is R    # magistral: intent + judge
+    assert seen["formalize"] is F                        # leanstral: formalize
+    assert seen["gate"] is P                             # leanstral: kernel gates
+
+
+# --- two-stage draft components: intent (magistral) + formalize (leanstral) ---
+
+def test_parse_intent_extracts_statement_and_meta():
+    reply = ('reasoning...\n```json\n{"statement": "For a ZCB B ...", "objects": ["MathFin.zcb"], '
+             '"module_name": "FRA", "benchmark_id": "mf-fi-fra", "docstring": "d", "deferred": []}\n```')
+    it = af.parse_intent(reply)
+    assert it["statement"].startswith("For a ZCB")
+    assert it["objects"] == ["MathFin.zcb"]
+    assert it["module_name"] == "FRA" and it["benchmark_id"] == "mf-fi-fra"
+
+
+def test_parse_intent_none_when_missing_required():
+    assert af.parse_intent('```json\n{"statement": "x"}\n```') is None    # no module/benchmark
+    assert af.parse_intent("no json at all") is None
+
+
+def test_intent_messages_carry_issue_and_context():
+    msgs = af.intent_messages({"number": 1, "title": "FRA", "body": "F = ...", "pointers": []}, "SIGPACK")
+    joined = " ".join(m["content"] for m in msgs)
+    assert "FRA" in joined and "SIGPACK" in joined
+    assert any(m["role"] == "system" for m in msgs)
+
+
+def test_draft_intent_ok_and_tokens():
+    reply = '```json\n{"statement":"S","objects":[],"module_name":"M","benchmark_id":"mf-x","docstring":"d"}\n```'
+    r = af.draft_intent(_issue(3), "", chat_fn=_script_chat([reply]))
+    assert r["ok"] is True and r["intent"]["module_name"] == "M" and r["tokens"] == 10
+
+
+def test_draft_intent_not_ok_when_unparseable():
+    r = af.draft_intent(_issue(3), "", chat_fn=_script_chat(["sorry, no json"]))
+    assert r["ok"] is False and r["intent"] is None
+
+
+_INTENT = {"statement": "P1 = P2*(1+d)", "objects": ["MathFin.zcb"], "module_name": "FRA",
+           "benchmark_id": "mf-fi-fra", "docstring": "d", "deferred": []}
+
+
+def _formalize_reply(concl="x = x", name="foo"):
+    return f"```lean\ntheorem {name} (x : ℝ) : {concl} := by sorry\n```"
+
+
+def test_formalize_messages_carry_intent_objects_and_grounding():
+    msgs = af.formalize_messages(_INTENT, "SIGS")
+    joined = " ".join(m["content"] for m in msgs)
+    assert "P1 = P2*(1+d)" in joined and "MathFin.zcb" in joined and "SIGS" in joined
+    assert ":= by sorry" in joined
+
+
+def test_formalize_with_repair_succeeds_first_round():
+    r = af.formalize_with_repair(_INTENT, "", issue=_issue(5), chat_fn=_script_chat([_formalize_reply()]),
+                                 check_fn=_ELAB_OK, emit_fn=af.emit_target_files, rounds=3)
+    assert r["ok"] is True and "theorem foo" in r["lean_text"] and r["tokens"] == 10
+
+
+def test_formalize_with_repair_repairs_on_elaboration_error():
+    replies = [_formalize_reply(concl="x ²"), _formalize_reply(concl="x = x")]
+    checks = iter([{"success": False, "errors": ["unexpected token '²'"], "sorry_count": 1},
+                   {"success": True, "errors": [], "sorry_count": 1}])
+    r = af.formalize_with_repair(_INTENT, "", issue=_issue(5), chat_fn=_script_chat(replies),
+                                 check_fn=lambda c: next(checks), emit_fn=af.emit_target_files, rounds=3)
+    assert r["ok"] is True and "x = x" in r["lean_text"]
+
+
+def test_formalize_with_repair_injects_loogle_on_unknown_identifier():
+    replies = [_formalize_reply(concl="Foo.bar x"), _formalize_reply(concl="x = x")]
+    seen = []
+
+    def chat(msgs):
+        seen.append(msgs)
+        return (replies[len(seen) - 1], 10)
+    checks = iter([{"success": False, "errors": ["unknown identifier 'Foo.bar'"], "sorry_count": 1},
+                   {"success": True, "errors": [], "sorry_count": 1}])
+    r = af.formalize_with_repair(_INTENT, "", issue=_issue(5), chat_fn=chat,
+                                 check_fn=lambda c: next(checks), emit_fn=af.emit_target_files,
+                                 rounds=3, retrieve_fn=lambda nm: f"CANDIDATES:{nm}=real.bar")
+    assert r["ok"] is True
+    assert "CANDIDATES:Foo.bar" in " ".join(m["content"] for m in seen[1])   # loogle fed back
+
+
+def test_formalize_with_repair_gives_up_after_rounds():
+    r = af.formalize_with_repair(_INTENT, "", issue=_issue(5),
+                                 chat_fn=_script_chat([_formalize_reply("bad ²"), _formalize_reply("worse ²")]),
+                                 check_fn=lambda c: {"success": False, "errors": ["e"], "sorry_count": 1},
+                                 emit_fn=af.emit_target_files, rounds=2)
+    assert r["ok"] is False
+
+
+def test_unknown_identifiers_extracted_and_deduped():
+    errs = ["line 3: unknown identifier 'Foo.bar'", "line 5: unknown constant 'Baz'",
+            "again unknown identifier 'Foo.bar'", "unrelated error"]
+    assert af._unknown_identifiers(errs) == ["Foo.bar", "Baz"]
+
+
+def test_loogle_candidates_uses_injected_runner():
+    assert af.loogle_candidates("zcb", main_repo="/x", run_fn=lambda nm: f"hit:{nm}") == "hit:zcb"
+
+
+def test_intent_fidelity_faithful_and_tokens():
+    r = af.intent_fidelity_check(_INTENT, "theorem foo : True := by sorry",
+                                 reason_fn=_canned_chat('{"faithful": true, "verdict": "ok"}', 8))
+    assert r["faithful"] is True and r["tokens"] == 8
+
+
+def test_intent_fidelity_rejects_on_explicit_false():
+    r = af.intent_fidelity_check(_INTENT, "theorem foo : True := by sorry",
+                                 reason_fn=_canned_chat('{"faithful": false, "verdict": "dropped hyp"}', 8))
+    assert r["faithful"] is False
+
+
+def test_intent_fidelity_fails_open_when_unparseable():
+    r = af.intent_fidelity_check(_INTENT, "theorem foo : True := by sorry",
+                                 reason_fn=_canned_chat("hmm no json", 3))
+    assert r["faithful"] is True    # reject only on an explicit false
 
 
 # --- issue preparation (pointers extraction + filter/enrich) -----------------
