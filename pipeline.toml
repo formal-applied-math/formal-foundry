@@ -53,3 +53,8 @@ draft_rounds = 3         # draft attempts w/ compiler feedback — magistral dra
 draft_model = "magistral-medium-latest"
 prover_model = "labs-leanstral-1-5"
 draft_max_tokens = 16000   # reasoning headroom — magistral emits a think trace before the code
+depth_gate = true          # pointers-scoped depth gate: reject a true-but-shallow stub whose
+                           # TYPE consumes no def from its `-- pointers:` MathFin modules (a
+                           # Mathlib identity in domain clothing — cal-bk-67 inlined the forward
+                           # rate as `let`s over raw reals instead of consuming MathFin.zcb).
+                           # No pointers ⇒ inapplicable ⇒ skipped.

@@ -19,7 +19,7 @@ proof and a human still owns the merge.
 
 ```
  SELF-FEED  (when the queue has no unattempted target)
-   ISSUE → MAGISTRAL drafts stub ⇄ elaborate → kernel gates (vacuity·disproof) → judge → roundtrip → STUB
+   ISSUE → MAGISTRAL drafts stub ⇄ elaborate → depth gate → kernel gates (vacuity·disproof) → judge → roundtrip → STUB
  PROVE + SHIP
    STUB → HOUSE DOCTRINE (+ LIVE docs/patterns.md) → LEANSTRAL ⇄ LEAN ENV → GATE → REFINERY → PR
           (system prompt)                             (the prover)  (checks it) (kernel)  (human)  (human-merged)
@@ -28,13 +28,17 @@ proof and a human still owns the merge.
 **Self-feed (the refill phase, `probe/autoformalize.py`).** When the queue is
 empty, the tick pulls the next `status:ready`+`type:proof` issue and Magistral
 drafts a `theorem … := by sorry` statement from its Task+Pointers, repairing it
-against the elaborator (compiler feedback) until it is well-formed. Five gates then
-guard faithfulness before any proving budget is spent: elaboration, two
+against the elaborator (compiler feedback) until it is well-formed. A cascade of
+gates then guards faithfulness before any proving budget is spent: elaboration, a
+**structural depth gate** (a `run_cmd` meta check requiring the statement's TYPE to
+consume a def from its `-- pointers:` MathFin modules — else it is a Mathlib identity
+in domain clothing, like cal-bk-67 inlining the forward rate over raw reals instead of
+consuming `MathFin.zcb`; pointers-scoped, so it skips when the issue cites none), two
 kernel-grade Leanstral probes (**hypothesis-rejection** ⊢ False and **disproof**
 ⊢ ¬Concl → retire if provable), a Magistral **semantic judge**, and a **roundtrip**
 check. A passing draft is staged as a validated target; a rejected issue stays
-`status:ready`, never auto-closed. Honest caveat: elaboration + the Leanstral probes
-are *independent, kernel-grade* checks; the judge is a *soft magistral self-check*
+`status:ready`, never auto-closed. Honest caveat: elaboration, the depth gate, and the
+Leanstral probes are *independent, elaborator/kernel-grade* checks; the judge is a *soft magistral self-check*
 (magistral grading its own draft); the roundtrip is a *cross-model back-translation*
 (magistral informalizes → **Leanstral independently re-formalizes** → magistral
 compares — a genuine consistency check, but still soft + unverified). None of the

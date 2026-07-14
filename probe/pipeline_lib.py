@@ -75,6 +75,10 @@ class AutoformalizeConfig:
     draft_model: str = "magistral-medium-latest"
     prover_model: str = "labs-leanstral-1-5"
     draft_max_tokens: int = 16_000   # reasoning headroom (magistral emits a think trace)
+    # pointers-scoped depth gate: reject a true-but-shallow stub whose TYPE consumes
+    # no def from its `-- pointers:` MathFin modules (a Mathlib identity in domain
+    # clothing). `false` disables it (rely on the kernel/judge gates + human merge).
+    depth_gate: bool = True
 
     @staticmethod
     def load(path: str | None) -> "AutoformalizeConfig":

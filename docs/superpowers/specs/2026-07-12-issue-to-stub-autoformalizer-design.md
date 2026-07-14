@@ -138,19 +138,30 @@ Run in increasing cost, cheapest-rejects-first:
    daemon's `success` — a valid stub whose `sorry` remains reports `success=False`;
    this bit us, see Build log). On a Lean error, feed it back (+ a `^`-not-`²` hint)
    and re-draft up to `draft_rounds` (default 2) times — the compiler-feedback lever.
-2. **hypothesis_rejection** (leaf-prover, small budget) — `⊢ False` from the
+2. **depth_rejection** (elaborator, ~free — pointers-scoped, option B) — a `run_cmd`
+   meta block requires the theorem's TYPE to USE ≥1 constant DEFINED in one of the
+   issue's `-- pointers:` MathFin modules (`ci.type.getUsedConstants` attributed via
+   `env.getModuleIdxFor?`). None ⇒ `throwError "depth-gate: …"` ⇒ shallow ⇒ skip. This
+   catches the true-but-shallow class the kernel gates pass — a Mathlib identity in
+   domain clothing (cal-bk-53 = `integral_add_compl`; cal-bk-67 inlined
+   `F = (P₁/P₂−1)/δ` over raw reals instead of consuming `MathFin.zcb`). With NO
+   pointers the gate is inapplicable and SKIPS (a missing Pointers section is a metadata
+   gap, not a shallowness verdict; the stub carries no MathFin import to consume anyway).
+   Fails OPEN on a daemon-communication error (keys on the `depth-gate:` marker, not any
+   error). Config `[autoformalize].depth_gate` (default on).
+3. **hypothesis_rejection** (leaf-prover, small budget) — `⊢ False` from the
    hypotheses ⇒ vacuous ⇒ retire.
-3. **disproof** (leaf-prover, small budget) — `⊢ ¬ Concl` ⇒ false ⇒ retire.
-4. **judge_faithfulness** (magistral) — statement says what the issue asks; catches
+4. **disproof** (leaf-prover, small budget) — `⊢ ¬ Concl` ⇒ false ⇒ retire.
+5. **judge_faithfulness** (magistral) — statement says what the issue asks; catches
    the *gross* semantic failures the kernel can't (missing conjunct, weaker
    restatement, wrong hypothesis).
-5. **roundtrip_check** (CROSS-MODEL back-translation) — magistral informalizes the
+6. **roundtrip_check** (CROSS-MODEL back-translation) — magistral informalizes the
    draft → **Leanstral independently re-formalizes** the prose → magistral compares
    the two Lean statements. The independence (a different model re-formalizes) makes it
    a genuine consistency cross-check, not a self-check; soft + lenient (rejects only on
    an explicit divergence; a failed Leanstral re-formalize is inconclusive, not a reject).
 
-All five pass ⇒ stage the target. Any reject ⇒ log the reason, skip the issue
+All gates pass ⇒ stage the target. Any reject ⇒ log the reason, skip the issue
 (it stays `status:ready` on GitHub — never auto-closed on a reject — so R or a
 later tick can revisit). The gates are a **safety net on a machine-authored
 statement**; R's 8-lens PR review remains the final faithfulness authority.
@@ -313,3 +324,33 @@ not a `tools/` bind-mount, and `publish-image.yml`'s trigger paths **exclude `to
 (it is bind-mounted locally). So Fix 1 reaches the CI daemon **only** via a manual
 `gh workflow run publish-image.yml` after pushing `lean_backend.py`; a local daemon restart
 suffices locally.
+
+## Depth gate (2026-07-13) — the yield ceiling was modeling depth, and it is now gated
+
+The robustness pass fixed the infra; the first proved stage (`cal-bk-67`,
+`fra_value_zero_iff_fair`, leanstral-proved axiom-clean) then exposed the *real* ceiling:
+the statement was true, non-vacuous, faithful-to-structure — and **shallow**. Stripped of
+FRA vocabulary it is `δ·P₂·(F−K) = 0 ↔ K = F` (a nonzero-factor cancellation) over opaque
+reals `P₁ P₂ : ℝ`, and it **inlined** the forward rate `F := (P₁/P₂−1)/δ` as a `let` instead
+of **consuming** `MathFin.zcb` / the ForwardRate lemmas its own pointers name. Every kernel
+and judge gate passed because none of them measures whether the statement *engages the
+domain*. R rejected it (as with cal-bk-53 = `integral_add_compl` in barrier clothing).
+
+The fix (option B — pointers-scoped, R's call): a **structural depth gate**, first among
+the gates. It is elaborator-grounded, not an LLM judge (rigorous-vs-soft rule): the probe is
+`lean_text` + a `run_cmd` meta block that looks the decl up (`env.find? \`MathFin.<name>`),
+takes `ci.type.getUsedConstants`, attributes each via `env.getModuleIdxFor?` →
+`env.header.moduleNames[i.toNat]!`, and `throwError "depth-gate: …"` unless ≥1 constant is
+defined in a `-- pointers:` module. `depth_rejection` keys on the `depth-gate:` marker so it
+fails **open** on a daemon-communication error, and **skips** entirely when the issue has no
+pointers (a metadata gap, not a shallowness verdict). Config `[autoformalize].depth_gate`
+(default on); CLI `--depth-gate/--no-depth-gate`.
+
+Validated: 8 new unit tests (probe construction, reject/pass/fail-open/skip, refill wiring,
+config) + the whole 146-test suite green; and live against the daemon — the Python-emitted
+probe **rejects** the staged cal-bk-67 (`depth-gate: … consumes no def from pointer modules`)
+and **passes** a variant that consumes `MathFin.zcb`. The Lean meta API was locked against
+the live daemon before writing the Python (the elaborated term confirmed `ModuleIdx.toNat` +
+`getModuleIdxFor?`). Known limit: pointers-scoped only — a deep statement consuming a MathFin
+def from a *non-pointer* module would be rejected; that is the deliberate strictness of
+option B, and the issue stays `status:ready` for a human, never auto-closed.

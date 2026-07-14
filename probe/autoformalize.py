@@ -416,6 +416,70 @@ def disproof(lean_text: str, sorry_name: str, *, chat_fn, check_fn,
     return {"false": proved, "tokens": tokens}
 
 
+# --- pointers-scoped depth gate (option B) -----------------------------------
+#
+# The kernel gates catch a FALSE or vacuous statement; they do NOT catch a
+# TRUE-but-shallow one — a Mathlib identity in domain clothing (cal-bk-53 reduced to
+# `integral_add_compl`; cal-bk-67 inlined the forward-rate formula as `let`s over raw
+# reals instead of consuming `MathFin.zcb`). The depth gate is a structural,
+# ELABORATOR-grounded check (not an LLM judge, per the rigorous-vs-soft rule): elaborate
+# the stub, then a `run_cmd` meta block inspects the theorem's TYPE and requires it to
+# USE at least one constant DEFINED in one of the issue's `-- pointers:` MathFin modules.
+# If none, the meta throwErrors — surfacing as a daemon error the gate keys on by its
+# `depth-gate:` marker. With no pointers there is nothing to scope to, so it falls back
+# to requiring any `MathFin.*` constant (namespace fallback).
+
+_DEPTH_MARKER = "depth-gate:"
+
+
+def _mod_name(pointer: str) -> str:
+    """`MathFin/FixedIncome/ZCB.lean` -> the Lean module name `MathFin.FixedIncome.ZCB`."""
+    stem = pointer[:-5] if pointer.endswith(".lean") else pointer
+    return stem.replace("/", ".")
+
+
+def depth_probe(lean_text: str, name: str, pointers: list[str]) -> str:
+    """The stub + a `run_cmd` meta block that FAILS elaboration unless the theorem's
+    TYPE uses a constant DEFINED in one of its pointer modules (pointers-scoped).
+    `name` is the decl name (under `namespace MathFin`); `pointers` are repo-relative
+    `MathFin/…/X.lean` paths (assumed non-empty — `depth_rejection` skips otherwise)."""
+    mods = [_mod_name(p) for p in pointers if p.endswith(".lean")]
+    ptr_list = ", ".join(f"`{m}" for m in mods)
+    meta = (
+        "\nopen Lean in\n"
+        "run_cmd do\n"
+        "  let env ← getEnv\n"
+        f"  let some ci := env.find? `MathFin.{name}\n"
+        f'    | throwError "{_DEPTH_MARKER} declaration {name} not found"\n'
+        "  let mods := env.header.moduleNames\n"
+        f"  let ptr : List Name := [{ptr_list}]\n"
+        "  let used := ci.type.getUsedConstants\n"
+        "  let hit := used.any fun c =>\n"
+        "    match env.getModuleIdxFor? c with\n"
+        "    | some i => ptr.contains mods[i.toNat]!\n"
+        "    | none => false\n"
+        "  unless hit do\n"
+        f'    throwError "{_DEPTH_MARKER} statement type consumes no def from pointer modules {{ptr}}"\n'
+    )
+    return lean_text.rstrip() + "\n" + meta
+
+
+def depth_rejection(lean_text: str, name: str, pointers: list[str], *, check_fn) -> dict:
+    """Elaborate the depth probe via `check_fn` (the daemon). `shallow=True` iff the meta
+    block reported a `depth-gate:` error (the type consumes no pointer-module def). With
+    NO pointers the gate is inapplicable — it SKIPS (a missing Pointers section is a
+    metadata gap, not a shallowness verdict; the stub carries no MathFin import to consume
+    anyway). Fails OPEN too: a daemon-communication error is NOT a depth verdict, so an
+    infra hiccup never rejects a good target (like the prover gates). No prover call ⇒
+    `tokens=0`."""
+    mods = [p for p in pointers if p.endswith(".lean")]
+    if not mods:
+        return {"shallow": False, "tokens": 0, "verdict": "no pointers — depth gate skipped"}
+    res = check_fn(depth_probe(lean_text, name, mods))
+    depth_errs = [str(e) for e in (res.get("errors") or []) if _DEPTH_MARKER in str(e)]
+    return {"shallow": bool(depth_errs), "tokens": 0, "verdict": "; ".join(depth_errs[:2])}
+
+
 # --- issue preparation --------------------------------------------------------
 
 _POINTER_RE = re.compile(r"MathFin/[\w/]+\.lean")
@@ -464,13 +528,14 @@ def _write_target(queue_dir: str, n: int, lean_text: str, entry: dict) -> list[s
 def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn,
            queue_dir: str, budget: int, pins: str = "", max_issues: int = 1,
            max_attempt_issues: int = 3, gate_budget: int = 20_000, draft_rounds: int = 2,
-           system_prompt=None, log=lambda m: None) -> dict:
+           depth_gate: bool = True, system_prompt=None, log=lambda m: None) -> dict:
     """Draft + gate + stage up to `max_issues` targets from `issues`.
 
     For each candidate (up to `max_attempt_issues`), the gate cascade runs
     cheapest-first: draft-with-repair (magistral `reason_fn`, elaboration-checked
-    with compiler feedback) → hypothesis-rejection + disproof (leanstral `prove_fn`)
-    → semantic judge + roundtrip (magistral). Any reject logs the reason and skips
+    with compiler feedback) → depth gate (structural: the type must consume a
+    pointer-module def) → hypothesis-rejection + disproof (leanstral `prove_fn`) →
+    semantic judge + roundtrip (magistral). Any reject logs the reason and skips
     to the next issue (the issue stays `status:ready` — never auto-closed). A passing
     target's stub + `.entry.json` are written to `queue_dir`. Returns
     `{seeded, tokens}`."""
@@ -491,6 +556,12 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn,
             stub, lean_text, entry = dr["stub"], dr["lean_text"], dr["entry"]
             name = split_statement(stub)[0]
             deferred = normalize_deferred((dr.get("meta") or {}).get("deferred"))
+
+            if depth_gate:
+                dep = depth_rejection(lean_text, name, issue.get("pointers", []), check_fn=check_fn)
+                spent += dep["tokens"]
+                if dep["shallow"]:
+                    log(f"#{n}: shallow — {dep.get('verdict', '')}"); continue
 
             vac = hypothesis_rejection(lean_text, name, chat_fn=prove_fn, check_fn=check_fn,
                                        budget=gate_budget, system_prompt=system_prompt)
@@ -566,6 +637,8 @@ def main() -> int:
     p.add_argument("--prover-model", default=None)
     p.add_argument("--draft-max-tokens", type=int, default=None)
     p.add_argument("--draft-rounds", type=int, default=None)
+    p.add_argument("--depth-gate", dest="depth_gate", action=argparse.BooleanOptionalAction,
+                   default=None, help="pointers-scoped depth gate (default: config)")
     args = ap.parse_args()
 
     api_key = os.environ.get("MISTRAL_API_KEY")
@@ -584,6 +657,7 @@ def main() -> int:
     prover_model = pick(args.prover_model, cfg.prover_model)
     draft_max_tokens = pick(args.draft_max_tokens, cfg.draft_max_tokens)
     draft_rounds = pick(args.draft_rounds, cfg.draft_rounds)
+    depth_gate = pick(args.depth_gate, cfg.depth_gate)
 
     queue_dir = args.queue_dir or os.path.join(_foundry_root(), "targets", "queue")
 
@@ -615,7 +689,7 @@ def main() -> int:
     res = refill(issues, reason_fn=reason_fn, prove_fn=prove_fn, check_fn=daemon_check,
                  context_fn=context_fn, queue_dir=queue_dir, budget=budget, pins=pins,
                  max_issues=max_issues, max_attempt_issues=max_attempt, gate_budget=gate_budget,
-                 draft_rounds=draft_rounds, system_prompt=prove_system,
+                 draft_rounds=draft_rounds, depth_gate=depth_gate, system_prompt=prove_system,
                  log=lambda m: print(f"[refill] {m}", file=sys.stderr))
     print(json.dumps(res))
     return 0

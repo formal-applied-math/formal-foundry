@@ -29,6 +29,16 @@ def test_autoformalize_config_reads_toml(tmp_path):
     assert cfg.gate_budget == 20_000        # unspecified keys keep defaults
 
 
+def test_autoformalize_config_depth_gate_default_on():
+    assert pl.AutoformalizeConfig.load(None).depth_gate is True
+
+
+def test_autoformalize_config_depth_gate_reads_toml(tmp_path):
+    toml = tmp_path / "pipeline.toml"
+    toml.write_text("[autoformalize]\ndepth_gate = false\n")
+    assert pl.AutoformalizeConfig.load(str(toml)).depth_gate is False
+
+
 # --- split_statement ---------------------------------------------------------
 
 def test_split_statement_simple():
@@ -502,6 +512,66 @@ def test_gate_is_lightened_to_a_single_daemon_check_by_default():
     assert len(calls) == 1
 
 
+# --- pointers-scoped depth gate (option B) -----------------------------------
+
+def test_depth_probe_pointers_scoped_targets_pointer_module_defs():
+    lean_text, _e, _p = af.emit_target_files(_ISSUE, _STUB, _META)
+    probe = af.depth_probe(lean_text, "fra_value", _ISSUE["pointers"])
+    assert lean_text.rstrip() in probe                         # elaborates the stub first
+    assert "`MathFin.fra_value" in probe                       # looks the decl up by full name
+    assert "`MathFin.FixedIncome.ForwardRate" in probe         # pointer modules, Lean-name form
+    assert "`MathFin.FixedIncome.ZCB" in probe
+    assert "getUsedConstants" in probe and "getModuleIdxFor?" in probe
+    assert "depth-gate:" in probe                              # the reject marker
+
+
+def test_depth_rejection_skips_when_no_pointers():
+    # the gate is pointers-scoped; with no pointers it is INAPPLICABLE — skip (never
+    # reject for a missing Pointers section, and never touch the daemon).
+    lean_text, _e, _p = af.emit_target_files({**_ISSUE, "pointers": []}, _STUB, _META)
+    called = {"n": 0}
+
+    def check(code):
+        called["n"] += 1
+        return {"success": False, "errors": [_DEPTH_ERR], "sorry_count": 1}
+    r = af.depth_rejection(lean_text, "fra_value", [], check_fn=check)
+    assert r["shallow"] is False
+    assert called["n"] == 0                                    # daemon not consulted
+
+
+_DEPTH_ERR = ("line 21:0: depth-gate: statement type consumes no def from "
+              "pointer modules [MathFin.FixedIncome.ForwardRate, MathFin.FixedIncome.ZCB]")
+
+
+def test_depth_rejection_rejects_on_depth_error():
+    lean_text, _e, _p = af.emit_target_files(_ISSUE, _STUB, _META)
+    check = lambda code: {"success": False, "errors": [_DEPTH_ERR],
+                          "warnings": ["declaration uses `sorry`"], "sorry_count": 1}
+    r = af.depth_rejection(lean_text, "fra_value", _ISSUE["pointers"], check_fn=check)
+    assert r["shallow"] is True
+    assert "depth-gate" in r["verdict"]
+    assert r["tokens"] == 0                                    # daemon elaboration, no prover
+
+
+def test_depth_rejection_passes_when_only_sorry_warning():
+    lean_text, _e, _p = af.emit_target_files(_ISSUE, _STUB, _META)
+    check = lambda code: {"success": False, "errors": [],
+                          "warnings": ["declaration uses `sorry`"], "sorry_count": 1}
+    r = af.depth_rejection(lean_text, "fra_value", _ISSUE["pointers"], check_fn=check)
+    assert r["shallow"] is False
+
+
+def test_depth_rejection_fails_open_on_daemon_error():
+    # a daemon-communication failure (Fix 1b's error dict) is NOT a depth verdict —
+    # do not reject a good target on an infra hiccup (fail-open, like the prover gates).
+    lean_text, _e, _p = af.emit_target_files(_ISSUE, _STUB, _META)
+    check = lambda code: {"success": False,
+                          "errors": ["daemon check did not complete: TimeoutError: timed out"],
+                          "sorry_count": 0}
+    r = af.depth_rejection(lean_text, "fra_value", _ISSUE["pointers"], check_fn=check)
+    assert r["shallow"] is False
+
+
 # --- refill orchestrator (monkeypatched steps; control flow only) ------------
 
 def _issue(n, **kw):
@@ -523,6 +593,7 @@ def _good_dwr(i, cp, p, *, chat_fn, check_fn, emit_fn, rounds):
 
 
 def _pass_gates(monkeypatch):
+    monkeypatch.setattr(af, "depth_rejection", lambda lt, nm, ptr, **k: {"shallow": False, "tokens": 0})
     monkeypatch.setattr(af, "hypothesis_rejection", lambda *a, **k: {"vacuous": False, "tokens": 1})
     monkeypatch.setattr(af, "disproof", lambda *a, **k: {"false": False, "tokens": 1})
     monkeypatch.setattr(af, "judge_faithfulness",
@@ -542,6 +613,35 @@ def test_refill_stages_a_good_issue(monkeypatch, tmp_path):
     assert [s["issue"] for s in res["seeded"]] == [5]
     assert (tmp_path / "cal-bk-5.lean").exists()
     assert (tmp_path / "cal-bk-5.entry.json").exists()
+
+
+def test_refill_skips_shallow_statement(monkeypatch, tmp_path):
+    # a true-but-shallow draft (consumes no pointer-module def) is rejected by the
+    # depth gate before the expensive prover gates — never staged.
+    monkeypatch.setattr(af, "draft_with_repair", _good_dwr)
+    _pass_gates(monkeypatch)
+    monkeypatch.setattr(af, "depth_rejection",
+                        lambda lt, nm, ptr, **k: {"shallow": True, "verdict": "no domain def", "tokens": 0})
+    res = af.refill([_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
+                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
+    assert res["seeded"] == []
+    assert not (tmp_path / "cal-bk-5.lean").exists()
+
+
+def test_refill_depth_gate_can_be_disabled(monkeypatch, tmp_path):
+    # depth_gate=False bypasses the gate entirely — it is not even invoked.
+    monkeypatch.setattr(af, "draft_with_repair", _good_dwr)
+    _pass_gates(monkeypatch)
+    calls = {"n": 0}
+
+    def dep(*a, **k):
+        calls["n"] += 1
+        return {"shallow": True, "verdict": "would reject", "tokens": 0}
+    monkeypatch.setattr(af, "depth_rejection", dep)
+    res = af.refill([_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
+                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000, depth_gate=False)
+    assert [s["issue"] for s in res["seeded"]] == [5]
+    assert calls["n"] == 0
 
 
 def test_refill_skips_vacuous_then_stages_next(monkeypatch, tmp_path):
