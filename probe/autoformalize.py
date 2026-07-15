@@ -315,6 +315,14 @@ def roundtrip_check(issue: dict, stub: str, *, reason_fn, prove_fn) -> dict:
             "verdict": v.get("verdict", ""), "tokens": t1 + t2 + t3}
 
 
+def _assistant(content: str) -> dict:
+    """An assistant turn safe to re-send. Mistral 400s on an empty-content assistant message
+    ("Assistant message must have either content or tool_calls, but not none") — which a
+    free-tier empty reply produces once threaded into a repair round — so substitute a
+    placeholder (caught #61 in the 2026-07-15 forced tick)."""
+    return {"role": "assistant", "content": content or "(no output)"}
+
+
 def draft_with_repair(issue: dict, context_pack: str, pins: str, *, chat_fn, check_fn,
                       emit_fn, rounds: int = 2) -> dict:
     """Draft a stub and repair it against the elaborator (compiler feedback, the
@@ -330,7 +338,7 @@ def draft_with_repair(issue: dict, context_pack: str, pins: str, *, chat_fn, che
         parsed = parse_draft(content)
         if parsed is None:
             messages += [
-                {"role": "assistant", "content": content},
+                _assistant(content),
                 {"role": "user", "content":
                  "Output exactly one ```lean block with a single "
                  "`theorem NAME <binders> : <conclusion> := by sorry`, then one ```json "
@@ -341,7 +349,7 @@ def draft_with_repair(issue: dict, context_pack: str, pins: str, *, chat_fn, che
             lean_text, entry, _placement = emit_fn(issue, stub, meta)
         except Exception as e:  # noqa: BLE001 — surface the assembly failure to the model
             messages += [
-                {"role": "assistant", "content": content},
+                _assistant(content),
                 {"role": "user", "content":
                  f"The theorem could not be assembled ({e}). Re-output a single "
                  "well-formed `theorem … := by sorry`."}]
@@ -356,7 +364,7 @@ def draft_with_repair(issue: dict, context_pack: str, pins: str, *, chat_fn, che
                     "lean_text": lean_text, "entry": entry, "tokens": tokens}
         errs = "\n".join(str(e) for e in elab.get("errors", [])[:8])
         messages += [
-            {"role": "assistant", "content": content},
+            _assistant(content),
             {"role": "user", "content":
              f"That statement does not elaborate in Lean:\n```\n{errs}\n```\n"
              "Fix ONLY the statement, keeping it faithful to the issue and still "
@@ -495,7 +503,7 @@ def formalize_with_repair(intent: dict, grounding: str, *, issue: dict, chat_fn,
         stub = extract_lean_code(content)
         if stub is None:
             messages += [
-                {"role": "assistant", "content": content},
+                _assistant(content),
                 {"role": "user", "content":
                  "Output exactly one ```lean block: a single "
                  "`theorem NAME <binders> : <conclusion> := by sorry`."}]
@@ -504,7 +512,7 @@ def formalize_with_repair(intent: dict, grounding: str, *, issue: dict, chat_fn,
             lean_text, entry, _placement = emit_fn(issue, stub, meta)
         except Exception as e:  # noqa: BLE001 — surface the assembly failure to the model
             messages += [
-                {"role": "assistant", "content": content},
+                _assistant(content),
                 {"role": "user", "content":
                  f"The theorem could not be assembled ({e}). Re-output a single "
                  "well-formed `theorem … := by sorry`."}]
@@ -524,7 +532,7 @@ def formalize_with_repair(intent: dict, grounding: str, *, issue: dict, chat_fn,
                 cand = retrieve_fn(nm)
                 if cand:
                     feedback += f"\n\nCandidates for `{nm}` (verify they elaborate under our pin):\n{cand}"
-        messages += [{"role": "assistant", "content": content},
+        messages += [_assistant(content),
                      {"role": "user", "content": feedback}]
     return {"ok": False, "stub": None, "meta": None,
             "lean_text": None, "entry": None, "tokens": tokens}

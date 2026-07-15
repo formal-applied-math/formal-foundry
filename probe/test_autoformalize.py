@@ -857,6 +857,28 @@ def test_formalize_with_repair_injects_loogle_on_unknown_identifier():
     assert "CANDIDATES:Foo.bar" in " ".join(m["content"] for m in seen[1])   # loogle fed back
 
 
+def test_assistant_turn_substitutes_placeholder_for_empty():
+    assert af._assistant("hi")["content"] == "hi"
+    assert af._assistant("")["content"] == "(no output)"       # Mistral 400s on empty content
+    assert af._assistant(None)["content"] == "(no output)"
+
+
+def test_formalize_with_repair_guards_empty_assistant_content():
+    # a free-tier EMPTY reply must not become an empty-content assistant message on the
+    # next round (Mistral 400: "Assistant message must have either content or tool_calls").
+    seen = []
+    replies = ["", _formalize_reply(concl="x = x")]
+
+    def chat(msgs):
+        seen.append(list(msgs))
+        return (replies[len(seen) - 1], 5)
+    r = af.formalize_with_repair(_INTENT, "", issue=_issue(5), chat_fn=chat,
+                                 check_fn=lambda c: {"success": True, "errors": [], "sorry_count": 1},
+                                 emit_fn=af.emit_target_files, rounds=3)
+    assert r["ok"] is True
+    assert all(not (m["role"] == "assistant" and not m["content"]) for m in seen[1])   # 2nd call clean
+
+
 def test_formalize_with_repair_gives_up_after_rounds():
     r = af.formalize_with_repair(_INTENT, "", issue=_issue(5),
                                  chat_fn=_script_chat([_formalize_reply("bad ²"), _formalize_reply("worse ²")]),
