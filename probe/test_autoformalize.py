@@ -45,6 +45,7 @@ def test_autoformalize_config_two_stage_defaults():
     assert cfg.formalize_model == "labs-leanstral-1-5"      # leanstral formalizes the Lean
     assert cfg.formalize_rounds == 3
     assert cfg.retrieval is True
+    assert cfg.formalize_token_budget == 40_000            # early-abort a doomed draft
 
 
 # --- split_statement ---------------------------------------------------------
@@ -597,7 +598,8 @@ def _good_intent(i, ctx, *, chat_fn):
         "benchmark_id": f"mf-fi-t{n}", "docstring": "d", "deferred": []}}
 
 
-def _good_formalize(intent, grounding, *, issue, chat_fn, check_fn, emit_fn, rounds, retrieve_fn=None):
+def _good_formalize(intent, grounding, *, issue, chat_fn, check_fn, emit_fn, rounds,
+                    retrieve_fn=None, token_budget=None):
     """Stand-in for formalize_with_repair — emits a real lean_text/entry from the intent meta."""
     n = issue["number"]
     stub = f"theorem t{n} (h : p) : q := by sorry"
@@ -757,7 +759,7 @@ def test_refill_wires_intent_formalize_prove_fns(monkeypatch, tmp_path):
         lambda i, ctx, *, chat_fn: seen.update(intent=chat_fn) or _good_intent(i, ctx, chat_fn=chat_fn))
     monkeypatch.setattr(
         af, "formalize_with_repair",
-        lambda intent, g, *, issue, chat_fn, check_fn, emit_fn, rounds, retrieve_fn=None:
+        lambda intent, g, *, issue, chat_fn, check_fn, emit_fn, rounds, retrieve_fn=None, token_budget=None:
         seen.update(formalize=chat_fn) or _good_formalize(intent, g, issue=issue, chat_fn=chat_fn,
                                                           check_fn=check_fn, emit_fn=emit_fn, rounds=rounds))
     monkeypatch.setattr(af, "depth_rejection", lambda lt, nm, ptr, **k: {"shallow": False, "tokens": 0})
@@ -877,6 +879,21 @@ def test_formalize_with_repair_guards_empty_assistant_content():
                                  emit_fn=af.emit_target_files, rounds=3)
     assert r["ok"] is True
     assert all(not (m["role"] == "assistant" and not m["content"]) for m in seen[1])   # 2nd call clean
+
+
+def test_formalize_with_repair_aborts_at_token_budget():
+    # a doomed draft must not burn every round (#61 spent 77k tokens failing) — stop once
+    # the cumulative token budget is exceeded, even if rounds remain.
+    calls = {"n": 0}
+
+    def chat(msgs):
+        calls["n"] += 1
+        return (_formalize_reply(concl="x ²"), 30)   # never elaborates; 30 tokens/round
+    r = af.formalize_with_repair(_INTENT, "", issue=_issue(5), chat_fn=chat,
+                                 check_fn=lambda c: {"success": False, "errors": ["bad"], "sorry_count": 1},
+                                 emit_fn=af.emit_target_files, rounds=10, token_budget=50)
+    assert r["ok"] is False
+    assert calls["n"] == 2       # r1: 0<50 spend→30; r2: 30<50 spend→60; r3: 60>=50 break
 
 
 def test_formalize_with_repair_gives_up_after_rounds():

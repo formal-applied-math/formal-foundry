@@ -86,6 +86,8 @@ class AutoformalizeConfig:
     formalize_model: str = "labs-leanstral-1-5"
     formalize_rounds: int = 3   # leanstral formalize + compiler-feedback repair rounds
     retrieval: bool = True      # loogle-augmented repair on `unknown identifier X`
+    formalize_token_budget: int = 40_000   # early-abort a doomed formalization (a hard issue
+                                           # like #61 else burns ~77k/draw grinding all rounds)
 
     @staticmethod
     def load(path: str | None) -> "AutoformalizeConfig":

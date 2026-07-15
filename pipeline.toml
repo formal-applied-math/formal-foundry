@@ -60,6 +60,8 @@ draft_max_tokens = 16000   # reasoning headroom — magistral emits a think trac
 intent_model = "magistral-medium-latest"
 formalize_model = "labs-leanstral-1-5"
 formalize_rounds = 3       # leanstral formalize + compiler-feedback repair rounds
+formalize_token_budget = 40000  # early-abort a doomed formalization (a hard issue like #61 else
+                                # burns ~77k tokens/draw grinding every round without elaborating)
 retrieval = true           # on `unknown identifier X`, feed loogle candidates back (elaboration-gated)
 depth_gate = true          # pointers-scoped depth gate: reject a true-but-shallow stub whose
                            # TYPE consumes no def from its `-- pointers:` MathFin modules (a

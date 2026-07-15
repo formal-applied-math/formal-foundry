@@ -488,16 +488,21 @@ def loogle_candidates(name: str, *, main_repo: str, run_fn=None) -> str:
 
 
 def formalize_with_repair(intent: dict, grounding: str, *, issue: dict, chat_fn, check_fn,
-                          emit_fn, rounds: int = 3, retrieve_fn=None) -> dict:
+                          emit_fn, rounds: int = 3, retrieve_fn=None,
+                          token_budget: int = 40_000) -> dict:
     """Stage 2: Leanstral FORMALIZES `intent` into an elaborating stub, repairing against the
     elaborator. On an error the compiler message is fed back to Leanstral; for `unknown identifier
     X`, `retrieve_fn(X)` (loogle) candidates are appended. The naming meta rides from `intent`.
-    Returns `{ok, stub, meta, lean_text, entry, tokens}`."""
+    Early-aborts once cumulative tokens exceed `token_budget` so a doomed draft can't burn every
+    round (a hard issue like #61 else spends ~77k/draw). Returns
+    `{ok, stub, meta, lean_text, entry, tokens}`."""
     meta = {"module_name": intent["module_name"], "benchmark_id": intent["benchmark_id"],
             "docstring": intent.get("docstring", ""), "deferred": intent.get("deferred", [])}
     messages = formalize_messages(intent, grounding)
     tokens = 0
     for _ in range(max(1, rounds)):
+        if tokens >= token_budget:
+            break   # doomed draft — stop before another expensive, likely-futile round
         content, tk = chat_fn(messages)
         tokens += tk
         stub = extract_lean_code(content)
@@ -715,8 +720,8 @@ def _write_target(queue_dir: str, n: int, lean_text: str, entry: dict) -> list[s
 def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn,
            queue_dir: str, budget: int, pins: str = "", max_issues: int = 1,
            max_attempt_issues: int = 3, gate_budget: int = 20_000, formalize_rounds: int = 3,
-           formalize_fn=None, retrieve_fn=None, depth_gate: bool = True,
-           system_prompt=None, log=lambda m: None) -> dict:
+           formalize_token_budget: int = 40_000, formalize_fn=None, retrieve_fn=None,
+           depth_gate: bool = True, system_prompt=None, log=lambda m: None) -> dict:
     """Draft + gate + stage up to `max_issues` targets from `issues`.
 
     For each candidate (up to `max_attempt_issues`), the cascade runs cheapest-first:
@@ -747,7 +752,8 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn,
 
             fr = formalize_with_repair(intent, ctx, issue=issue, chat_fn=formalize_fn,
                                        check_fn=check_fn, emit_fn=emit_target_files,
-                                       rounds=formalize_rounds, retrieve_fn=retrieve_fn)
+                                       rounds=formalize_rounds, retrieve_fn=retrieve_fn,
+                                       token_budget=formalize_token_budget)
             spent += fr["tokens"]
             if not fr["ok"]:
                 log(f"#{n}: no elaborating formalization after {formalize_rounds} rounds"); continue
@@ -863,6 +869,7 @@ def main() -> int:
     formalize_model = pick(args.formalize_model, cfg.formalize_model)
     formalize_rounds = pick(args.formalize_rounds, cfg.formalize_rounds)
     retrieval = pick(args.retrieval, cfg.retrieval)
+    formalize_token_budget = cfg.formalize_token_budget
 
     queue_dir = args.queue_dir or os.path.join(_foundry_root(), "targets", "queue")
 
@@ -900,7 +907,8 @@ def main() -> int:
     res = refill(issues, reason_fn=reason_fn, prove_fn=prove_fn, check_fn=daemon_check,
                  context_fn=context_fn, queue_dir=queue_dir, budget=budget, pins=pins,
                  max_issues=max_issues, max_attempt_issues=max_attempt, gate_budget=gate_budget,
-                 formalize_rounds=formalize_rounds, formalize_fn=formalize_fn, retrieve_fn=retrieve_fn,
+                 formalize_rounds=formalize_rounds, formalize_token_budget=formalize_token_budget,
+                 formalize_fn=formalize_fn, retrieve_fn=retrieve_fn,
                  depth_gate=depth_gate, system_prompt=prove_system,
                  log=lambda m: print(f"[refill] {m}", file=sys.stderr))
     print(json.dumps(res))
