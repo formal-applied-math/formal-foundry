@@ -89,6 +89,7 @@ def main() -> int:
     ap.add_argument("--config", default=None)
     ap.add_argument("--no-retrieval", dest="retrieval", action="store_false")
     ap.add_argument("--formalize-rounds", type=int, default=None)
+    ap.add_argument("--samples", type=int, default=1, help="draws per issue (for variance)")
     args = ap.parse_args()
 
     api_key = os.environ.get("MISTRAL_API_KEY")
@@ -119,14 +120,25 @@ def main() -> int:
 
     results = []
     for issue in issues:
-        r = eval_issue(issue, mode=args.mode, intent_fn=intent_fn, formalize_fn=formalize_fn,
-                       check_fn=daemon_check, main_repo=args.main_repo,
-                       formalize_rounds=formalize_rounds, retrieve_fn=retrieve_fn)
-        results.append(r)
-        print(f"[eval] #{r['issue']}: elaborated={r['elaborated']} depth={r['depth_pass']} "
-              f"tokens={r['tokens']} wall={r['wall_s']:.1f}s", file=sys.stderr)
+        for s in range(max(1, args.samples)):
+            r = eval_issue(issue, mode=args.mode, intent_fn=intent_fn, formalize_fn=formalize_fn,
+                           check_fn=daemon_check, main_repo=args.main_repo,
+                           formalize_rounds=formalize_rounds, retrieve_fn=retrieve_fn)
+            r["sample"] = s
+            results.append(r)
+            print(f"[eval] #{r['issue']} draw {s + 1}/{args.samples}: elaborated={r['elaborated']} "
+                  f"depth={r['depth_pass']} tokens={r['tokens']} wall={r['wall_s']:.1f}s", file=sys.stderr)
+    # per-issue tally (the variance we're actually measuring)
+    tally: dict = {}
+    for r in results:
+        t = tally.setdefault(r["issue"], {"elab": 0, "n": 0})
+        t["n"] += 1
+        t["elab"] += 1 if r["elaborated"] else 0
+    for iss in sorted(tally):
+        print(f"[tally] #{iss}: elaborated {tally[iss]['elab']}/{tally[iss]['n']}", file=sys.stderr)
     print(format_table(results))
-    print(json.dumps({"mode": args.mode, "retrieval": args.retrieval, **summarize(results)}))
+    print(json.dumps({"mode": args.mode, "retrieval": args.retrieval, "samples": args.samples,
+                      **summarize(results)}))
     return 0
 
 
