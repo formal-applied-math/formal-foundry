@@ -21,6 +21,8 @@ import re
 import subprocess
 import sys
 
+import embed as _embed
+from autop import autop_prove  # noqa: F401  (re-exported for probe.py prove path)
 from house_context import build_system_prompt, extract_signatures, read_pins
 from issues import select_issues
 from pipeline_lib import AutoformalizeConfig
@@ -864,6 +866,24 @@ def _foundry_root() -> str:
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+def build_retrieve_fns(*, backend, main_repo, index_dir, k, embed_model, api_key):
+    """(reactive_retrieve_fn, proactive_fn). Embedding backend ranks the whole
+    MathFin corpus; proactive_fn retrieves on the intent STATEMENT. Falls open to
+    loogle (reactive only) when the embedding cache is absent."""
+    loogle_fn = lambda nm: loogle_candidates(nm, main_repo=main_repo)  # noqa: E731
+    if backend != "embedding":
+        return loogle_fn, None
+    premises = _embed.load_premises(index_dir)
+    cache = _embed.cache_path(index_dir, embed_model)
+    idx = _embed.EmbeddingIndex.load(cache, premises, embed_model) if premises else None
+    if idx is None:
+        return loogle_fn, None   # fails-open — no index/cache ⇒ loogle
+    embed_fn = lambda texts: _embed.mistral_embed(texts, api_key=api_key, model=embed_model)  # noqa: E731
+    reactive = _embed.make_embedding_retrieve_fn(idx, k, embed_fn)
+    proactive = lambda stmt: idx.retrieve(stmt, k, embed_fn)  # noqa: E731
+    return reactive, proactive
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -944,13 +964,20 @@ def main() -> int:
         ptrs = issue.get("pointers", [])
         return extract_signatures(args.main_repo, ptrs) if ptrs else ""
 
-    retrieve_fn = (lambda nm: loogle_candidates(nm, main_repo=args.main_repo)) if retrieval else None
+    from scout_index import default_index_dir
+    index_dir = default_index_dir()
+    if retrieval:
+        retrieve_fn, proactive_fn = build_retrieve_fns(
+            backend=cfg.retrieval_backend, main_repo=args.main_repo, index_dir=index_dir,
+            k=cfg.retrieval_k, embed_model=cfg.embed_model, api_key=api_key)
+    else:
+        retrieve_fn, proactive_fn = None, None
 
     res = refill(issues, reason_fn=reason_fn, prove_fn=prove_fn, check_fn=daemon_check,
                  context_fn=context_fn, queue_dir=queue_dir, budget=budget, pins=pins,
                  max_issues=max_issues, max_attempt_issues=max_attempt, gate_budget=gate_budget,
                  formalize_rounds=formalize_rounds, formalize_token_budget=formalize_token_budget,
-                 formalize_fn=formalize_fn, retrieve_fn=retrieve_fn,
+                 formalize_fn=formalize_fn, retrieve_fn=retrieve_fn, proactive_fn=proactive_fn,
                  depth_gate=depth_gate, system_prompt=prove_system,
                  log=lambda m: print(f"[refill] {m}", file=sys.stderr))
     print(json.dumps(res))

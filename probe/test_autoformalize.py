@@ -1074,3 +1074,20 @@ def test_formalize_injects_proactive_premises_into_first_message():
         rounds=1, proactive_premises="MathFin.zcb : ℝ → ℝ")
     blob = "\n".join(m["content"] for m in captured["msgs"])
     assert "MathFin.zcb : ℝ → ℝ" in blob
+
+
+# --- build_retrieve_fns (backend selection + fails-open fallback) -----------
+
+def test_build_retrieve_fns_selects_loogle_when_configured(monkeypatch):
+    # backend "loogle" ⇒ reactive loogle fn, no proactive fn (loogle is name-only)
+    r, p = af.build_retrieve_fns(backend="loogle", main_repo="/x", index_dir="/no/index",
+                                 k=8, embed_model="mistral-embed", api_key="k")
+    assert r is not None and p is None
+
+
+def test_build_retrieve_fns_falls_open_to_loogle_when_index_absent():
+    # backend "embedding" but no cache present ⇒ degrade to loogle, no proactive
+    r, p = af.build_retrieve_fns(backend="embedding", main_repo="/x",
+                                 index_dir="/no/index", k=8,
+                                 embed_model="mistral-embed", api_key="k")
+    assert r is not None and p is None

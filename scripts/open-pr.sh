@@ -38,6 +38,16 @@ QUEUE="$FOUNDRY/targets/queue/manifest.json"
 CAND="$FOUNDRY/runs/$TAG-$ID.lean"
 [ -f "$CAND" ] || { echo "[open-pr] no candidate at $CAND" >&2; exit 1; }
 
+# scout proofs (autop-closed) open as DRAFT + labeled — a lead to refactor, never
+# a silent merge (values gate). Author (leanstral) proofs open as normal PRs.
+PR_FLAGS=()
+if [ -f "${CAND}.scout" ]; then
+  PR_FLAGS+=(--draft --label scout-proof)
+  SCOUT_NOTE=$'\n\n> scout proof: closed by `'"$(cat "${CAND}.scout")"$'`. needs refactor to the conceptually-right proof before merge.'
+else
+  SCOUT_NOTE=""
+fi
+
 # --- 1. placement metadata (from the queue manifest) -------------------------
 read_meta() { python3 - "$QUEUE" "$ID" "$1" <<'PY'
 import json, sys
@@ -197,12 +207,16 @@ review checklist (8-lens, before merge):
 - [ ] the statement faithfully formalizes (its stated subset of) issue #$ISSUE — no vacuity, no weaker restatement of what it states; a declared subset is fine (see follow-ups).
 - [ ] the proof is idiomatic and consumes existing lemmas, not a wrapper.
 - [ ] ledger row present (run \`ledger verify\` if ci is red on it).
-- [ ] axioms clean; no slop.$FOLLOWUPS
+- [ ] axioms clean; no slop.$FOLLOWUPS$SCOUT_NOTE
 EOF
 )"
 gh label create autoform --repo "$SLUG" --color 0E8A16 \
   --description "opened by the autoform pipeline; review before merge" 2>/dev/null || true
-gh pr create --repo "$SLUG" --head "$BRANCH" --label autoform \
+if [ -n "$SCOUT_NOTE" ]; then
+  gh label create scout-proof --repo "$SLUG" --color FBCA04 \
+    --description "autop-closed scout; needs refactor to the conceptually-right proof" 2>/dev/null || true
+fi
+gh pr create --repo "$SLUG" --head "$BRANCH" --label autoform "${PR_FLAGS[@]}" \
   --title "autoform: $(basename "$MODULE" .lean) $TITLE_SUFFIX" \
   --body "$BODY" || blocked "gh pr create failed"
 echo "[open-pr] PR opened for $ID ($CLOSE_KW #$ISSUE)" >&2
