@@ -1,0 +1,3 @@
+{"target": "cal-bk-67", "stream": "backlog", "round": 1, "tokens_cum": 17797, "success": false, "errors_head": ["daemon error: RuntimeError('elaboration timed out after 180.0s (REPL killed)')"], "sorry_count": 0}
+{"target": "cal-bk-67", "stream": "backlog", "round": 1, "tokens_cum": 51541, "success": false, "errors_head": ["line 40:10: Invalid rewrite argument: Expected an equality or iff proof or definition name, but `V` is a value of type\n  ℝ"], "sorry_count": 0}
+{"target": "cal-bk-67", "stream": "backlog", "round": 1, "tokens_cum": 72472, "success": true, "errors_head": [], "sorry_count": 0}
