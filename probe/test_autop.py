@@ -38,3 +38,17 @@ def test_autop_prove_returns_none_when_all_fail():
         return {"success": False, "sorry_count": 1, "errors": ["boom"]}
 
     assert autop.autop_prove("theorem t : True := by sorry", check_fn=check) is None
+
+
+def test_autop_prove_returns_none_when_statement_has_no_sorry():
+    # a complete proof (no hole) must NOT be misattributed to a tactic that did nothing
+    def check(text):
+        return {"success": True, "sorry_count": 0, "errors": []}
+    assert autop.autop_prove("theorem t : True := by trivial", check_fn=check) is None
+
+
+def test_autop_prove_returns_none_when_multiple_sorries():
+    def check(text):
+        return {"success": True, "sorry_count": 0, "errors": []}
+    stmt = "theorem a : True := by sorry\ntheorem b : True := by sorry"
+    assert autop.autop_prove(stmt, check_fn=check) is None

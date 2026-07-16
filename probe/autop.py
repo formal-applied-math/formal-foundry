@@ -23,7 +23,12 @@ def autop_candidate(statement: str, tactic: str) -> str:
 def autop_prove(statement: str, *, check_fn, menu=AUTOP_MENU) -> dict | None:
     """First menu tactic whose whole-proof script elaborates with 0 sorries, as
     `{"tactic", "proof"}`; None if none close. Values gate: the caller must treat
-    a result as a SCOUT (never a silent merge)."""
+    a result as a SCOUT (never a silent merge). Fails safe (None) if statement
+    does not contain exactly one "by sorry" hole."""
+    if statement.count("by sorry") != 1:
+        # no unique hole to close → fail safe; never misattribute a close to a
+        # tactic that was never inserted (values gate: no false scout).
+        return None
     for tactic in menu:
         cand = autop_candidate(statement, tactic)
         res = check_fn(cand)
