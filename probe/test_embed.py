@@ -55,3 +55,43 @@ def test_embedding_index_retrieve_ranks_by_query():
     out = idx.retrieve("what is the zcb price", k=1, embed_fn=fake_embed)
     assert "MathFin.zcb" in out
     assert "MathFin.forwardRate" not in out
+
+
+def test_embedding_index_save_load_roundtrip(tmp_path):
+    premises = [{"name": "MathFin.zcb", "type": "ℝ → ℝ", "docString": ""}]
+    idx = embed.EmbeddingIndex(premises, model="fake")
+    idx.build(lambda texts: [[1.0, 0.0] for _ in texts])
+    path = str(tmp_path / "cache.json")
+    idx.save(path)
+    loaded = embed.EmbeddingIndex.load(path, premises, "fake")
+    assert loaded is not None
+    assert loaded.vectors == idx.vectors
+
+
+def test_embedding_index_load_rejects_model_mismatch(tmp_path):
+    premises = [{"name": "MathFin.zcb", "type": "ℝ → ℝ", "docString": ""}]
+    idx = embed.EmbeddingIndex(premises, model="fake")
+    idx.build(lambda texts: [[1.0, 0.0] for _ in texts])
+    path = str(tmp_path / "cache.json")
+    idx.save(path)
+    assert embed.EmbeddingIndex.load(path, premises, "other-model") is None
+
+
+def test_embedding_index_load_rejects_corpus_mismatch(tmp_path):
+    premises = [{"name": "MathFin.zcb", "type": "ℝ → ℝ", "docString": ""}]
+    idx = embed.EmbeddingIndex(premises, model="fake")
+    idx.build(lambda texts: [[1.0, 0.0] for _ in texts])
+    path = str(tmp_path / "cache.json")
+    idx.save(path)
+    other = [{"name": "MathFin.forwardRate", "type": "ℝ → ℝ", "docString": ""}]
+    assert embed.EmbeddingIndex.load(path, other, "fake") is None
+
+
+def test_embedding_index_load_fails_soft_on_missing_vectors(tmp_path):
+    import json as _json
+    premises = [{"name": "MathFin.zcb", "type": "ℝ → ℝ", "docString": ""}]
+    idx = embed.EmbeddingIndex(premises, model="fake")
+    path = str(tmp_path / "cache.json")
+    with open(path, "w") as f:
+        _json.dump({"model": "fake", "corpus_hash": idx.hash}, f)
+    assert embed.EmbeddingIndex.load(path, premises, "fake") is None

@@ -143,7 +143,9 @@ class EmbeddingIndex:
             return None
         if blob.get("model") != model or blob.get("corpus_hash") != idx.hash:
             return None
-        idx.vectors = blob["vectors"]
+        idx.vectors = blob.get("vectors")
+        if idx.vectors is None:
+            return None
         return idx
 
     def retrieve(self, query: str, k: int, embed_fn) -> str:
