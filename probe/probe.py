@@ -306,6 +306,11 @@ def main() -> int:
     _eidx = (_embed.EmbeddingIndex.load(_embed.cache_path(index_dir, args.embed_model),
                                         _premises, args.embed_model)
              if (args.retrieval_backend == "embedding" and _premises) else None)
+    if args.retrieval_backend == "embedding" and _eidx is None:
+        print("[prove] embedding index absent → no prove-side premise retrieval", flush=True)
+    elif args.retrieval_backend != "embedding":
+        print(f"[prove] retrieval-backend={args.retrieval_backend} → prove-side premise "
+              "retrieval is embedding-only; none injected", flush=True)
 
     def _retrieve_premises(statement):
         if _eidx is None:
@@ -359,6 +364,11 @@ def main() -> int:
             if target.get("_proof_source"):
                 with open(win_path + ".scout", "w") as f:
                     f.write(target["_proof_source"])
+            else:
+                try:
+                    os.remove(win_path + ".scout")   # author proof: clear any stale scout sidecar
+                except FileNotFoundError:
+                    pass
     return 0
 
 

@@ -1078,7 +1078,7 @@ def test_formalize_injects_proactive_premises_into_first_message():
 
 # --- build_retrieve_fns (backend selection + fails-open fallback) -----------
 
-def test_build_retrieve_fns_selects_loogle_when_configured(monkeypatch):
+def test_build_retrieve_fns_selects_loogle_when_configured():
     # backend "loogle" ⇒ reactive loogle fn, no proactive fn (loogle is name-only)
     r, p = af.build_retrieve_fns(backend="loogle", main_repo="/x", index_dir="/no/index",
                                  k=8, embed_model="mistral-embed", api_key="k")
