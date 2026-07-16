@@ -21,7 +21,7 @@ import urllib.error
 import urllib.request
 
 import embed as _embed
-from autop import autop_prove
+from autop import autop_prove, scout_rescue
 from house_context import build_system_prompt, extract_signatures
 from probe_lib import (
     TokenLedger,
@@ -348,10 +348,11 @@ def main() -> int:
         summary["ts"] = time.strftime("%Y-%m-%dT%H:%M:%S")
         summary["autop"] = autop_res["tactic"] if autop_res else None   # prove-wall evidence
         summary["scout"] = False
-        if summary["outcome"] != "pass" and autop_res:
+        rescue = scout_rescue(summary["outcome"] == "pass", autop_res)
+        if rescue:
             # leanstral missed but a cheap tactic closes it → SCOUT rescue (draft PR)
-            target["_winning_candidate"] = autop_res["proof"]
-            target["_proof_source"] = f"autop-{autop_res['tactic']}"
+            target["_winning_candidate"] = rescue["winning_candidate"]
+            target["_proof_source"] = rescue["proof_source"]
             summary["outcome"] = "pass_scout"
             summary["scout"] = True
         append_jsonl(summary_log, summary)

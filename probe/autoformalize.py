@@ -22,7 +22,6 @@ import subprocess
 import sys
 
 import embed as _embed
-from autop import autop_prove  # noqa: F401  (re-exported for probe.py prove path)
 from house_context import build_system_prompt, extract_signatures, read_pins
 from issues import select_issues
 from pipeline_lib import AutoformalizeConfig

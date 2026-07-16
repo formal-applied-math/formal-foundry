@@ -35,3 +35,14 @@ def autop_prove(statement: str, *, check_fn, menu=AUTOP_MENU) -> dict | None:
         if res.get("success") and res.get("sorry_count", 1) == 0:
             return {"tactic": tactic, "proof": cand}
     return None
+
+
+def scout_rescue(run_target_passed: bool, autop_res: dict | None) -> dict | None:
+    """Scout-rescue decision: when run_target did NOT pass but autop closed the goal,
+    return the scout proof to bank as a draft-PR lead; else None (author path, or no
+    close). Pure — the caller applies it. The values gate lives here: an author pass
+    (run_target_passed=True) is NEVER a scout."""
+    if not run_target_passed and autop_res:
+        return {"winning_candidate": autop_res["proof"],
+                "proof_source": f"autop-{autop_res['tactic']}"}
+    return None

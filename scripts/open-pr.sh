@@ -38,16 +38,6 @@ QUEUE="$FOUNDRY/targets/queue/manifest.json"
 CAND="$FOUNDRY/runs/$TAG-$ID.lean"
 [ -f "$CAND" ] || { echo "[open-pr] no candidate at $CAND" >&2; exit 1; }
 
-# scout proofs (autop-closed) open as DRAFT + labeled — a lead to refactor, never
-# a silent merge (values gate). Author (leanstral) proofs open as normal PRs.
-PR_FLAGS=()
-if [ -f "${CAND}.scout" ]; then
-  PR_FLAGS+=(--draft --label scout-proof)
-  SCOUT_NOTE=$'\n\n> scout proof: closed by `'"$(cat "${CAND}.scout")"$'`. needs refactor to the conceptually-right proof before merge.'
-else
-  SCOUT_NOTE=""
-fi
-
 # --- 1. placement metadata (from the queue manifest) -------------------------
 read_meta() { python3 - "$QUEUE" "$ID" "$1" <<'PY'
 import json, sys
@@ -88,6 +78,35 @@ if [ -n "$FOLLOWUPS" ]; then
   TITLE_SUFFIX="(subset of #$ISSUE)"
 else
   CLOSE_KW="closes"; CLOSE_LINE="closes #$ISSUE"; TITLE_SUFFIX="(closes #$ISSUE)"
+fi
+
+# scout proofs (autop-closed) open as DRAFT + labeled — a lead to refactor, never
+# a silent merge (values gate). Author (leanstral) proofs open as normal PRs.
+# All scout-vs-author variables are set HERE in one place, then referenced by the
+# commit + PR-body steps below: PR metadata (PR_FLAGS/SCOUT_NOTE), the closing
+# keyword (a scout must NEVER auto-close its parent issue on an accidental merge,
+# so CLOSE_KW/CLOSE_LINE/TITLE_SUFFIX are overridden to `refs` here regardless of
+# the subset logic above), and the commit/PR-body attribution strings (autop is
+# NOT leanstral, and a scout is NOT axiom-guarded).
+MODEL="${MODEL:-labs-leanstral-1-5}"   # the prover, for attribution + the PR body
+PR_FLAGS=()
+if [ -f "${CAND}.scout" ]; then
+  SCOUT_TACTIC="$(cat "${CAND}.scout")"
+  PR_FLAGS+=(--draft --label scout-proof)
+  SCOUT_NOTE=$'\n\n> scout proof: closed by `'"$SCOUT_TACTIC"$'`. needs refactor to the conceptually-right proof before merge.'
+  CLOSE_KW="refs"
+  CLOSE_LINE="refs #$ISSUE (scout — needs refactor; not auto-closed on merge)"
+  TITLE_SUFFIX="(refs #$ISSUE)"
+  PROVER_DESC="Closed by the autop probe (${SCOUT_TACTIC}) via the mathfin-foundry pipeline — a SCOUT lead; refactor to the conceptually-right proof before merge."
+  COMMIT_TRAILER=()
+  BODY_INTRO="this pr's proof was closed by the autop probe (\`${SCOUT_TACTIC}\`) in the mathfin-foundry pipeline — a SCOUT lead, not an author proof, and is NOT axiom-guarded."
+  PROOF_BULLET="- \`$MODULE\` — the proof (a SCOUT lead closed by the autop probe \`${SCOUT_TACTIC}\`; needs refactor to the conceptually-right proof; NOT axiom-guarded)."
+else
+  SCOUT_NOTE=""
+  PROVER_DESC="Proved by Leanstral (${MODEL}) via the mathfin-foundry autoform pipeline; human-reviewed before merge."
+  COMMIT_TRAILER=(-m "Co-Authored-By: Leanstral <${MODEL}@users.noreply.mistral.ai>")
+  BODY_INTRO="this pr was produced by the autoform pipeline (leanstral $MODEL), then assembled and validated green in ci."
+  PROOF_BULLET="- \`$MODULE\` — the proof (axioms-clean; the probe's axiom guard passed)."
 fi
 
 FOUNDRY_SLUG="${FOUNDRY_REPO:-raphaelrrcoelho/mathfin-foundry}"
@@ -165,20 +184,21 @@ else
 fi
 
 # --- 5. commit + push + PR ---------------------------------------------------
-MODEL="${MODEL:-labs-leanstral-1-5}"   # the prover, for attribution + the PR body
 # specific adds only (never -A): the proof, the benchmark entry, the umbrella
 # import, and whichever regenerated artifacts exist.
 git add "$MODULE" "$BENCH" MathFin.lean formalization.yaml
 git add MathFin/AxiomAuditGen.lean verification_ledger.json 2>/dev/null || true
-# Attribution rule: credit LEANSTRAL, the prover that did the mathematical work
-# (honest provenance, matching the benchmark entry's metadata.provenance and the
-# formalization.yaml automation count). This is distinct from the standing rule
-# that Claude / the coding assistant is never attributed anywhere.
+# Attribution rule (honest provenance, set above in the scout-vs-author branch):
+# an author (leanstral) PR credits the prover that did the mathematical work,
+# matching the benchmark entry's metadata.provenance and the formalization.yaml
+# automation count; a scout PR credits the autop probe that closed it, never
+# leanstral. Distinct from the standing rule that Claude / the coding assistant
+# is never attributed anywhere.
 git -c user.name="mathfin-autoform" -c user.email="autoform@users.noreply.github.com" \
     commit -q \
     -m "feat(autoform): $ID — prove $(basename "$MODULE" .lean) ($CLOSE_KW #$ISSUE)" \
-    -m "Proved by Leanstral (${MODEL}) via the mathfin-foundry autoform pipeline; human-reviewed before merge." \
-    -m "Co-Authored-By: Leanstral <${MODEL}@users.noreply.mistral.ai>"
+    -m "$PROVER_DESC" \
+    "${COMMIT_TRAILER[@]}"
 git push -f origin "$BRANCH"
 
 TOKENS="$(python3 - "$FOUNDRY/runs/$TAG-summary.jsonl" "$ID" <<'PY'
@@ -194,10 +214,10 @@ PY
 )"
 
 BODY="$(cat <<EOF
-this pr was produced by the autoform pipeline (leanstral $MODEL), then assembled and validated green in ci. $CLOSE_LINE.
+$BODY_INTRO $CLOSE_LINE.
 
 what it adds:
-- \`$MODULE\` — the proof (axioms-clean; the probe's axiom guard passed).
+$PROOF_BULLET
 - a re-export entry in \`$BENCH\`.
 - regenerated \`MathFin/AxiomAuditGen.lean\` + \`formalization.yaml\`.
 

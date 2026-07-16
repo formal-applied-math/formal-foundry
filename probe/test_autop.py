@@ -52,3 +52,21 @@ def test_autop_prove_returns_none_when_multiple_sorries():
         return {"success": True, "sorry_count": 0, "errors": []}
     stmt = "theorem a : True := by sorry\ntheorem b : True := by sorry"
     assert autop.autop_prove(stmt, check_fn=check) is None
+
+
+def test_scout_rescue_none_when_author_passed():
+    assert autop.scout_rescue(True, {"tactic": "simp", "proof": "P"}) is None
+
+
+def test_scout_rescue_none_when_no_autop():
+    assert autop.scout_rescue(False, None) is None
+
+
+def test_scout_rescue_banks_scout_when_leanstral_missed_and_autop_hit():
+    r = autop.scout_rescue(False, {"tactic": "nlinarith", "proof": "PROOF"})
+    assert r == {"winning_candidate": "PROOF", "proof_source": "autop-nlinarith"}
+
+
+def test_scout_rescue_author_pass_with_autop_available_is_still_author():
+    # even if autop also closed it, an author pass wins → NOT a scout
+    assert autop.scout_rescue(True, {"tactic": "simp", "proof": "X"}) is None
