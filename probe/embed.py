@@ -6,6 +6,7 @@ docs/superpowers/specs/2026-07-16-embedding-retrieval-prove-probe-design.md.
 """
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import math
@@ -155,3 +156,49 @@ class EmbeddingIndex:
         qv = embed_fn([query])[0]
         idxs = top_k(qv, self.vectors, k)
         return "\n".join(self.texts[i] for i in idxs)
+
+
+def cache_path(index_dir: str, model: str) -> str:
+    return os.path.join(index_dir, f"embeddings-{model}.json")
+
+
+def build_cli(argv=None) -> int:
+    """Embed index/types.jsonl and write the vector cache. Host-side HTTP — NO
+    Lean process, so it is orthogonal to the daemon slot."""
+    ap = argparse.ArgumentParser(prog="embed build")
+    ap.add_argument("--index-dir", default=None)
+    ap.add_argument("--model", default=DEFAULT_EMBED_MODEL)
+    ap.add_argument("--batch", type=int, default=256)
+    args = ap.parse_args(argv)
+
+    from scout_index import default_index_dir
+    index_dir = args.index_dir or default_index_dir()
+    api_key = os.environ.get("MISTRAL_API_KEY")
+    if not api_key:
+        print("MISTRAL_API_KEY not set", file=sys.stderr)
+        return 2
+    premises = load_premises(index_dir)
+    if not premises:
+        print(f"no types.jsonl under {index_dir}", file=sys.stderr)
+        return 1
+
+    idx = EmbeddingIndex(premises, model=args.model)
+
+    def embed_fn(texts):
+        out: list[list[float]] = []
+        for i in range(0, len(texts), args.batch):
+            out.extend(mistral_embed(texts[i:i + args.batch],
+                                     api_key=api_key, model=args.model))
+            print(f"  embedded {min(i + args.batch, len(texts))}/{len(texts)}",
+                  file=sys.stderr)
+        return out
+
+    idx.build(embed_fn)
+    out_path = cache_path(index_dir, args.model)
+    idx.save(out_path)
+    print(f"wrote {out_path} ({len(premises)} premises, model={args.model})")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(build_cli())

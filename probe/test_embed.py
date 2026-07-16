@@ -95,3 +95,7 @@ def test_embedding_index_load_fails_soft_on_missing_vectors(tmp_path):
     with open(path, "w") as f:
         _json.dump({"model": "fake", "corpus_hash": idx.hash}, f)
     assert embed.EmbeddingIndex.load(path, premises, "fake") is None
+
+
+def test_cache_path_is_per_model_under_index_dir():
+    assert embed.cache_path("index", "mistral-embed") == "index/embeddings-mistral-embed.json"
