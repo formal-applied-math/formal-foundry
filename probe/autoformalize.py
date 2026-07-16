@@ -489,24 +489,27 @@ def loogle_candidates(name: str, *, main_repo: str, run_fn=None) -> str:
 
 def formalize_with_repair(intent: dict, grounding: str, *, issue: dict, chat_fn, check_fn,
                           emit_fn, rounds: int = 3, retrieve_fn=None,
-                          token_budget: int = 40_000) -> dict:
+                          token_budget: int = 40_000, log=lambda m: None) -> dict:
     """Stage 2: Leanstral FORMALIZES `intent` into an elaborating stub, repairing against the
     elaborator. On an error the compiler message is fed back to Leanstral; for `unknown identifier
     X`, `retrieve_fn(X)` (loogle) candidates are appended. The naming meta rides from `intent`.
     Early-aborts once cumulative tokens exceed `token_budget` so a doomed draft can't burn every
-    round (a hard issue like #61 else spends ~77k/draw). Returns
+    round (a hard issue like #61 else spends ~77k/draw). `log` receives a one-line diagnostic per
+    round (reply size, lean-block?, elab error) so a failure is not opaque. Returns
     `{ok, stub, meta, lean_text, entry, tokens}`."""
     meta = {"module_name": intent["module_name"], "benchmark_id": intent["benchmark_id"],
             "docstring": intent.get("docstring", ""), "deferred": intent.get("deferred", [])}
     messages = formalize_messages(intent, grounding)
     tokens = 0
-    for _ in range(max(1, rounds)):
+    for i in range(max(1, rounds)):
         if tokens >= token_budget:
+            log(f"round {i + 1}: aborted — token budget reached ({tokens} >= {token_budget})")
             break   # doomed draft — stop before another expensive, likely-futile round
         content, tk = chat_fn(messages)
         tokens += tk
         stub = extract_lean_code(content)
         if stub is None:
+            log(f"round {i + 1}: no ```lean block (reply {len(content or '')}c, {tk} tok)")
             messages += [
                 _assistant(content),
                 {"role": "user", "content":
@@ -516,6 +519,7 @@ def formalize_with_repair(intent: dict, grounding: str, *, issue: dict, chat_fn,
         try:
             lean_text, entry, _placement = emit_fn(issue, stub, meta)
         except Exception as e:  # noqa: BLE001 — surface the assembly failure to the model
+            log(f"round {i + 1}: assembly failed ({e})")
             messages += [
                 _assistant(content),
                 {"role": "user", "content":
@@ -524,9 +528,11 @@ def formalize_with_repair(intent: dict, grounding: str, *, issue: dict, chat_fn,
             continue
         elab = check_fn(lean_text)
         if not elab.get("errors") and elab.get("sorry_count", 0) == 1:
+            log(f"round {i + 1}: elaborates ✓ ({tokens} tok total)")
             return {"ok": True, "stub": stub, "meta": meta,
                     "lean_text": lean_text, "entry": entry, "tokens": tokens}
         errs = elab.get("errors", [])
+        log(f"round {i + 1}: {len(errs)} elab error(s); first: {str(errs[0])[:180] if errs else '?'}")
         feedback = ("That statement does not elaborate in Lean:\n```\n"
                     + "\n".join(str(e) for e in errs[:8]) + "\n```\n"
                     "Fix ONLY the statement, keep it faithful to the intended statement and still "
@@ -753,7 +759,8 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn,
             fr = formalize_with_repair(intent, ctx, issue=issue, chat_fn=formalize_fn,
                                        check_fn=check_fn, emit_fn=emit_target_files,
                                        rounds=formalize_rounds, retrieve_fn=retrieve_fn,
-                                       token_budget=formalize_token_budget)
+                                       token_budget=formalize_token_budget,
+                                       log=lambda m: log(f"#{n} formalize {m}"))
             spent += fr["tokens"]
             if not fr["ok"]:
                 log(f"#{n}: no elaborating formalization after {formalize_rounds} rounds"); continue

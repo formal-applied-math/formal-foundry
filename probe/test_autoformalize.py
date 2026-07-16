@@ -599,7 +599,7 @@ def _good_intent(i, ctx, *, chat_fn):
 
 
 def _good_formalize(intent, grounding, *, issue, chat_fn, check_fn, emit_fn, rounds,
-                    retrieve_fn=None, token_budget=None):
+                    retrieve_fn=None, token_budget=None, log=None):
     """Stand-in for formalize_with_repair — emits a real lean_text/entry from the intent meta."""
     n = issue["number"]
     stub = f"theorem t{n} (h : p) : q := by sorry"
@@ -759,7 +759,8 @@ def test_refill_wires_intent_formalize_prove_fns(monkeypatch, tmp_path):
         lambda i, ctx, *, chat_fn: seen.update(intent=chat_fn) or _good_intent(i, ctx, chat_fn=chat_fn))
     monkeypatch.setattr(
         af, "formalize_with_repair",
-        lambda intent, g, *, issue, chat_fn, check_fn, emit_fn, rounds, retrieve_fn=None, token_budget=None:
+        lambda intent, g, *, issue, chat_fn, check_fn, emit_fn, rounds, retrieve_fn=None,
+        token_budget=None, log=None:
         seen.update(formalize=chat_fn) or _good_formalize(intent, g, issue=issue, chat_fn=chat_fn,
                                                           check_fn=check_fn, emit_fn=emit_fn, rounds=rounds))
     monkeypatch.setattr(af, "depth_rejection", lambda lt, nm, ptr, **k: {"shallow": False, "tokens": 0})
@@ -879,6 +880,19 @@ def test_formalize_with_repair_guards_empty_assistant_content():
                                  emit_fn=af.emit_target_files, rounds=3)
     assert r["ok"] is True
     assert all(not (m["role"] == "assistant" and not m["content"]) for m in seen[1])   # 2nd call clean
+
+
+def test_formalize_with_repair_logs_each_round():
+    # instrumentation: each round emits a one-line diagnostic (why a draft fails is not opaque).
+    logs = []
+    replies = [_formalize_reply(concl="x ²"), _formalize_reply(concl="x = x")]
+    checks = iter([{"success": False, "errors": ["unexpected token '²'"], "sorry_count": 1},
+                   {"success": True, "errors": [], "sorry_count": 1}])
+    af.formalize_with_repair(_INTENT, "", issue=_issue(5), chat_fn=_script_chat(replies),
+                             check_fn=lambda c: next(checks), emit_fn=af.emit_target_files,
+                             rounds=3, log=lambda m: logs.append(m))
+    assert any("round 1" in m and "elab error" in m for m in logs)   # first round: the error
+    assert any("elaborates" in m for m in logs)                      # second round: success
 
 
 def test_formalize_with_repair_aborts_at_token_budget():
