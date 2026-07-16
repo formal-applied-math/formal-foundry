@@ -639,7 +639,7 @@ def _good_intent(i, ctx, *, chat_fn):
 
 
 def _good_formalize(intent, grounding, *, issue, chat_fn, check_fn, emit_fn, rounds,
-                    retrieve_fn=None, token_budget=None, log=None):
+                    retrieve_fn=None, token_budget=None, proactive_premises=None, log=None):
     """Stand-in for formalize_with_repair — emits a real lean_text/entry from the intent meta."""
     n = issue["number"]
     stub = f"theorem t{n} (h : p) : q := by sorry"
@@ -800,7 +800,7 @@ def test_refill_wires_intent_formalize_prove_fns(monkeypatch, tmp_path):
     monkeypatch.setattr(
         af, "formalize_with_repair",
         lambda intent, g, *, issue, chat_fn, check_fn, emit_fn, rounds, retrieve_fn=None,
-        token_budget=None, log=None:
+        token_budget=None, proactive_premises=None, log=None:
         seen.update(formalize=chat_fn) or _good_formalize(intent, g, issue=issue, chat_fn=chat_fn,
                                                           check_fn=check_fn, emit_fn=emit_fn, rounds=rounds))
     monkeypatch.setattr(af, "depth_rejection", lambda lt, nm, ptr, **k: {"shallow": False, "tokens": 0})
@@ -1057,3 +1057,20 @@ def test_prepare_issues_filters_and_enriches():
     assert out[0]["area"] == "fixed-income"
     assert out[0]["pointers"] == ["MathFin/FixedIncome/ZCB.lean"]
     assert out[0]["body"].startswith("## Task")
+
+
+def test_formalize_injects_proactive_premises_into_first_message():
+    captured = {}
+
+    def chat(msgs):
+        captured["msgs"] = msgs
+        return ("```lean\ntheorem t : True := by sorry\n```", 10)
+
+    intent = {"module_name": "M", "benchmark_id": "b", "statement": "True", "docstring": ""}
+    af.formalize_with_repair(
+        intent, "GROUNDING", issue={"number": 1, "name": "n", "domain": "d"},
+        chat_fn=chat, check_fn=lambda t: {"errors": [], "sorry_count": 1},
+        emit_fn=lambda i, s, m: ("LEAN", {"id": "x"}, None),
+        rounds=1, proactive_premises="MathFin.zcb : ℝ → ℝ")
+    blob = "\n".join(m["content"] for m in captured["msgs"])
+    assert "MathFin.zcb : ℝ → ℝ" in blob

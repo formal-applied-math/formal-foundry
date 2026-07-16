@@ -516,7 +516,8 @@ def _repair_hint(errors) -> str:
 
 def formalize_with_repair(intent: dict, grounding: str, *, issue: dict, chat_fn, check_fn,
                           emit_fn, rounds: int = 3, retrieve_fn=None,
-                          token_budget: int = 40_000, log=lambda m: None) -> dict:
+                          token_budget: int = 40_000, proactive_premises: str = "",
+                          log=lambda m: None) -> dict:
     """Stage 2: Leanstral FORMALIZES `intent` into an elaborating stub, repairing against the
     elaborator. On an error the compiler message is fed back to Leanstral; for `unknown identifier
     X`, `retrieve_fn(X)` (loogle) candidates are appended. The naming meta rides from `intent`.
@@ -524,6 +525,9 @@ def formalize_with_repair(intent: dict, grounding: str, *, issue: dict, chat_fn,
     round (a hard issue like #61 else spends ~77k/draw). `log` receives a one-line diagnostic per
     round (reply size, lean-block?, elab error) so a failure is not opaque. Returns
     `{ok, stub, meta, lean_text, entry, tokens}`."""
+    if proactive_premises:
+        grounding = (grounding + "\n\n── LIKELY-RELEVANT PREMISES (rank by cosine; "
+                     "verify they elaborate under our pin) ──\n" + proactive_premises)
     meta = {"module_name": intent["module_name"], "benchmark_id": intent["benchmark_id"],
             "docstring": intent.get("docstring", ""), "deferred": intent.get("deferred", [])}
     messages = formalize_messages(intent, grounding)
@@ -755,6 +759,7 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn,
            queue_dir: str, budget: int, pins: str = "", max_issues: int = 1,
            max_attempt_issues: int = 3, gate_budget: int = 20_000, formalize_rounds: int = 3,
            formalize_token_budget: int = 40_000, formalize_fn=None, retrieve_fn=None,
+           proactive_fn=None,
            depth_gate: bool = True, system_prompt=None, log=lambda m: None) -> dict:
     """Draft + gate + stage up to `max_issues` targets from `issues`.
 
@@ -784,10 +789,12 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn,
                 log(f"#{n}: no parseable intent"); continue
             intent = di["intent"]
 
+            proactive = proactive_fn(intent["statement"]) if proactive_fn else ""
             fr = formalize_with_repair(intent, ctx, issue=issue, chat_fn=formalize_fn,
                                        check_fn=check_fn, emit_fn=emit_target_files,
                                        rounds=formalize_rounds, retrieve_fn=retrieve_fn,
                                        token_budget=formalize_token_budget,
+                                       proactive_premises=proactive,
                                        log=lambda m: log(f"#{n} formalize {m}"))
             spent += fr["tokens"]
             if not fr["ok"]:
