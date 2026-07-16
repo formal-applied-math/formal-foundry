@@ -420,7 +420,12 @@ FIDELITY_SYSTEM = (
     "it. Decide whether the Lean faithfully renders the intent: same hypotheses, same conclusion, "
     "nothing weakened, dropped, or flipped. This is a SAFETY NET for gross formalization failures, "
     "not a maximal-formality check (a human makes the final call at merge); accept reasonable "
-    "abstractions. Respond with ONLY a JSON object: "
+    "abstractions. A hypothesis the intent lists as an ASSUMPTION but that becomes PROVABLE once "
+    "the Lean realizes the quantity with a concrete definition is faithfully OMITTED, not dropped: "
+    "e.g. the intent assumes `0 < P` for a discount factor, but the Lean uses `MathFin.zcb` (a "
+    "`Real.exp`, automatically positive), so leaving out `0 < P` is a correct refinement, not a "
+    "weakening. (A side condition NOT provable from the concrete defs is still required.) "
+    "Respond with ONLY a JSON object: "
     '{"faithful": true|false, "verdict": "<one line>", "issues": ["<gross divergence>", ...]}.'
 )
 

@@ -984,6 +984,13 @@ def test_loogle_candidates_uses_injected_runner():
     assert af.loogle_candidates("zcb", main_repo="/x", run_fn=lambda nm: f"hit:{nm}") == "hit:zcb"
 
 
+def test_fidelity_system_accepts_concrete_realization_refinement():
+    # #67 passed the judge but fidelity flagged "drops positivity" — the same over-strictness:
+    # omitting `0 < P` is correct when the Lean realizes P with `zcb` (Real.exp, provably positive).
+    sys = " ".join(m["content"] for m in af.fidelity_messages(_INTENT, "theorem foo : True := by sorry"))
+    assert "PROVABLE" in sys and "correct refinement" in sys
+
+
 def test_intent_fidelity_faithful_and_tokens():
     r = af.intent_fidelity_check(_INTENT, "theorem foo : True := by sorry",
                                  reason_fn=_canned_chat('{"faithful": true, "verdict": "ok"}', 8))
