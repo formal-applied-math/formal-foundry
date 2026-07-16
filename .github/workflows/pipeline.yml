@@ -32,7 +32,7 @@ concurrency:
 jobs:
   tick:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 120                # headroom for a pin-bump index+embedding rebuild
     steps:
       - name: Free disk space
         # the in-image `lake exe cache get` + `lake build MathFin` (Mathlib
@@ -71,6 +71,54 @@ jobs:
       - name: Pull the pinned verify image
         run: docker pull ghcr.io/raphaelrrcoelho/mathfin-verify:latest
 
+      - name: Setup Python                # needed by build-embeddings (host-side) + the tick
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # --- embedding-retrieval corpus (Track A) ---------------------------------
+      # index/ is a gitignored build artifact, so CI rebuilds it here and caches it
+      # by the MathFin source + pin. On a cache HIT (the common case) these steps
+      # are a fast restore; only a pin bump / MathFin change rebuilds. Both builds
+      # run BEFORE the daemon starts (build-index loads the Lean env in its own
+      # container — one Lean process at a time) and are NON-FATAL: any failure
+      # leaves index/ absent and retrieval falls open to loogle (no tick regression).
+      - name: Restore lean_scout index (per-pin)
+        id: index-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            index/types.jsonl
+            index/const_dep.jsonl
+            index/PIN
+          key: mathfin-index-v1-${{ hashFiles('main/lean-toolchain', 'main/lake-manifest.json', 'main/MathFin/**') }}
+
+      - name: Build lean_scout index (cache miss only; non-fatal)
+        if: steps.index-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        env:
+          MAIN_REPO: ${{ github.workspace }}/main
+        run: bash scripts/build-index.sh
+
+      - name: Restore embedding cache (per-pin, mistral-embed)
+        id: embed-cache
+        uses: actions/cache@v4
+        with:
+          path: index/embeddings-mistral-embed.json
+          key: mathfin-embeddings-mistral-embed-v1-${{ hashFiles('main/lean-toolchain', 'main/lake-manifest.json', 'main/MathFin/**') }}
+
+      - name: Build embedding cache (cache miss only; non-fatal)
+        if: steps.embed-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        env:
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+        run: |
+          if [ -f index/types.jsonl ]; then
+            bash scripts/build-embeddings.sh
+          else
+            echo "no index/types.jsonl (index build skipped/failed) → embedding retrieval falls open to loogle"
+          fi
+
       - name: Start the lean-repl daemon
         run: |
           # The image's default entrypoint is the verify CLI; the daemon needs
@@ -88,11 +136,6 @@ jobs:
             sleep 5
           done
           echo "::error::daemon did not become READY in time"; docker logs lean-repl; exit 1
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
 
       - name: Run one pipeline tick (prove → on pass, open the PR)
         env:
