@@ -1,9 +1,17 @@
 # Embedding premise retrieval + a cheap prove probe (ulam-inspired)
 
-Status: DESIGN — APPROVED 2026-07-16. Not yet implemented. Two tracks:
+Status: IMPLEMENTED 2026-07-16 (branch `feat/embedding-retrieval-prove-probe`,
+8-task subagent-driven build, 203 unit tests green). Two tracks:
 **A** = embedding premise retrieval; **B1** = a cheap prove probe. Explicitly
 DEFERS Track B2 (goal-state best-first search) and k-candidate typecheck-filtered
 self-consistency statement selection — see § Non-goals.
+
+**Live-smoke deferral:** the embedding cache build (`scripts/build-embeddings.sh`)
+and the autop-through-daemon smoke need `MISTRAL_API_KEY` / the lean-repl daemon,
+which are not in the local env — deferred to a key-available run (or CI). The
+feature **fails open to loogle** when the cache is absent, so an unbuilt cache is a
+graceful degradation, not a regression. Vector-cache commit-vs-CI decision (§ Risks)
+is likewise pending that first build.
 
 Inspiration: the UlamAI Prover (github.com/ulamai/ulamai, ulam.ai — a "truth-first"
 LLM-propose / Lean-verify scaffold). Two of its pieces are reusable for us:

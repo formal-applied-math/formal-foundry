@@ -68,3 +68,9 @@ depth_gate = true          # pointers-scoped depth gate: reject a true-but-shall
                            # Mathlib identity in domain clothing — cal-bk-67 inlined the forward
                            # rate as `let`s over raw reals instead of consuming MathFin.zcb).
                            # No pointers ⇒ inapplicable ⇒ skipped.
+retrieval_backend = "embedding"  # "embedding" (pin-accurate types.jsonl cosine, whole-corpus
+                           # semantic reach) | "loogle" (name-based reactive only). Falls open to
+                           # loogle when the embedding cache is absent.
+retrieval_k = 8            # top-k premises surfaced per query (formalize grounding + prove context)
+embed_model = "mistral-embed"    # Mistral /v1/embeddings model id (build cache: scripts/build-embeddings.sh)
+autop = true               # cheap tactic-menu prove probe — a SCOUT (draft PR, never a silent merge)
