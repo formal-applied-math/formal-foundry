@@ -203,7 +203,12 @@ JUDGE_SYSTEM = (
     "E[X], Var[X], a price, or a discount factor is fine (no measure-theoretic "
     "construction required), and a named quantity's definition MAY be inlined into its "
     "stated property (e.g. `(1+θ)*μ ≥ μ` faithfully renders 'the premium π = (1+θ)·μ "
-    "satisfies π ≥ μ'). Respond with ONLY a JSON object: "
+    "satisfies π ≥ μ'). Do NOT fault a statement for omitting a hypothesis that is PROVABLE "
+    "from the definitions it consumes: a zero-coupon-bond price built from `Real.exp` is "
+    "automatically positive, so an explicit `0 < P` positivity hypothesis is unnecessary — its "
+    "absence is not a gap. (A genuinely-needed side condition, like a denominator `≠ 0` that is "
+    "NOT provable from the consumed defs, is still required.) "
+    "Respond with ONLY a JSON object: "
     '{"faithful": true|false, "verdict": "<one line>", "issues": ["<gross gap>", ...]}.'
 )
 
@@ -807,12 +812,12 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn,
             j = judge_faithfulness(issue, stub, chat_fn=reason_fn, deferred=deferred)
             spent += j["tokens"]
             if not j.get("faithful"):
-                log(f"#{n}: unfaithful — {j.get('verdict', '')}"); continue
+                log(f"#{n}: unfaithful — {j.get('verdict', '')}\n  statement: {stub}"); continue
 
             fid = intent_fidelity_check(intent, stub, reason_fn=reason_fn)
             spent += fid["tokens"]
             if not fid.get("faithful"):
-                log(f"#{n}: intent drift — {fid.get('verdict', '')}"); continue
+                log(f"#{n}: intent drift — {fid.get('verdict', '')}\n  statement: {stub}"); continue
 
             paths = _write_target(queue_dir, n, lean_text, entry)
             seeded.append({"id": f"cal-bk-{n}", "issue": n, "paths": paths})

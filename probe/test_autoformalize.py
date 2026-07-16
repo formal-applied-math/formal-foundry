@@ -200,6 +200,30 @@ def test_draft_system_documents_subset_and_deferred_contract():
     assert ":= by sorry" in joined    # unchanged stub-format contract still present
 
 
+def test_judge_system_does_not_fault_provable_hypotheses():
+    # #67 was wrongly rejected for "missing positivity hypotheses" though its zcb (Real.exp) is
+    # provably positive — the judge must not fault a hypothesis provable from the consumed defs.
+    msgs = af.judge_messages({"number": 1, "title": "t", "body": "b"}, "theorem foo : True := by sorry")
+    sys = " ".join(m["content"] for m in msgs)
+    assert "PROVABLE" in sys and "automatically positive" in sys
+
+
+def test_refill_logs_rejected_statement_on_unfaithful(monkeypatch, tmp_path):
+    # instrument the reject path: log the ACTUAL statement so we stop inferring why it was rejected.
+    _two_stage_ok(monkeypatch)
+    monkeypatch.setattr(af, "depth_rejection", lambda lt, nm, ptr, **k: {"shallow": False, "tokens": 0})
+    monkeypatch.setattr(af, "hypothesis_rejection", lambda *a, **k: {"vacuous": False, "tokens": 1})
+    monkeypatch.setattr(af, "disproof", lambda *a, **k: {"false": False, "tokens": 1})
+    monkeypatch.setattr(af, "judge_faithfulness",
+                        lambda i, s, chat_fn, deferred=None: {"faithful": False, "verdict": "missing X", "tokens": 1})
+    monkeypatch.setattr(af, "intent_fidelity_check", lambda intent, s, *, reason_fn: {"faithful": True, "tokens": 1})
+    logs = []
+    af.refill([_issue(7)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
+              context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000, log=lambda m: logs.append(m))
+    blob = "\n".join(logs)
+    assert "unfaithful" in blob and "theorem t7" in blob   # verdict + the actual rejected statement
+
+
 def test_judge_messages_includes_declared_deferred():
     msgs = af.judge_messages({"number": 88, "title": "t", "body": "b"},
                              "theorem foo : True := by sorry",
