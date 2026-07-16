@@ -99,12 +99,14 @@ if [ -f "${CAND}.scout" ]; then
   TITLE_SUFFIX="(refs #$ISSUE)"
   PROVER_DESC="Closed by the autop probe (${SCOUT_TACTIC}) via the mathfin-foundry pipeline — a SCOUT lead; refactor to the conceptually-right proof before merge."
   COMMIT_TRAILER=()
+  PROVENANCE_DESC="autop probe (${SCOUT_TACTIC})"
   BODY_INTRO="this pr's proof was closed by the autop probe (\`${SCOUT_TACTIC}\`) in the mathfin-foundry pipeline — a SCOUT lead, not an author proof, and is NOT axiom-guarded."
   PROOF_BULLET="- \`$MODULE\` — the proof (a SCOUT lead closed by the autop probe \`${SCOUT_TACTIC}\`; needs refactor to the conceptually-right proof; NOT axiom-guarded)."
 else
   SCOUT_NOTE=""
   PROVER_DESC="Proved by Leanstral (${MODEL}) via the mathfin-foundry autoform pipeline; human-reviewed before merge."
   COMMIT_TRAILER=(-m "Co-Authored-By: Leanstral <${MODEL}@users.noreply.mistral.ai>")
+  PROVENANCE_DESC="leanstral"
   BODY_INTRO="this pr was produced by the autoform pipeline (leanstral $MODEL), then assembled and validated green in ci."
   PROOF_BULLET="- \`$MODULE\` — the proof (axioms-clean; the probe's axiom guard passed)."
 fi
@@ -221,7 +223,7 @@ $PROOF_BULLET
 - a re-export entry in \`$BENCH\`.
 - regenerated \`MathFin/AxiomAuditGen.lean\` + \`formalization.yaml\`.
 
-provenance: leanstral, run tag \`$TAG\`, ~$TOKENS tokens.
+provenance: $PROVENANCE_DESC, run tag \`$TAG\`, ~$TOKENS tokens.
 
 review checklist (8-lens, before merge):
 - [ ] the statement faithfully formalizes (its stated subset of) issue #$ISSUE — no vacuity, no weaker restatement of what it states; a declared subset is fine (see follow-ups).
