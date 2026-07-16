@@ -6,12 +6,14 @@ Status: IMPLEMENTED 2026-07-16 (branch `feat/embedding-retrieval-prove-probe`,
 DEFERS Track B2 (goal-state best-first search) and k-candidate typecheck-filtered
 self-consistency statement selection — see § Non-goals.
 
-**Live-smoke deferral:** the embedding cache build (`scripts/build-embeddings.sh`)
-and the autop-through-daemon smoke need `MISTRAL_API_KEY` / the lean-repl daemon,
-which are not in the local env — deferred to a key-available run (or CI). The
-feature **fails open to loogle** when the cache is absent, so an unbuilt cache is a
-graceful degradation, not a regression. Vector-cache commit-vs-CI decision (§ Risks)
-is likewise pending that first build.
+**Deployment:** `index/` (types.jsonl + the embedding cache) is a gitignored
+`lean_scout` build artifact, NOT committed. Built + validated locally 2026-07-16
+(55 MB cache, strong semantic hits). On the cron, `pipeline.yml` rebuilds + caches both
+the index (`scripts/build-index.sh`) and the embedding cache (`scripts/build-embeddings.sh`,
+`MISTRAL_API_KEY` secret) per pin via `actions/cache` keyed by the MathFin source +
+toolchain; the builds are non-fatal, so a miss **falls open to loogle** — a graceful
+degradation, not a regression. The autop-through-daemon live smoke is still deferred to a
+daemon session / the first cron run.
 
 Inspiration: the UlamAI Prover (github.com/ulamai/ulamai, ulam.ai — a "truth-first"
 LLM-propose / Lean-verify scaffold). Two of its pieces are reusable for us:
@@ -31,7 +33,7 @@ We have two open weaknesses — one we have evidence for, one we have never obse
   which tracks a NEWER Mathlib than our pin, so its hits are unverified and often
   false.
 - `extract_signatures` / the `ScoutIndex` context pack (`house_context.py:264`):
-  real elaborated signatures from the committed `index/types.jsonl`, but **scoped to
+  real elaborated signatures from the `lean_scout`-built `index/types.jsonl`, but **scoped to
   the issue's declared `-- pointers:` modules** and their dependency closure.
 
 The logged formalize failures are premise-surfacing failures: leanstral hallucinates
@@ -55,7 +57,8 @@ evidenced failure; B1 starts gathering prove-stage evidence at low cost.
 
 ### Corpus — reuse what is already committed
 
-The premise corpus is the **already-committed `index/types.jsonl`** (2785 pin-accurate
+The premise corpus is `index/types.jsonl` — a **gitignored `lean_scout` build artifact**
+(not committed; built by `scripts/build-index.sh`, CI-cached per pin) — (2785 pin-accurate
 elaborated declarations: `{name, module, type, docString}`, produced by `lean_scout`
 via `scripts/build-index.sh`, one rebuild per pin). No new extractor is written; the
 embedding index reads the same JSONL as `ScoutIndex`.
