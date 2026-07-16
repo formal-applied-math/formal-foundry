@@ -6,7 +6,10 @@ docs/superpowers/specs/2026-07-16-embedding-retrieval-prove-probe-design.md.
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import math
+import os
 import sys
 import time
 import urllib.error
@@ -58,3 +61,95 @@ def mistral_embed(texts, *, api_key, model=DEFAULT_EMBED_MODEL,
                 time.sleep(5 * (2 ** attempt)); continue
             raise RuntimeError(f"Mistral embeddings {type(e).__name__} after retries: {e}") from e
     raise RuntimeError("unreachable")
+
+
+def load_premises(index_dir: str) -> list[dict]:
+    """The types.jsonl records (name/module/type/docString). [] if absent —
+    callers then fall back to loogle."""
+    path = os.path.join(index_dir, "types.jsonl")
+    recs: list[dict] = []
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    recs.append(json.loads(line))
+    except (OSError, ValueError):
+        return []
+    return recs
+
+
+def premise_text(rec: dict) -> str:
+    """The text we embed + surface for a premise: `name : type`."""
+    return f"{rec.get('name', '')} : {rec.get('type', '')}".strip()
+
+
+def corpus_hash(premise_texts: list[str], model: str) -> str:
+    """Cache key: (model, corpus). A pin rebuild or model change invalidates."""
+    h = hashlib.sha256(model.encode("utf-8"))
+    for t in premise_texts:
+        h.update(b"\x00")
+        h.update(t.encode("utf-8"))
+    return h.hexdigest()
+
+
+def cosine(a: list[float], b: list[float]) -> float:
+    """Cosine similarity; 0.0 (never NaN) when either vector is zero."""
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(y * y for y in b))
+    if na == 0.0 or nb == 0.0:
+        return 0.0
+    return sum(x * y for x, y in zip(a, b)) / (na * nb)
+
+
+def top_k(query_vec: list[float], matrix: list[list[float]], k: int) -> list[int]:
+    """Indices of the k rows most cosine-similar to `query_vec`, best first."""
+    scored = [(cosine(query_vec, row), i) for i, row in enumerate(matrix)]
+    scored.sort(key=lambda s: (-s[0], s[1]))
+    return [i for _, i in scored[:k]]
+
+
+class EmbeddingIndex:
+    """Vectors for a premise corpus + cosine top-k retrieval. Build once per pin
+    (vectors cached to disk keyed by (model, corpus_hash)); query embeds one text
+    and ranks locally."""
+
+    def __init__(self, premises: list[dict], *, model: str):
+        self.premises = premises
+        self.model = model
+        self.texts = [premise_text(p) for p in premises]
+        self.hash = corpus_hash(self.texts, model)
+        self.vectors: list[list[float]] | None = None
+
+    def build(self, embed_fn) -> "EmbeddingIndex":
+        """Embed the corpus. `embed_fn(list[str]) -> list[list[float]]`."""
+        self.vectors = embed_fn(self.texts)
+        return self
+
+    def save(self, path: str) -> None:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"model": self.model, "corpus_hash": self.hash,
+                       "vectors": self.vectors}, f)
+
+    @classmethod
+    def load(cls, path: str, premises: list[dict], model: str) -> "EmbeddingIndex | None":
+        """Load a cached index iff its (model, corpus_hash) matches `premises` —
+        else None (stale/absent → caller rebuilds or falls back)."""
+        idx = cls(premises, model=model)
+        try:
+            with open(path, encoding="utf-8") as f:
+                blob = json.load(f)
+        except (OSError, ValueError):
+            return None
+        if blob.get("model") != model or blob.get("corpus_hash") != idx.hash:
+            return None
+        idx.vectors = blob["vectors"]
+        return idx
+
+    def retrieve(self, query: str, k: int, embed_fn) -> str:
+        """Top-k premises for `query` as `name : type` lines ('' if not built)."""
+        if not self.vectors:
+            return ""
+        qv = embed_fn([query])[0]
+        idxs = top_k(qv, self.vectors, k)
+        return "\n".join(self.texts[i] for i in idxs)
