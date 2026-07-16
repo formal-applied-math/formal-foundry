@@ -88,6 +88,12 @@ class AutoformalizeConfig:
     retrieval: bool = True      # loogle-augmented repair on `unknown identifier X`
     formalize_token_budget: int = 40_000   # early-abort a doomed formalization (a hard issue
                                            # like #61 else burns ~77k/draw grinding all rounds)
+    # embedding premise retrieval (pin-accurate types.jsonl) with loogle fallback.
+    retrieval_backend: str = "embedding"   # "embedding" | "loogle"
+    retrieval_k: int = 8                    # top-k premises surfaced per query
+    embed_model: str = "mistral-embed"      # Mistral /v1/embeddings model id
+    # cheap prove probe: try a fixed tactic menu as whole-proof scripts (scout).
+    autop: bool = True
 
     @staticmethod
     def load(path: str | None) -> "AutoformalizeConfig":

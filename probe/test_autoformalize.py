@@ -48,6 +48,22 @@ def test_autoformalize_config_two_stage_defaults():
     assert cfg.formalize_token_budget == 40_000            # early-abort a doomed draft
 
 
+def test_autoformalize_config_retrieval_backend_defaults():
+    cfg = pl.AutoformalizeConfig.load(None)
+    assert cfg.retrieval_backend == "embedding"
+    assert cfg.retrieval_k == 8
+    assert cfg.embed_model == "mistral-embed"
+    assert cfg.autop is True
+
+
+def test_autoformalize_config_retrieval_backend_reads_toml(tmp_path):
+    toml = tmp_path / "pipeline.toml"
+    toml.write_text('[autoformalize]\nretrieval_backend = "loogle"\nautop = false\n')
+    cfg = pl.AutoformalizeConfig.load(str(toml))
+    assert cfg.retrieval_backend == "loogle"
+    assert cfg.autop is False
+
+
 # --- split_statement ---------------------------------------------------------
 
 def test_split_statement_simple():

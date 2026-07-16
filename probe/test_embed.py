@@ -99,3 +99,16 @@ def test_embedding_index_load_fails_soft_on_missing_vectors(tmp_path):
 
 def test_cache_path_is_per_model_under_index_dir():
     assert embed.cache_path("index", "mistral-embed") == "index/embeddings-mistral-embed.json"
+
+
+def test_make_embedding_retrieve_fn_is_str_to_str():
+    premises = [{"name": "MathFin.zcb", "type": "ℝ → ℝ", "docString": ""}]
+
+    def fake_embed(texts):
+        return [[1.0, 0.0] for _ in texts]
+
+    idx = embed.EmbeddingIndex(premises, model="fake")
+    idx.build(fake_embed)
+    fn = embed.make_embedding_retrieve_fn(idx, k=1, embed_fn=fake_embed)
+    out = fn("MathFin.zcb")
+    assert isinstance(out, str) and "MathFin.zcb" in out

@@ -162,6 +162,14 @@ def cache_path(index_dir: str, model: str) -> str:
     return os.path.join(index_dir, f"embeddings-{model}.json")
 
 
+def make_embedding_retrieve_fn(index: "EmbeddingIndex", k: int, embed_fn):
+    """A drop-in `retrieve_fn(query: str) -> str` over `index` — same shape as
+    loogle_candidates, but ranks the WHOLE MathFin corpus by cosine similarity."""
+    def retrieve(query: str) -> str:
+        return index.retrieve(query, k, embed_fn)
+    return retrieve
+
+
 def build_cli(argv=None) -> int:
     """Embed index/types.jsonl and write the vector cache. Host-side HTTP — NO
     Lean process, so it is orthogonal to the daemon slot."""
