@@ -918,6 +918,38 @@ def test_formalize_with_repair_gives_up_after_rounds():
     assert r["ok"] is False
 
 
+def test_repair_hint_partial_application():
+    # #67's real CI failure: `… * MathFin.zcb r` (a ℝ→ℝ→ℝ function) instead of `… * zcb r t T`.
+    errs = ["line 29:13: failed to synthesize instance of type class\n  HMul ℝ (ℝ → ℝ → ℝ) ?m.33"]
+    h = af._repair_hint(errs)
+    assert "PARTIALLY-APPLIED" in h and "all its arguments" in h.lower()
+
+
+def test_repair_hint_import_mid_file():
+    errs = ["line 26:0: invalid 'import' command, it must be used in the beginning of the file"]
+    assert "import" in af._repair_hint(errs).lower()
+
+
+def test_repair_hint_empty_for_generic_error():
+    assert af._repair_hint(["line 5: unsolved goals"]) == ""
+
+
+def test_formalize_with_repair_appends_targeted_hint_on_partial_application():
+    # the HMul-function hint must reach the repair prompt (generic feedback couldn't fix #67).
+    seen = []
+    replies = [_formalize_reply(concl="x * (fun a b => a)"), _formalize_reply(concl="x = x")]
+
+    def chat(msgs):
+        seen.append(list(msgs))
+        return (replies[len(seen) - 1], 10)
+    checks = iter([{"success": False, "sorry_count": 1,
+                    "errors": ["line 29:13: failed to synthesize instance of type class\n  HMul ℝ (ℝ → ℝ → ℝ) ?m"]},
+                   {"success": True, "errors": [], "sorry_count": 1}])
+    af.formalize_with_repair(_INTENT, "", issue=_issue(5), chat_fn=chat,
+                             check_fn=lambda c: next(checks), emit_fn=af.emit_target_files, rounds=3)
+    assert "PARTIALLY-APPLIED" in " ".join(m["content"] for m in seen[1])   # 2nd call got the hint
+
+
 def test_unknown_identifiers_extracted_and_deduped():
     errs = ["line 3: unknown identifier 'Foo.bar'", "line 5: unknown constant 'Baz'",
             "again unknown identifier 'Foo.bar'", "unrelated error"]

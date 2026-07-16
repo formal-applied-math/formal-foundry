@@ -487,6 +487,23 @@ def loogle_candidates(name: str, *, main_repo: str, run_fn=None) -> str:
     return run_fn(name)
 
 
+def _repair_hint(errors) -> str:
+    """Targeted repair hints for RECURRING Leanstral formalization errors (like the `^`-not-`²`
+    hint), keyed off the elaboration error text — the generic feedback alone couldn't fix these
+    (e.g. #67 hit the same `HMul ℝ (ℝ → ℝ → ℝ)` under-application 3 rounds running). '' if none
+    match."""
+    blob = "\n".join(str(e) for e in errors)
+    hints = []
+    if re.search(r"type class\s+H(?:Mul|Add|Sub|Div|Pow).*→", blob, re.DOTALL):
+        hints.append("A term is a PARTIALLY-APPLIED function (a `… → …` where a value is "
+                     "expected): apply every MathFin/Mathlib definition to ALL its arguments "
+                     "(e.g. `MathFin.zcb r t T`, never `MathFin.zcb r`).")
+    if "invalid 'import' command" in blob:
+        hints.append("Do NOT write any `import` inside the theorem — the module already imports "
+                     "Mathlib and the pointer modules.")
+    return ("\n" + "\n".join(hints)) if hints else ""
+
+
 def formalize_with_repair(intent: dict, grounding: str, *, issue: dict, chat_fn, check_fn,
                           emit_fn, rounds: int = 3, retrieve_fn=None,
                           token_budget: int = 40_000, log=lambda m: None) -> dict:
@@ -538,6 +555,7 @@ def formalize_with_repair(intent: dict, grounding: str, *, issue: dict, chat_fn,
                     "Fix ONLY the statement, keep it faithful to the intended statement and still "
                     "ending in `:= by sorry`. Use `^` for powers (never Unicode `²`); "
                     "`Real.exp`/`Real.log`/`Real.sqrt`.")
+        feedback += _repair_hint(errs)
         if retrieve_fn:
             for nm in _unknown_identifiers(errs):
                 cand = retrieve_fn(nm)
