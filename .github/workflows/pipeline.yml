@@ -105,7 +105,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: index/embeddings-mistral-embed.json
-          key: mathfin-embeddings-mistral-embed-v1-${{ hashFiles('main/lean-toolchain', 'main/lake-manifest.json', 'main/MathFin/**') }}
+          key: mathfin-embeddings-mistral-embed-v2-${{ hashFiles('main/lean-toolchain', 'main/lake-manifest.json', 'main/MathFin/**') }}
 
       - name: Build embedding cache (cache miss only; non-fatal)
         if: steps.embed-cache.outputs.cache-hit != 'true'

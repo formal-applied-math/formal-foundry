@@ -11,6 +11,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -64,17 +65,54 @@ def mistral_embed(texts, *, api_key, model=DEFAULT_EMBED_MODEL,
     raise RuntimeError("unreachable")
 
 
+# Lean-internal / auto-generated names are unusable as retrieval candidates (the
+# model can't cite `_private.…`, `.casesOn`, an auto-gen simp lemma, …) — and they
+# are ~45% of the raw types.jsonl, so filtering them sharpens the top-k the model sees.
+_PREMISE_INTERNAL_INFIX = (
+    "._simp", "._proof_", ".match_", "._sunfold", "._eq_", "._cstage",
+    ".congr_simp", "._flat_ctor",
+)
+_PREMISE_INTERNAL_SUFFIX = (
+    ".casesOn", ".recOn", ".rec", ".recAux", ".brecOn", ".below", ".ibelow",
+    ".noConfusion", ".noConfusionType", ".ind", ".sizeOf", ".sizeOf_spec",
+    ".injEq", ".eq_def", ".mk", ".ofNat", ".toCtorIdx",
+)
+_PREMISE_EQNUM = re.compile(r"\.eq_\d+$")
+
+
+def _is_usable_premise(name: str) -> bool:
+    """False for a Lean-internal / auto-generated name (private decl, simp/proof/
+    match internal, structure eliminator, numbered equation lemma) — none of which
+    the model can reference. True for a real, citable MathFin lemma or def."""
+    if not name or name.startswith("_private."):
+        return False
+    if any(m in name for m in _PREMISE_INTERNAL_INFIX):
+        return False
+    if any(name.endswith(s) for s in _PREMISE_INTERNAL_SUFFIX):
+        return False
+    return not _PREMISE_EQNUM.search(name)
+
+
 def load_premises(index_dir: str) -> list[dict]:
-    """The types.jsonl records (name/module/type/docString). [] if absent —
-    callers then fall back to loogle."""
+    """The SIGNAL types.jsonl records (name/module/type/docString): real, citable
+    MathFin decls only. Two combined filters — Lean's own `allowCompletion` flag
+    (drops `._f` / `.ctorIdx` / auto-gen internals it authoritatively marks) AND the
+    `_is_usable_premise` name guard (drops what `allowCompletion` still lets through:
+    `_private.` mangled names, `.eq_N`, `.congr_simp`, structure constructors). ~45%
+    of the raw index is such noise. [] if absent — callers then fall back to loogle."""
     path = os.path.join(index_dir, "types.jsonl")
     recs: list[dict] = []
     try:
         with open(path, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
-                if line:
-                    recs.append(json.loads(line))
+                if not line:
+                    continue
+                rec = json.loads(line)
+                # `is not False` (not `is True`) so a future field-less index degrades
+                # to the name guard alone rather than dropping everything.
+                if rec.get("allowCompletion") is not False and _is_usable_premise(rec.get("name", "")):
+                    recs.append(rec)
     except (OSError, ValueError):
         return []
     return recs

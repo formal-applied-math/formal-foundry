@@ -112,3 +112,37 @@ def test_make_embedding_retrieve_fn_is_str_to_str():
     fn = embed.make_embedding_retrieve_fn(idx, k=1, embed_fn=fake_embed)
     out = fn("MathFin.zcb")
     assert isinstance(out, str) and "MathFin.zcb" in out
+
+
+def test_is_usable_premise_drops_internal_names():
+    for n in ["_private.MathFin.X.0.MathFin.Y._simp_1_7", "MathFin.Foo._proof_3",
+              "MathFin.OnePeriodVector.IsEMM.casesOn", "MathFin.Bar.recOn",
+              "MathFin.Baz.injEq", "MathFin.Qux.eq_1", "MathFin.Thing.congr_simp",
+              "MathFin.Struct.mk", ""]:
+        assert embed._is_usable_premise(n) is False, n
+
+
+def test_is_usable_premise_keeps_real_decls():
+    for n in ["MathFin.bsCall_asset_piece_integral", "MathFin.zcb",
+              "MathFin.OnePeriodVector.IsEMM.exists_of_physical", "MathFin.gbmValue"]:
+        assert embed._is_usable_premise(n) is True, n
+
+
+def test_load_premises_filters_internal(tmp_path):
+    import json as _json
+    (tmp_path / "types.jsonl").write_text("\n".join(_json.dumps(r) for r in [
+        {"name": "MathFin.zcb", "type": "ℝ → ℝ"},
+        {"name": "_private.MathFin.X.0.Y._simp_1", "type": "z"},
+        {"name": "MathFin.Foo.casesOn", "type": "w"},
+    ]))
+    assert [r["name"] for r in embed.load_premises(str(tmp_path))] == ["MathFin.zcb"]
+
+
+def test_load_premises_drops_allowcompletion_false(tmp_path):
+    # Lean's own flag drops auto-gen internals even when the NAME looks clean.
+    import json as _json
+    (tmp_path / "types.jsonl").write_text("\n".join(_json.dumps(r) for r in [
+        {"name": "MathFin.realLemma", "type": "P", "allowCompletion": True},
+        {"name": "MathFin.autoGenThing", "type": "Q", "allowCompletion": False},
+    ]))
+    assert [r["name"] for r in embed.load_premises(str(tmp_path))] == ["MathFin.realLemma"]
