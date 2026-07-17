@@ -690,6 +690,17 @@ def test_load_refill_families_latest_wins_and_tolerates_junk(tmp_path):
     assert af.load_refill_families(str(tmp_path / "absent.jsonl")) == {}
 
 
+def test_load_prior_unknowns_unions_across_records(tmp_path):
+    p = tmp_path / "h.jsonl"
+    p.write_text(
+        '{"issue": 53, "history": [{"gate": "depth", "unknown_identifiers": ["MathFin.a"]}]}\n'
+        '{"issue": 53, "history": [{"gate": "depth", "unknown_identifiers": ["MathFin.a", "MathFin.b"]}]}\n'
+        '{"issue": 9, "history": [{"gate": "trivial"}]}\n')
+    u = af.load_prior_unknowns(str(p))
+    assert u[53] == ["MathFin.a", "MathFin.b"]
+    assert u.get(9, []) == []
+
+
 def test_unknown_identifiers_match_live_elaborator_format():
     # the VERBATIM error from the 2026-07-17 live run — capital U + backticks.
     # the old regex (lowercase + straight quotes) never matched it, so the
@@ -708,6 +719,163 @@ def test_formalize_with_repair_returns_collected_unknowns():
                                  emit_fn=af.emit_target_files, rounds=2)
     assert r["ok"] is True
     assert r["unknowns"] == ["MathFin.vanillaPayoff"]
+
+
+# --- definitions path (F1): prompts, def extraction, defs gates ---------------
+
+_DEFS_STUB = ("noncomputable def knockInPayoff (hit f : ℝ) : ℝ := hit * f\n\n"
+              "noncomputable def knockOutPayoff (hit f : ℝ) : ℝ := (1 - hit) * f\n\n"
+              "theorem in_out_parity (hit f : ℝ) :\n"
+              "    knockInPayoff hit f + knockOutPayoff hit f = f * 1 := by sorry")
+
+
+def test_intent_messages_defs_route_addendum_and_prior_unknowns():
+    msgs = af.intent_messages(_ISSUE, "SIGS", route="defs",
+                              prior_unknowns=["MathFin.vanillaPayoff"])
+    user = msgs[1]["content"]
+    assert "definitions" in user                       # the JSON array contract
+    assert "MathFin.vanillaPayoff" in user             # prior guesses become hints
+    assert "SIGS" in user
+
+
+def test_intent_messages_theorem_route_has_no_defs_addendum():
+    user = af.intent_messages(_ISSUE, "SIGS")[1]["content"]
+    assert "NEW definitions" not in user
+
+
+def test_formalize_messages_defs_block_when_intent_names_definitions():
+    intent = {"statement": "s", "objects": [],
+              "definitions": [{"name": "knockInPayoff", "signature": "ℝ → ℝ → ℝ",
+                               "meaning": "in-part", "built_from": ["max"]}]}
+    user = af.formalize_messages(intent, "")[1]["content"]
+    assert "knockInPayoff" in user
+    assert "definitions" in user.lower()
+    assert "sorry" in user                             # only the THEOREM carries sorry
+
+
+def test_drafted_def_names_extracts_defs_not_theorem():
+    assert af.drafted_def_names(_DEFS_STUB) == ["knockInPayoff", "knockOutPayoff"]
+    assert af.drafted_def_names("theorem t : True := by sorry") == []
+
+
+def test_defs_probe_checks_consumption_and_grounding():
+    probe = af.defs_probe(_DEFS_STUB, "in_out_parity",
+                          ["knockInPayoff", "knockOutPayoff"])
+    assert _DEFS_STUB.rstrip() in probe                # elaborates the stub first
+    assert "`MathFin.in_out_parity" in probe           # theorem looked up by name
+    assert "`MathFin.knockInPayoff" in probe and "`MathFin.knockOutPayoff" in probe
+    assert "getUsedConstants" in probe
+    assert "defs-gate:" in probe                       # the reject marker
+    assert "newdef_depth" in probe and "ungrounded" in probe
+
+
+def test_defs_rejection_requires_defs_without_daemon():
+    called = {"n": 0}
+
+    def check(code):
+        called["n"] += 1
+        return {"errors": [], "sorry_count": 1}
+    r = af.defs_rejection("theorem t : True := by sorry", "t", [], check_fn=check)
+    assert r["failed"] is True and r["gate"] == "newdef_depth"
+    assert called["n"] == 0                            # no daemon consulted
+
+
+def test_defs_rejection_classifies_marker_errors():
+    ungrounded = {"errors": ["defs-gate: ungrounded: MathFin.k is a free-floating wrapper"],
+                  "sorry_count": 1}
+    r = af.defs_rejection(_DEFS_STUB, "in_out_parity", ["knockInPayoff"],
+                          check_fn=lambda c: ungrounded)
+    assert r["failed"] is True and r["gate"] == "ungrounded"
+    newdef = {"errors": ["defs-gate: newdef_depth: the theorem's type uses none"],
+              "sorry_count": 1}
+    r = af.defs_rejection(_DEFS_STUB, "in_out_parity", ["knockInPayoff"],
+                          check_fn=lambda c: newdef)
+    assert r["failed"] is True and r["gate"] == "newdef_depth"
+
+
+def test_defs_rejection_fails_open_on_unmarked_daemon_error():
+    infra = {"errors": ["daemon check did not complete: TimeoutError"], "sorry_count": 0}
+    r = af.defs_rejection(_DEFS_STUB, "in_out_parity", ["knockInPayoff"],
+                          check_fn=lambda c: infra)
+    assert r["failed"] is False
+
+
+def test_semantic_verdict_defs_route_swaps_depth_for_defs_gate(monkeypatch):
+    order = []
+    monkeypatch.setattr(af, "depth_rejection",
+                        lambda *a, **k: order.append("depth") or {"shallow": True, "verdict": "x", "tokens": 0})
+    monkeypatch.setattr(af, "defs_rejection",
+                        lambda lt, nm, dn, **k: order.append("defs") or
+                        {"failed": True, "gate": "ungrounded", "verdict": "w", "tokens": 0})
+    fail, _tok = af.semantic_verdict(
+        lean_text="lt", stub="s", name="t", intent={}, issue={"pointers": []},
+        deferred=[], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
+        gate_budget=100, route="defs", def_names=["k"])
+    assert order == ["defs"]                           # pointer-depth gate not consulted
+    assert fail == {"gate": "ungrounded", "detail": "w"}
+
+
+def test_render_gate_feedback_covers_defs_gates():
+    assert "drafted def" in af.render_gate_feedback("newdef_depth", "", None)
+    assert "wrapper" in af.render_gate_feedback("ungrounded", "", None)
+
+
+def test_emit_target_files_defs_meta_header_and_provenance():
+    meta = {**_META, "definitions": ["knockInPayoff", "knockOutPayoff"]}
+    lean_text, entry, placement = af.emit_target_files(_ISSUE, _DEFS_STUB, meta)
+    assert "-- new-defs: knockInPayoff, knockOutPayoff" in lean_text
+    assert entry["metadata"]["provenance"]["new_defs"] == ["knockInPayoff", "knockOutPayoff"]
+    assert lean_text.count("sorry") == 1               # defs are sorry-free
+    meta2 = bm.parse_meta(lean_text)                   # header block still parses
+    assert meta2["benchmark_id"] == "mf-fi-fra"
+
+
+def test_refill_defs_route_requires_intent_definitions(monkeypatch, tmp_path):
+    # a defs-routed issue whose intent names NO definitions fails the intent gate
+    # (repairable), never reaching formalize.
+    calls = {"formalize": 0}
+    monkeypatch.setattr(af, "draft_intent", _good_intent)      # definitions: absent
+
+    def formalize(*a, **k):
+        calls["formalize"] += 1
+        return _good_formalize(*a, **k)
+    monkeypatch.setattr(af, "formalize_with_repair", formalize)
+    _pass_gates(monkeypatch)
+    res = af.refill([_issue(5, route="defs")], reason_fn=_NOOP, prove_fn=_NOOP,
+                    check_fn=_ELAB_OK, context_fn=lambda i: "", queue_dir=str(tmp_path),
+                    budget=100000, semantic_rounds=1)
+    assert res["seeded"] == []
+    assert res["attempted"][0]["history"][0]["gate"] == "intent"
+    assert calls["formalize"] == 0
+
+
+def test_refill_defs_route_seeds_with_new_defs_header(monkeypatch, tmp_path):
+    def intent(i, ctx, *, chat_fn, **_kw):
+        base = _good_intent(i, ctx, chat_fn=chat_fn)
+        base["intent"]["definitions"] = [{"name": "knockInPayoff"}]
+        return base
+
+    def formalize(intent_, g, *, issue, emit_fn, **kw):
+        lean_text, entry, _ = emit_fn(issue, _DEFS_STUB,
+                                      {"module_name": intent_["module_name"],
+                                       "benchmark_id": intent_["benchmark_id"],
+                                       "docstring": "d",
+                                       "definitions": ["knockInPayoff", "knockOutPayoff"]})
+        return {"ok": True, "stub": _DEFS_STUB, "meta": {}, "lean_text": lean_text,
+                "entry": entry, "tokens": 10}
+    monkeypatch.setattr(af, "draft_intent", intent)
+    monkeypatch.setattr(af, "formalize_with_repair", formalize)
+    _pass_gates(monkeypatch)
+    monkeypatch.setattr(af, "defs_rejection",
+                        lambda lt, nm, dn, **k: {"failed": False, "gate": None,
+                                                 "verdict": "", "tokens": 0})
+    res = af.refill([_issue(6, route="defs")], reason_fn=_NOOP, prove_fn=_NOOP,
+                    check_fn=_ELAB_OK, context_fn=lambda i: "", queue_dir=str(tmp_path),
+                    budget=100000)
+    assert [s["issue"] for s in res["seeded"]] == [6]
+    staged = (tmp_path / "cal-bk-6.lean").read_text()
+    assert "-- new-defs:" in staged
+    assert "theorem in_out_parity" in staged
 
 
 def test_refill_history_rows_carry_unknowns_and_family(monkeypatch, tmp_path):
@@ -740,7 +908,7 @@ def _issue(n, **kw):
     return d
 
 
-def _good_intent(i, ctx, *, chat_fn, feedback=None):
+def _good_intent(i, ctx, *, chat_fn, feedback=None, **_kw):
     """Stand-in for draft_intent — a parseable intent with naming meta."""
     n = i["number"]
     return {"ok": True, "tokens": 5, "intent": {
@@ -793,7 +961,7 @@ def test_refill_stages_a_good_issue(monkeypatch, tmp_path):
 def test_refill_skips_when_intent_unparseable(monkeypatch, tmp_path):
     # stage 1 (magistral) fails to produce a parseable intent → skip before formalizing.
     monkeypatch.setattr(af, "draft_intent",
-                        lambda i, ctx, *, chat_fn, feedback=None: {"ok": False, "intent": None, "tokens": 3})
+                        lambda i, ctx, *, chat_fn, feedback=None, **_kw: {"ok": False, "intent": None, "tokens": 3})
     _pass_gates(monkeypatch)
     res = af.refill([_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
                     context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
@@ -890,7 +1058,7 @@ def test_refill_skips_intent_drift(monkeypatch, tmp_path):
 def test_refill_skips_issue_on_step_exception(monkeypatch, tmp_path):
     # a transient error (e.g. HTTP 429 exhaustion) on one issue must not crash the
     # whole refill — log it and skip to the next issue.
-    def boom(i, ctx, *, chat_fn, feedback=None):
+    def boom(i, ctx, *, chat_fn, feedback=None, **_kw):
         if i["number"] == 1:
             raise RuntimeError("HTTP 429 from Mistral API")
         return _good_intent(i, ctx, chat_fn=chat_fn)
@@ -907,7 +1075,7 @@ def test_refill_wires_intent_formalize_prove_fns(monkeypatch, tmp_path):
     seen = {}
     monkeypatch.setattr(
         af, "draft_intent",
-        lambda i, ctx, *, chat_fn, feedback=None:
+        lambda i, ctx, *, chat_fn, feedback=None, **_kw:
         seen.update(intent=chat_fn) or _good_intent(i, ctx, chat_fn=chat_fn))
     monkeypatch.setattr(
         af, "formalize_with_repair",
@@ -960,7 +1128,7 @@ def test_refill_repairs_shallow_draft_with_feedback(monkeypatch, tmp_path):
     # feedback into BOTH stages, then seed. This is the observed #53/#66 failure.
     seen = {"intent_feedback": [], "revision_notes": []}
 
-    def intent(i, ctx, *, chat_fn, feedback=None):
+    def intent(i, ctx, *, chat_fn, feedback=None, **_kw):
         seen["intent_feedback"].append(feedback)
         return _good_intent(i, ctx, chat_fn=chat_fn)
 
@@ -1024,7 +1192,7 @@ def test_refill_exhausts_semantic_rounds_and_records_obstruction(monkeypatch, tm
 def test_refill_semantic_rounds_one_is_single_shot(monkeypatch, tmp_path):
     calls = {"n": 0}
 
-    def intent(i, ctx, *, chat_fn, feedback=None):
+    def intent(i, ctx, *, chat_fn, feedback=None, **_kw):
         calls["n"] += 1
         return _good_intent(i, ctx, chat_fn=chat_fn)
     monkeypatch.setattr(af, "draft_intent", intent)
@@ -1054,7 +1222,7 @@ def test_refill_budget_stops_semantic_loop(monkeypatch, tmp_path):
     # loop must stop instead of re-drafting, and say so in the history.
     calls = {"n": 0}
 
-    def intent(i, ctx, *, chat_fn, feedback=None):
+    def intent(i, ctx, *, chat_fn, feedback=None, **_kw):
         calls["n"] += 1
         return _good_intent(i, ctx, chat_fn=chat_fn)
     monkeypatch.setattr(af, "draft_intent", intent)
@@ -1070,7 +1238,7 @@ def test_refill_budget_stops_semantic_loop(monkeypatch, tmp_path):
 
 
 def test_refill_records_error_outcome(monkeypatch, tmp_path):
-    def boom(i, ctx, *, chat_fn, feedback=None):
+    def boom(i, ctx, *, chat_fn, feedback=None, **_kw):
         raise RuntimeError("HTTP 429 from Mistral API")
     monkeypatch.setattr(af, "draft_intent", boom)
     res = af.refill([_issue(1)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,

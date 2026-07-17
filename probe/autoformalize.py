@@ -254,10 +254,30 @@ FIDELITY_SYSTEM = (
 )
 
 
-def intent_messages(issue: dict, context_pack: str, feedback: str | None = None) -> list[dict]:
+# the defs-route addendum (F1): the issue's primitives don't exist yet, so the
+# intent must also SPECIFY the 1-3 definitions the module introduces.
+INTENT_DEFS_ADDENDUM = (
+    "\n\nTHIS ISSUE NEEDS NEW DEFINITIONS: the library does not yet provide the primitives "
+    "the statement should be expressed through. In the same JSON, also emit "
+    '"definitions": [{"name": "<camelCase>", "signature": "<Lean type>", '
+    '"meaning": "<one line>", "built_from": ["<existing Mathlib/MathFin constants>"]}, ...] '
+    "— 1 to 3 definitions, each buildable from EXISTING constants (never a free-floating "
+    "wrapper), and specify the statement so the theorem is EXPRESSED THROUGH these new "
+    "definitions."
+)
+
+
+def intent_messages(issue: dict, context_pack: str, feedback: str | None = None,
+                    route: str = "theorem",
+                    prior_unknowns: list[str] | None = None) -> list[dict]:
     user = f"ISSUE #{issue.get('number')}: {_issue_prose(issue)}\n"
     if context_pack:
         user += "\nAvailable declarations you may reference:\n" + context_pack
+    if route == "defs":
+        user += INTENT_DEFS_ADDENDUM
+        if prior_unknowns:
+            user += ("\nPrior attempts guessed these MISSING declarations — define "
+                     "equivalents where sensible: " + ", ".join(prior_unknowns))
     if feedback:
         user += ("\n\n" + feedback
                  + "\nProduce a REVISED intent that fixes this; respond with the same JSON shape.")
@@ -274,14 +294,19 @@ def parse_intent(reply: str) -> dict | None:
     v.setdefault("objects", [])
     v.setdefault("docstring", "")
     v.setdefault("deferred", [])
+    v.setdefault("definitions", [])
     return v
 
 
-def draft_intent(issue: dict, context_pack: str, *, chat_fn, feedback: str | None = None) -> dict:
+def draft_intent(issue: dict, context_pack: str, *, chat_fn, feedback: str | None = None,
+                 route: str = "theorem", prior_unknowns: list[str] | None = None) -> dict:
     """Stage 1: magistral SPECIFIES the intended statement (prose + objects + naming meta) from the
     issue. No Lean. `feedback` (a `render_gate_feedback` block from a rejected previous attempt)
-    turns this into a REVISION round. Returns `{ok, intent, tokens}`."""
-    content, tokens = chat_fn(intent_messages(issue, context_pack, feedback))
+    turns this into a REVISION round; `route="defs"` adds the new-definitions contract, with
+    `prior_unknowns` (declarations earlier drafts guessed at) as hints. Returns
+    `{ok, intent, tokens}`."""
+    content, tokens = chat_fn(intent_messages(issue, context_pack, feedback,
+                                              route=route, prior_unknowns=prior_unknowns))
     intent = parse_intent(content)
     return {"ok": intent is not None, "intent": intent, "tokens": tokens}
 
@@ -290,6 +315,17 @@ def formalize_messages(intent: dict, grounding: str, revision_note: str = "") ->
     objs = ", ".join(intent.get("objects") or []) or "(none named)"
     user = (f"INTENDED STATEMENT:\n{intent['statement']}\n\n"
             f"CONSUME THESE DECLARATIONS: {objs}\n")
+    defs = [d for d in (intent.get("definitions") or []) if isinstance(d, dict)]
+    if defs:
+        spec = "\n".join(
+            f"- {d.get('name')} : {d.get('signature', '?')} — {d.get('meaning', '')}"
+            + (f" (built from: {', '.join(d.get('built_from') or [])})"
+               if d.get("built_from") else "")
+            for d in defs)
+        user += ("\nNEW DEFINITIONS TO INTRODUCE (this module defines them):\n" + spec
+                 + "\nEmit ONE ```lean block containing these definitions (complete — no "
+                 "sorry; each built from existing constants) followed by the single theorem "
+                 "stated THROUGH them, ending `:= by sorry`.\n")
     if grounding:
         user += "\nAVAILABLE SIGNATURES:\n" + grounding
     if revision_note:
@@ -385,8 +421,11 @@ def formalize_with_repair(intent: dict, grounding: str, *, issue: dict, chat_fn,
                  "Output exactly one ```lean block: a single "
                  "`theorem NAME <binders> : <conclusion> := by sorry`."}]
             continue
+        # the ACTUAL defs this round's stub introduces (empty on a plain theorem
+        # stub) ride the meta so emit discloses them (`-- new-defs:` header).
+        round_meta = {**meta, "definitions": drafted_def_names(stub)}
         try:
-            lean_text, entry, _placement = emit_fn(issue, stub, meta)
+            lean_text, entry, _placement = emit_fn(issue, stub, round_meta)
         except Exception as e:  # noqa: BLE001 — surface the assembly failure to the model
             log(f"round {i + 1}: assembly failed ({e})")
             messages += [
@@ -398,7 +437,7 @@ def formalize_with_repair(intent: dict, grounding: str, *, issue: dict, chat_fn,
         elab = check_fn(lean_text)
         if not elab.get("errors") and elab.get("sorry_count", 0) == 1:
             log(f"round {i + 1}: elaborates ✓ ({tokens} tok total)")
-            return {"ok": True, "stub": stub, "meta": meta, "lean_text": lean_text,
+            return {"ok": True, "stub": stub, "meta": round_meta, "lean_text": lean_text,
                     "entry": entry, "tokens": tokens, "unknowns": unknowns}
         errs = elab.get("errors", [])
         log(f"round {i + 1}: {len(errs)} elab error(s); first: {str(errs[0])[:180] if errs else '?'}")
@@ -661,6 +700,30 @@ def load_refill_families(history_path: str) -> dict[int, str]:
     return fams
 
 
+def load_prior_unknowns(history_path: str) -> dict[int, list[str]]:
+    """Issue → union (first-seen order) of `unknown_identifiers` across its
+    refill-history rows — the missing declarations earlier drafts guessed at;
+    they become defs-route hints ("define equivalents where sensible")."""
+    out: dict[int, list[str]] = {}
+    try:
+        with open(history_path, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(rec, dict) or rec.get("issue") is None:
+                    continue
+                bucket = out.setdefault(int(rec["issue"]), [])
+                for row in rec.get("history", []) or []:
+                    for u in row.get("unknown_identifiers", []) or []:
+                        if u not in bucket:
+                            bucket.append(u)
+    except OSError:
+        pass
+    return out
+
+
 def route_for(issue: dict, *, def_count: int, family: str | None) -> str:
     """`theorem` (statement can consume existing pointer defs) or `defs` (the
     library lacks the primitives — draft definitions + the theorem). Runtime
@@ -677,6 +740,72 @@ def order_by_route(issues: list[dict]) -> list[dict]:
     """Theorem-route issues first (cheap wins), stable within each group."""
     return ([i for i in issues if i.get("route", "theorem") == "theorem"]
             + [i for i in issues if i.get("route", "theorem") == "defs"])
+
+
+# --- definitions-path gates (F1) -----------------------------------------------
+#
+# On the defs route the drafter introduces 1-3 defs + one theorem; the pointer
+# depth gate is replaced by ONE daemon probe with two verdicts:
+#   newdef_depth — the theorem's TYPE must use ≥1 drafted def (else the defs are
+#                  decoration and the statement is still raw);
+#   ungrounded   — every drafted def's VALUE must use ≥1 IMPORTED constant
+#                  (`getModuleIdxFor?.isSome`) — an identity/self-referential
+#                  wrapper fails; honest defs over real structure pass.
+# Wrapping real content in honest defs is exactly what we WANT (knockInPayoff
+# over indicator integrals); design quality stays with R's merge review.
+
+_DEFS_MARKER = "defs-gate:"
+
+
+def drafted_def_names(stub: str) -> list[str]:
+    """Names of the `def`/`abbrev`/`structure` declarations the stub introduces,
+    in order (the theorem is not one of them)."""
+    return _DEF_RE.findall(stub)
+
+
+def defs_probe(lean_text: str, thm_name: str, def_names: list[str]) -> str:
+    """The stub + a `run_cmd` meta block that FAILS elaboration unless (a) the
+    theorem's type uses ≥1 drafted def (newdef_depth) and (b) every drafted def's
+    value uses ≥1 imported constant (ungrounded)."""
+    names = ", ".join(f"`MathFin.{d}" for d in def_names)
+    meta = (
+        "\nopen Lean in\n"
+        "run_cmd do\n"
+        "  let env ← getEnv\n"
+        f"  let some thm := env.find? `MathFin.{thm_name}\n"
+        f'    | throwError "{_DEFS_MARKER} theorem {thm_name} not found"\n'
+        f"  let newDefs : List Name := [{names}]\n"
+        "  let used := thm.type.getUsedConstants\n"
+        "  unless newDefs.any (fun d => used.contains d) do\n"
+        f'    throwError "{_DEFS_MARKER} newdef_depth: the theorem\'s type uses none of '
+        'the drafted defs {newDefs}"\n'
+        "  for d in newDefs do\n"
+        "    let some ci := env.find? d\n"
+        f'      | throwError "{_DEFS_MARKER} drafted def {{d}} not found"\n'
+        "    let some v := ci.value?\n"
+        f'      | throwError "{_DEFS_MARKER} ungrounded: {{d}} has no value"\n'
+        "    let ext := v.getUsedConstants.filter (fun c => (env.getModuleIdxFor? c).isSome)\n"
+        "    unless ext.size > 0 do\n"
+        f'      throwError "{_DEFS_MARKER} ungrounded: {{d}} is a free-floating wrapper '
+        '(its value uses no imported constant)"\n'
+    )
+    return lean_text.rstrip() + "\n" + meta
+
+
+def defs_rejection(lean_text: str, thm_name: str, def_names: list[str], *, check_fn) -> dict:
+    """Elaborate the defs probe via `check_fn` (the daemon). Returns
+    `{failed, gate: "newdef_depth"|"ungrounded"|None, verdict, tokens}`. No defs
+    drafted ⇒ instant `newdef_depth` fail (no daemon call — the route's contract
+    was ignored). Fails OPEN on unmarked errors, like the other structural gates."""
+    if not def_names:
+        return {"failed": True, "gate": "newdef_depth", "tokens": 0,
+                "verdict": "no definitions drafted — the defs route requires 1-3 new defs"}
+    res = check_fn(defs_probe(lean_text, thm_name, def_names))
+    errs = [str(e) for e in (res.get("errors") or []) if _DEFS_MARKER in str(e)]
+    if not errs:
+        return {"failed": False, "gate": None, "verdict": "", "tokens": 0}
+    gate = "ungrounded" if "ungrounded" in errs[0] else "newdef_depth"
+    return {"failed": True, "gate": gate, "verdict": errs[0], "tokens": 0}
 
 
 # --- issue preparation --------------------------------------------------------
@@ -746,6 +875,14 @@ _GATE_INSTRUCTIONS = {
                   "fact you state.",
     "drift": "The Lean does not faithfully render the intended statement. Re-render "
              "every hypothesis and the full conclusion exactly.",
+    "newdef_depth": "The theorem's TYPE must be stated THROUGH the drafted definitions — "
+                    "apply each drafted def in the hypotheses/conclusion, never restate "
+                    "their formulas inline; and the module must actually contain the "
+                    "1-3 definitions.",
+    "ungrounded": "A drafted definition is a free-floating wrapper: its body must be "
+                  "BUILT FROM existing Mathlib/MathFin constants (an integral, Real.exp, "
+                  "max, an existing MathFin price), not a bare variable or a "
+                  "self-referential shell.",
 }
 
 
@@ -767,16 +904,23 @@ def render_gate_feedback(gate: str, detail: str, stub: str | None) -> str:
 def semantic_verdict(*, lean_text: str, stub: str, name: str, intent: dict, issue: dict,
                      deferred: list[str], reason_fn, prove_fn, check_fn, gate_budget: int,
                      depth_gate: bool = True, triviality_gate: bool = True,
+                     route: str = "theorem", def_names: list[str] | None = None,
                      system_prompt=None) -> tuple[dict | None, int]:
     """Run the semantic gate battery on an ELABORATING draft, cheapest-first:
-    depth → triviality (structural, zero tokens) → hypothesis-rejection → disproof
-    (kernel, leanstral) → issue-faithfulness → intent-fidelity (magistral judges).
+    depth (theorem route) / defs consumption+grounding (defs route) → triviality
+    (structural, zero tokens) → hypothesis-rejection → disproof (kernel,
+    leanstral) → issue-faithfulness → intent-fidelity (magistral judges).
     Returns `(failure, tokens)`: failure is None when every gate passes, else
     `{gate, detail}` for `render_gate_feedback`. The battery's DIVERSITY is the
     anti-Goodhart defense of the repair loop: a re-draft that games one gate still
     faces five others (and open-pr's honesty guards + the human merge after that)."""
     tokens = 0
-    if depth_gate:
+    if route == "defs":
+        dr = defs_rejection(lean_text, name, def_names or [], check_fn=check_fn)
+        tokens += dr["tokens"]
+        if dr["failed"]:
+            return {"gate": dr["gate"], "detail": dr.get("verdict", "")}, tokens
+    elif depth_gate:
         dep = depth_rejection(lean_text, name, issue.get("pointers", []), check_fn=check_fn)
         tokens += dep["tokens"]
         if dep["shallow"]:
@@ -855,6 +999,7 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn,
         if len(seeded) >= max_issues or spent >= budget:
             break
         n = issue.get("number")
+        route = issue.get("route", "theorem")
         history, feedback, staged = [], None, False
         # A transient error on ONE issue (e.g. an HTTP 429 that exhausts retries,
         # a daemon hiccup, a malformed draft) must not kill the tick — log it and
@@ -866,7 +1011,8 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn,
                     history.append({"attempt": attempt, "gate": "budget",
                                     "detail": f"refill budget exhausted ({spent} >= {budget})"})
                     break
-                di = draft_intent(issue, ctx, chat_fn=reason_fn, feedback=feedback)
+                di = draft_intent(issue, ctx, chat_fn=reason_fn, feedback=feedback,
+                                  route=route, prior_unknowns=issue.get("prior_unknowns"))
                 spent += di["tokens"]
                 if not di["ok"]:
                     fail = {"gate": "intent", "detail": "no parseable intent reply"}
@@ -875,6 +1021,13 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn,
                     feedback = render_gate_feedback(fail["gate"], fail["detail"], None)
                     continue
                 intent = di["intent"]
+                if route == "defs" and not (intent.get("definitions") or []):
+                    fail = {"gate": "intent",
+                            "detail": "defs route: the intent must name 1-3 new definitions"}
+                    history.append({"attempt": attempt, **fail})
+                    log(f"#{n}: intent named no definitions (attempt {attempt})")
+                    feedback = render_gate_feedback(fail["gate"], fail["detail"], None)
+                    continue
 
                 proactive = proactive_fn(intent["statement"]) if proactive_fn else ""
                 fr = formalize_with_repair(intent, ctx, issue=issue, chat_fn=formalize_fn,
@@ -904,7 +1057,9 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn,
                     lean_text=lean_text, stub=stub, name=name, intent=intent, issue=issue,
                     deferred=deferred, reason_fn=reason_fn, prove_fn=prove_fn,
                     check_fn=check_fn, gate_budget=gate_budget, depth_gate=depth_gate,
-                    triviality_gate=triviality_gate, system_prompt=system_prompt)
+                    triviality_gate=triviality_gate, route=route,
+                    def_names=drafted_def_names(stub) if route == "defs" else None,
+                    system_prompt=system_prompt)
                 spent += gate_tokens
                 if fail is None:
                     paths = _write_target(queue_dir, n, lean_text, entry)
@@ -1043,10 +1198,13 @@ def main() -> int:
 
     # primitives-aware routing: measure each issue's consumables, consult the
     # refill history's runtime evidence, route theorem/defs, cheap wins first.
-    families = load_refill_families(os.path.join(_foundry_root(), "runs", "refill-history.jsonl"))
+    hist_path = os.path.join(_foundry_root(), "runs", "refill-history.jsonl")
+    families = load_refill_families(hist_path)
+    prior_unknowns = load_prior_unknowns(hist_path)
     for i in issues:
         i["route"] = route_for(i, def_count=count_pointer_defs(args.main_repo, i.get("pointers", [])),
                                family=families.get(i["number"]))
+        i["prior_unknowns"] = prior_unknowns.get(i["number"], [])
     issues = order_by_route(issues)
     print(f"[refill] routes: " + ", ".join(f"#{i['number']}→{i['route']}" for i in issues[:8]),
           file=sys.stderr)
@@ -1190,6 +1348,7 @@ def emit_target_files(issue: dict, stub: str, meta: dict) -> tuple[str, dict, di
     pointers = issue.get("pointers", [])
     name, binders, concl = split_statement(stub)
 
+    new_defs = [str(d) for d in (meta.get("definitions") or [])]
     header_lines = [
         f"-- pointers: {', '.join(pointers)}",
         f"-- main-module: {main_module}",
@@ -1201,6 +1360,10 @@ def emit_target_files(issue: dict, stub: str, meta: dict) -> tuple[str, dict, di
         # this proof is a faithful SUBSET of the issue; the deferred facts ride the
         # header (build_manifest → manifest → open-pr surfaces them as follow-ups).
         header_lines.append(f"-- deferred: {'; '.join(deferred)}")
+    if new_defs:
+        # this module INTRODUCES definitions (the defs route) — open-pr labels the
+        # PR `new-defs`, the architecture-heavy review class.
+        header_lines.append(f"-- new-defs: {', '.join(new_defs)}")
     headers = "\n".join(header_lines)
     # coherence-first: import the pointer modules so the drafted statement can
     # consume existing MathFin defs (a path 'MathFin/FixedIncome/ZCB.lean' becomes
@@ -1247,6 +1410,9 @@ def emit_target_files(issue: dict, stub: str, meta: dict) -> tuple[str, dict, di
         scope += (f" Faithful SUBSET of issue #{n}; deferred to follow-up issues: "
                   f"{'; '.join(deferred)}.")
         provenance["deferred"] = deferred
+    if new_defs:
+        scope += f" Introduces definitions: {', '.join(new_defs)} (new-defs review class)."
+        provenance["new_defs"] = new_defs
     entry = {
         "id": benchmark_id,
         "name": issue.get("title", benchmark_id),

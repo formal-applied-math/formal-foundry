@@ -240,6 +240,13 @@ EOF
 )"
 gh label create autoform --repo "$SLUG" --color 0E8A16 \
   --description "opened by the autoform pipeline; review before merge" 2>/dev/null || true
+# defs-route modules introduce new definitions — the architecture-heavy review
+# class (library design, not just proof correctness). Flag them.
+if grep -q '^-- new-defs:' "$MODULE" 2>/dev/null; then
+  gh label create new-defs --repo "$SLUG" --color 5319E7 \
+    --description "autoform PR introducing new definitions — review the design, not just the proof" 2>/dev/null || true
+  PR_FLAGS+=(--label new-defs)
+fi
 gh pr create --repo "$SLUG" --head "$BRANCH" --label autoform "${PR_FLAGS[@]}" \
   --title "autoform: $(basename "$MODULE" .lean) $TITLE_SUFFIX" \
   --body "$BODY" || blocked "gh pr create failed"
