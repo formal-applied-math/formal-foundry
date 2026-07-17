@@ -11,7 +11,24 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
+
+_DECL = re.compile(
+    r"(?m)^\s*(?:@\[[^\]]*\]\s*)?(?:private\s+|protected\s+|noncomputable\s+)*"
+    r"(?:theorem|lemma|def|example)\b")
+
+
+def extract_statement(code: str) -> str:
+    """Best-effort: the declaration signature (decl keyword up to the proof
+    separator `:=`), for the notes. Falls back to the whole code if it can't find
+    a decl. Heuristic — the notes are a reviewer aid, not a parser."""
+    m = _DECL.search(code)
+    if not m:
+        return code.strip()
+    rest = code[m.start():]
+    idx = rest.find(":=")
+    return (rest[:idx] if idx != -1 else rest).strip()
 
 
 def _fence(code: str, lang: str = "lean") -> str:
@@ -69,7 +86,9 @@ def render_notes(*, target_id: str, lean_statement: str, issue_number=None,
 def main() -> int:
     ap = argparse.ArgumentParser(description="render statement-fidelity notes (markdown) for a PR")
     ap.add_argument("--target-id", required=True)
-    ap.add_argument("--lean-statement", required=True, help="the assembled Lean statement text")
+    ap.add_argument("--lean-statement", default=None, help="the assembled Lean statement text")
+    ap.add_argument("--lean-file", default=None,
+                    help="read + extract the statement from this .lean file (alt to --lean-statement)")
     ap.add_argument("--issue-number", type=int, default=None)
     ap.add_argument("--issue-title", default="")
     ap.add_argument("--issue-task", default="")
@@ -85,7 +104,13 @@ def main() -> int:
         provenance = json.loads(args.provenance)
     except ValueError:
         provenance = {}
-    md = render_notes(target_id=args.target_id, lean_statement=args.lean_statement,
+    lean_statement = args.lean_statement
+    if lean_statement is None and args.lean_file:
+        try:
+            lean_statement = extract_statement(open(args.lean_file, encoding="utf-8").read())
+        except OSError:
+            lean_statement = ""
+    md = render_notes(target_id=args.target_id, lean_statement=lean_statement or "",
                       issue_number=args.issue_number, issue_title=args.issue_title,
                       issue_task=args.issue_task, pointers=pointers, provenance=provenance)
     if args.out:

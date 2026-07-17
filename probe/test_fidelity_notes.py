@@ -33,3 +33,17 @@ def test_output_is_markdown_ending_in_single_newline():
     md = fn.render_notes(target_id="t", lean_statement=STMT)
     assert md.startswith("# Statement-fidelity notes")
     assert md.endswith("\n") and not md.endswith("\n\n")
+
+
+def test_extract_statement_takes_signature_up_to_proof():
+    code = "import Mathlib\n\ntheorem foo (x : ℝ) : x + 0 = x := by simp"
+    assert fn.extract_statement(code) == "theorem foo (x : ℝ) : x + 0 = x"
+
+
+def test_extract_statement_handles_attributes_and_modifiers():
+    code = "@[simp] noncomputable def bar : ℕ := 3"
+    assert fn.extract_statement(code) == "@[simp] noncomputable def bar : ℕ"
+
+
+def test_extract_statement_falls_back_without_a_decl():
+    assert fn.extract_statement("-- just a comment") == "-- just a comment"
