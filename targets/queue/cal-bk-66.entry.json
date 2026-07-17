@@ -1,0 +1,28 @@
+{
+  "id": "mf-fixedincome-swap",
+  "name": "Formalize the vanilla interest-rate swap value and par swap rate S = (P(0,T₀)−P(0,Tₙ))/(δ·Σ P(0,Tᵢ))",
+  "description": "Vanilla interest-rate swap value and par swap rate.",
+  "domain": "mathematical_finance",
+  "code": {
+    "lean": "import MathFin.FixedIncome.InterestRateSwap\n\nopen MathFin\n\n/-- Vanilla interest-rate swap value and par swap rate. -/\ntheorem mf_fixedincome_swap {ι : Type*} (r δ K : ℝ) (T : ι → ℝ) (s : Finset ι) (T_0 T_n : ι) (hT0 : T_0 ∈ s) (hTn : T_n ∈ s) (hδ : δ > 0) (hP : ∀ i ∈ s, MathFin.zcb r 0 (T i) > 0) : payer_swap_value (MathFin.zcb r 0 (T T_0)) (MathFin.zcb r 0 (T T_n)) K (annuity δ (fun i => MathFin.zcb r 0 (T i)) s) = 0 ↔ K = par_swap_rate (MathFin.zcb r 0 (T T_0)) (MathFin.zcb r 0 (T T_n)) (annuity δ (fun i => MathFin.zcb r 0 (T i)) s) :=\n  MathFin.payer_swap_value_eq_zero_iff_fixed_rate_eq_par_swap_rate r δ K T s T_0 T_n hT0 hTn hδ hP\n"
+  },
+  "metadata": {
+    "chapter": 0,
+    "reference": "Formalize the vanilla interest-rate swap value and par swap rate S = (P(0,T₀)−P(0,Tₙ))/(δ·Σ P(0,Tᵢ))",
+    "difficulty": "small",
+    "formalization_status": "full",
+    "formalization_scope": "Full formal proof in MathFin/FixedIncome/InterestRateSwap.lean (magistral-drafted statement, leanstral proof). Re-export from MathFin. Axioms-clean. Introduces definitions: annuity, payer_swap_value, par_swap_rate (new-defs review class).",
+    "provenance": {
+      "statement_source": "magistral-autoform",
+      "statement_model": "magistral-medium",
+      "source": "leanstral-autoform",
+      "model": "labs-leanstral-1-5",
+      "issue": 66,
+      "new_defs": [
+        "annuity",
+        "payer_swap_value",
+        "par_swap_rate"
+      ]
+    }
+  }
+}

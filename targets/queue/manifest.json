@@ -1,5 +1,51 @@
 {
   "toolchain": "leanprover/lean4:v4.31.0",
   "main_commit": "38e4d1c76cc3ecc8c9b2cc864ffae9022d82b4c9",
-  "targets": []
+  "targets": [
+    {
+      "id": "cal-bk-66",
+      "stream": "backlog",
+      "kind": "prove",
+      "sorry_name": "payer_swap_value_eq_zero_iff_fixed_rate_eq_par_swap_rate",
+      "file": "cal-bk-66.lean",
+      "pointers": [
+        "MathFin/FixedIncome/ZCB.lean",
+        "MathFin/FixedIncome/YieldCurve.lean",
+        "MathFin/Futures/Black76.lean"
+      ],
+      "input_hash": "dd86eb6ea0d9b346cbf8b4845cb600adc6fab0881623e8fbf1c30d7db46d5750",
+      "main_module": "MathFin/FixedIncome/InterestRateSwap.lean",
+      "benchmark": "benchmarks/mathematical_finance.json",
+      "benchmark_id": "mf-fixedincome-swap",
+      "source_issue": 66,
+      "benchmark_entry": {
+        "id": "mf-fixedincome-swap",
+        "name": "Formalize the vanilla interest-rate swap value and par swap rate S = (P(0,T\u2080)\u2212P(0,T\u2099))/(\u03b4\u00b7\u03a3 P(0,T\u1d62))",
+        "description": "Vanilla interest-rate swap value and par swap rate.",
+        "domain": "mathematical_finance",
+        "code": {
+          "lean": "import MathFin.FixedIncome.InterestRateSwap\n\nopen MathFin\n\n/-- Vanilla interest-rate swap value and par swap rate. -/\ntheorem mf_fixedincome_swap {\u03b9 : Type*} (r \u03b4 K : \u211d) (T : \u03b9 \u2192 \u211d) (s : Finset \u03b9) (T_0 T_n : \u03b9) (hT0 : T_0 \u2208 s) (hTn : T_n \u2208 s) (h\u03b4 : \u03b4 > 0) (hP : \u2200 i \u2208 s, MathFin.zcb r 0 (T i) > 0) : payer_swap_value (MathFin.zcb r 0 (T T_0)) (MathFin.zcb r 0 (T T_n)) K (annuity \u03b4 (fun i => MathFin.zcb r 0 (T i)) s) = 0 \u2194 K = par_swap_rate (MathFin.zcb r 0 (T T_0)) (MathFin.zcb r 0 (T T_n)) (annuity \u03b4 (fun i => MathFin.zcb r 0 (T i)) s) :=\n  MathFin.payer_swap_value_eq_zero_iff_fixed_rate_eq_par_swap_rate r \u03b4 K T s T_0 T_n hT0 hTn h\u03b4 hP\n"
+        },
+        "metadata": {
+          "chapter": 0,
+          "reference": "Formalize the vanilla interest-rate swap value and par swap rate S = (P(0,T\u2080)\u2212P(0,T\u2099))/(\u03b4\u00b7\u03a3 P(0,T\u1d62))",
+          "difficulty": "small",
+          "formalization_status": "full",
+          "formalization_scope": "Full formal proof in MathFin/FixedIncome/InterestRateSwap.lean (magistral-drafted statement, leanstral proof). Re-export from MathFin. Axioms-clean. Introduces definitions: annuity, payer_swap_value, par_swap_rate (new-defs review class).",
+          "provenance": {
+            "statement_source": "magistral-autoform",
+            "statement_model": "magistral-medium",
+            "source": "leanstral-autoform",
+            "model": "labs-leanstral-1-5",
+            "issue": 66,
+            "new_defs": [
+              "annuity",
+              "payer_swap_value",
+              "par_swap_rate"
+            ]
+          }
+        }
+      }
+    }
+  ]
 }
