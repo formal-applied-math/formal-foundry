@@ -159,9 +159,10 @@ esac
 # FIRST-RUN NOTE: this docker/mount/cache path is validated on the first live PR;
 # on any failure we abort to an autoform-blocked issue rather than open a red PR.
 IMAGE="${VERIFY_IMAGE:-ghcr.io/raphaelrrcoelho/mathfin-verify:latest}"
-# the proving daemon is done; stop it so the build has the memory headroom
-# (two Mathlib-loaded Lean envs overcommit even a 16 GB runner).
-docker stop lean-repl >/dev/null 2>&1 || true
+# the proving daemon is done; stop it (all possible names: docker-run `lean-repl`,
+# compose `docker-lean-repl-1`, plus the lean-lsp) so the build has the memory
+# headroom AND is the sole Lake writer to the shared olean volume mounted below.
+docker stop lean-repl docker-lean-repl-1 mathfin-lean-lsp >/dev/null 2>&1 || true
 # After the build, verify + record the new benchmark entry in the ledger via
 # `lake env lean` IN THIS container (LEDGER_EXEC_LOCAL — no docker-exec/daemon).
 # Default `verify` scope is stale+missing; the corpus has 0 bare-`import MathFin`
@@ -177,7 +178,16 @@ REGEN='set -e
 if command -v docker >/dev/null 2>&1; then
   # --entrypoint bash overrides the image's default entrypoint (the mathfin-verify
   # CLI); without it the shell command is fed as args to that CLI and errors.
-  docker run --rm --entrypoint bash -v "$MAIN":/work -w /work "$IMAGE" -lc "$REGEN" \
+  # Mount the checkout at /app (the daemon's Lake root) + the SHARED olean volume at
+  # /app/.lake, so `lake build MathFin` REUSES the daemon-built Mathlib + MathFin
+  # oleans and rebuilds only the new module — not the whole library from scratch
+  # (that from-scratch MathFin rebuild blew the 2h job timeout on the first live PR,
+  # 2026-07-17: 8558 Mathlib modules came from `cache get`, then heavy MathFin
+  # modules like DoobLpMaximalInequality rebuilt at ~400s each).
+  docker run --rm --entrypoint bash \
+    -v "$MAIN":/app \
+    -v "${COMPOSE_PROJECT_NAME:-docker}_lake_build_cache":/app/.lake \
+    -w /app "$IMAGE" -lc "$REGEN" \
     || blocked "in-image build/regen failed (lake build MathFin / axiom_audit_gen)"
 else
   # no docker (local dry-run): regen only the host-side artifact, flag the rest.
