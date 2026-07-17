@@ -46,6 +46,11 @@ class PipelineConfig:
     fanout: int = 8
     repair_rounds: int = 2
     tokens_per_attempt: int = 60_000
+    # vibe ⇄ lean-lsp-mcp harness (the cron prove path since 2026-07-17): one deep
+    # agentic session per target, bounded by turns (depth over breadth) — the lever
+    # that replaces the fanout×tokens text-loop budget. fanout/repair_rounds/
+    # tokens_per_attempt are retained for the legacy calibration probe only.
+    max_turns: int = 40
 
     @staticmethod
     def load(path: str | None) -> "PipelineConfig":

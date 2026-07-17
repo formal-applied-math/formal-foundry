@@ -62,6 +62,7 @@ def cmd_plan(args) -> int:
                  "reasoning_effort": cfg.reasoning_effort,
                  "fanout": cfg.fanout, "repair_rounds": cfg.repair_rounds,
                  "tokens_per_attempt": cfg.tokens_per_attempt,
+                 "max_turns": cfg.max_turns,
                  "remaining": P.budget_remaining(state, cfg)})
 
 

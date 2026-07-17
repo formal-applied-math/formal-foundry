@@ -76,6 +76,12 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Setup vibe                  # host-side CLI + the bundled lean agent
+        # W5 spike: the `lean` agent is bundled in mistral-vibe; `/leanstall` only
+        # writes installed_agents=["lean"] to the config. vibe runs on the RUNNER
+        # (it docker-execs into the lean-lsp container), so no image rebuild is needed.
+        run: bash scripts/vibe-setup.sh
+
       # --- embedding-retrieval corpus (Track A) ---------------------------------
       # index/ is a gitignored build artifact, so CI rebuilds it here and caches it
       # by the MathFin source + pin. On a cache HIT (the common case) these steps
@@ -120,23 +126,24 @@ jobs:
             echo "no index/types.jsonl (index build skipped/failed) → embedding retrieval falls open to loogle"
           fi
 
-      - name: Start the lean-repl daemon
+      - name: Place the lean-lsp compose in the main checkout
+        # its bind mounts are relative, so it must sit in main/docker/ beside MathFin/;
+        # the foundry carries the copy, so CI needs no formal-mathfin main push for it.
+        run: cp docker/docker-compose.lean-lsp.yml main/docker/docker-compose.lean-lsp.yml
+
+      - name: Start the lean-repl daemon (compose — matches the tick's lean-lsp flip)
+        env:
+          COMPOSE_PROJECT_NAME: docker
+          VERIFY_CPUSET: "0-1"            # 2-core runner (compose default 0-3 → docker exit 125)
         run: |
-          # The image's default entrypoint is the verify CLI; the daemon needs
-          # the same override the compose lean-repl service uses.
-          docker run -d --name lean-repl -p 127.0.0.1:7878:7878 \
-            --entrypoint python3 \
-            ghcr.io/raphaelrrcoelho/mathfin-verify:latest \
-            -m tools.verify.lean_repl
-          echo "waiting for READY (cold Mathlib env load ~5 min)…"
-          for i in $(seq 1 120); do
-            if docker logs lean-repl 2>&1 | grep -q "READY:"; then echo "daemon ready"; exit 0; fi
-            if [ "$(docker inspect -f '{{.State.Running}}' lean-repl 2>/dev/null)" != "true" ]; then
-              echo "::error::daemon container exited early"; docker logs lean-repl; exit 1
-            fi
-            sleep 5
-          done
-          echo "::error::daemon did not become READY in time"; docker logs lean-repl; exit 1
+          # Compose-manage the daemon so the tick can flip the single Lean slot
+          # daemon<->lean-lsp on the SAME project (stop/up, never down). On a fresh
+          # runner the lake_build_cache volume auto-populates from the image's baked
+          # /app/.lake on first mount (Docker volume semantics), so no seed step.
+          docker compose -f main/docker/docker-compose.yml up -d lean-repl
+          echo "probing 7878 until the daemon serves (cold Mathlib load ~5 min)…"
+          python3 probe/wait_daemon.py \
+            || { echo "::error::daemon not ready"; docker logs docker-lean-repl-1 2>&1 | tail -60; exit 1; }
 
       - name: Run one pipeline tick (prove → on pass, open the PR)
         env:
@@ -147,6 +154,8 @@ jobs:
           MAIN_REPO: ${{ github.workspace }}/main
           FOUNDRY_REPO: ${{ github.repository }}
           FORCE: ${{ inputs.force && '1' || '' }}
+          COMPOSE_PROJECT_NAME: docker    # the tick's daemon<->lean-lsp flip + leanstral-vibe.sh
+          VERIFY_CPUSET: "0-1"            # share the 2-core cpuset with the daemon step
         run: bash scripts/pipeline-tick.sh
 
       - name: Persist state + telemetry

@@ -215,6 +215,16 @@ print(tok)
 PY
 )"
 
+# statement-fidelity notes (R7): the reviewer's map from the informal claim to the
+# Lean statement, embedded in the PR body so the fidelity judgment is auditable by
+# someone who is not the pipeline (the kernel checks the proof, not the statement).
+POINTERS_JSON="$(read_meta pointers)"; [ -n "$POINTERS_JSON" ] || POINTERS_JSON="[]"
+PROV_JSON="$(python3 -c "import json,sys; print(json.dumps({'source': sys.argv[1], 'model': sys.argv[2]}))" "$PROVENANCE_DESC" "$MODEL")"
+FIDELITY_NOTES="$(python3 "$FOUNDRY/probe/fidelity_notes.py" \
+  --target-id "$ID" --lean-file "$CAND" --issue-number "$ISSUE" \
+  --pointers "$POINTERS_JSON" --provenance "$PROV_JSON" 2>/dev/null \
+  || echo "(fidelity notes unavailable)")"
+
 BODY="$(cat <<EOF
 $BODY_INTRO $CLOSE_LINE.
 
@@ -230,6 +240,12 @@ review checklist (8-lens, before merge):
 - [ ] the proof is idiomatic and consumes existing lemmas, not a wrapper.
 - [ ] ledger row present (run \`ledger verify\` if ci is red on it).
 - [ ] axioms clean; no slop.$FOLLOWUPS$SCOUT_NOTE
+
+<details><summary>statement-fidelity notes</summary>
+
+$FIDELITY_NOTES
+
+</details>
 EOF
 )"
 gh label create autoform --repo "$SLUG" --color 0E8A16 \

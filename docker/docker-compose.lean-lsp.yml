@@ -1,0 +1,35 @@
+# Mem-capped Lean LSP service for the lean-lsp-mcp harness (Leanstral / vibe).
+#
+# FOUNDRY COPY: kept in sync with the main repo's docker/docker-compose.lean-lsp.yml.
+# pipeline.yml copies this into the main checkout (main/docker/) before the tick, so
+# the service's RELATIVE bind mounts (../MathFin, …) resolve against the checked-out
+# MathFin project — without pushing CI infra to formal-mathfin main.
+#
+# Only ever used merged with docker-compose.yml (`-f docker-compose.yml -f this`):
+# the base file defines the `lake_build_cache` volume + the lean-repl service this
+# is mutually exclusive with (one Lean process — bring the daemon DOWN first).
+services:
+  lean-lsp:
+    image: ghcr.io/raphaelrrcoelho/mathfin-verify:latest
+    container_name: mathfin-lean-lsp
+    cpuset: "${VERIFY_CPUSET:-0-3}"
+    mem_limit: 6g
+    volumes:
+      - ../tools:/app/tools:ro
+      - ../MathFin:/app/MathFin
+      - ../MathFin.lean:/app/MathFin.lean
+      - ../lakefile.lean:/app/lakefile.lean
+      - ../lake-manifest.json:/app/lake-manifest.json
+      - ../lean-toolchain:/app/lean-toolchain
+      - ../mathfin.toml:/app/mathfin.toml:ro
+      - lake_build_cache:/app/.lake
+    working_dir: /app
+    # lean-lsp-mcp is not in the image; install it once at start, then idle.
+    # docker exec spawns the actual stdio MCP per vibe session.
+    entrypoint: ["sh", "-c"]
+    command:
+      - >-
+        (pip install --quiet --no-warn-script-location lean-lsp-mcp
+        || pip install --quiet --no-warn-script-location --break-system-packages lean-lsp-mcp)
+        && echo LEAN_LSP_MCP_READY && exec sleep infinity
+    restart: "no"
