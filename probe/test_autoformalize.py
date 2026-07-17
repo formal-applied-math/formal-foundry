@@ -186,6 +186,18 @@ def test_emit_stub_headers_and_scaffold():
     assert lean_text.count("sorry") == 1        # exactly one — build_manifest requires it
 
 
+def test_emit_stub_pins_autoImplicit_false_for_lake_parity():
+    # run 4's PR-blocker verbatim: the daemon (autoImplicit on) auto-bound the
+    # `u` in a drafted `{Ω : Type u}` and every gate passed; `lake build`
+    # (lakefile: autoImplicit false) then failed with `unknown universe level`.
+    # The emitted stub pins the option so DRAFT-time elaboration enforces what
+    # the build enforces and the compile-repair loop fixes such drafts early.
+    lean_text, _e, _p = af.emit_target_files(_ISSUE, _STUB, _META)
+    assert "set_option autoImplicit false" in lean_text
+    assert lean_text.index("set_option autoImplicit false") \
+        < lean_text.index("namespace MathFin")
+
+
 def test_emit_stub_imports_pointer_modules():
     # coherence-first: the stub imports its pointer modules so a drafted statement
     # can consume existing MathFin defs, not just Mathlib.

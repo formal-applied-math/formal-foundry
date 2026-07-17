@@ -1427,6 +1427,13 @@ def emit_target_files(issue: dict, stub: str, meta: dict) -> tuple[str, dict, di
         f"{imports}\n\n"
         f"{headers}\n\n"
         f"/-!\n{docstring}\n-/\n\n"
+        # lake-parity: the lakefile sets autoImplicit false, but the DAEMON that
+        # gates drafts elaborates with Lean's default (true) — a drafted
+        # `{Ω : Type u}` auto-binds `u`, passes every gate, then fails the
+        # open-pr regen build with `unknown universe level` (run-4 PR blocker).
+        # Pinning the option in the stub makes draft-time elaboration enforce
+        # exactly what the build enforces, so the compile-repair loop fixes it.
+        "set_option autoImplicit false\n\n"
         "@[expose] public section\n\n"
         "namespace MathFin\n\n"
         f"{stub.strip()}\n\n"
