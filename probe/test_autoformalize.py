@@ -662,6 +662,34 @@ def test_classify_refill_families():
     assert af.classify_refill({"outcome": "error"}) == "infra"
 
 
+def test_classify_refill_depth_evidence_beats_trailing_noise():
+    # the CI run's #66 verbatim: depth-rejected on attempt 1, then a flaky
+    # intent parse on attempt 2 — the depth evidence must still classify it
+    # needs_primitives, or the router never learns.
+    rec = {"outcome": "intent", "history": [{"gate": "depth"}, {"gate": "intent"}]}
+    assert af.classify_refill(rec) == "needs_primitives"
+    rec2 = {"outcome": "formalize",
+            "history": [{"gate": "ungrounded"}, {"gate": "formalize"}]}
+    assert af.classify_refill(rec2) == "defs_rejected"
+    # seeded always wins, whatever the earlier rows say
+    assert af.classify_refill({"outcome": "seeded",
+                               "history": [{"gate": "depth"}]}) == "seeded"
+
+
+def test_order_by_route_prefers_def_rich_and_demotes_lemons():
+    # the CI run attempted the same three lemons and never reached def-rich
+    # #108 at position 6. Within a route group: fresh before demoted families,
+    # easier difficulty first, then MORE pointer consumables, then number.
+    xs = [
+        {"number": 53, "route": "theorem", "difficulty": "small", "def_count": 1},
+        {"number": 61, "route": "theorem", "difficulty": "small", "def_count": 5,
+         "family": "undraftable"},                     # lemon: demoted despite riches
+        {"number": 108, "route": "theorem", "difficulty": "small", "def_count": 4},
+        {"number": 7, "route": "defs", "difficulty": "small", "def_count": 0},
+    ]
+    assert [i["number"] for i in af.order_by_route(xs)] == [108, 53, 61, 7]
+
+
 def test_route_for_history_beats_measurement():
     # runtime evidence (needs_primitives) routes to defs even when the pointer
     # modules export defs — the #53 case (chooserPrice exists; the faithful

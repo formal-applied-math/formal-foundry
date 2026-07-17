@@ -26,7 +26,7 @@ import time
 
 import embed as _embed
 from house_context import build_system_prompt, extract_signatures
-from issues import select_issues
+from issues import difficulty_rank, select_issues
 from pipeline_lib import AutoformalizeConfig
 from probe import daemon_check, mistral_chat, run_target
 from probe_lib import append_jsonl, extract_lean_code
@@ -670,13 +670,17 @@ def count_pointer_defs(main_repo: str, pointers: list[str]) -> int:
 def classify_refill(rec: dict) -> str:
     """Obstruction family for a refill `attempted` record — the drafter's triage
     analogue. Computed at write time (rides the record in refill-history.jsonl)
-    and at read time for records written before the field existed."""
+    and at read time for records written before the field existed. Routing
+    evidence takes precedence over trailing noise: a depth rejection ANYWHERE in
+    the history classifies the issue even when a later attempt died on a flaky
+    intent parse (the first CI run's #66: ['depth', 'intent'])."""
     out = rec.get("outcome", "")
     if out == "seeded":
         return "seeded"
-    if out == "depth":
+    gates = {h.get("gate") for h in rec.get("history", []) or []}
+    if out == "depth" or "depth" in gates:
         return "needs_primitives"
-    if out in ("newdef_depth", "ungrounded"):
+    if out in ("newdef_depth", "ungrounded") or gates & {"newdef_depth", "ungrounded"}:
         return "defs_rejected"
     if out == "trivial":
         return "trivial_restatement"
@@ -707,7 +711,11 @@ def load_refill_families(history_path: str) -> dict[int, str]:
                 if not isinstance(rec, dict) or rec.get("arch") != ROUTING_ARCH:
                     continue
                 if rec.get("issue") is not None:
-                    fams[int(rec["issue"])] = rec.get("family") or classify_refill(rec)
+                    # always RE-classify (the stored family is telemetry, not
+                    # authority) so classifier fixes apply to existing records:
+                    # the first CI run stored #66 as undraftable although its
+                    # history carries depth evidence.
+                    fams[int(rec["issue"])] = classify_refill(rec)
     except OSError:
         pass
     return fams
@@ -751,10 +759,25 @@ def route_for(issue: dict, *, def_count: int, family: str | None) -> str:
     return "theorem"
 
 
+# families that failed for non-primitives reasons under the CURRENT architecture:
+# fresh issues attempt first; these lemons go to the back of their route group
+# (the first CI run burned ~100k tokens re-attempting #61's empty-reply furnace
+# at position 2 while def-rich #108 sat unattempted at position 6).
+_DEMOTED_FAMILIES = {"undraftable", "fidelity", "statement_wrong", "trivial_restatement"}
+
+
 def order_by_route(issues: list[dict]) -> list[dict]:
-    """Theorem-route issues first (cheap wins), stable within each group."""
-    return ([i for i in issues if i.get("route", "theorem") == "theorem"]
-            + [i for i in issues if i.get("route", "theorem") == "defs"])
+    """Attempt order: theorem route before defs route; within each group, fresh
+    issues before current-arch lemons, easier difficulty first, then MORE pointer
+    consumables (a def-richer context gives the drafter more to consume), then
+    issue number. Stable for ties."""
+    def key(i: dict):
+        return (0 if i.get("route", "theorem") == "theorem" else 1,
+                1 if i.get("family") in _DEMOTED_FAMILIES else 0,
+                difficulty_rank(i.get("difficulty")),
+                -int(i.get("def_count", 0) or 0),
+                i.get("number", 0))
+    return sorted(issues, key=key)
 
 
 # --- definitions-path gates (F1) -----------------------------------------------
@@ -1225,8 +1248,9 @@ def main() -> int:
     families = load_refill_families(hist_path)
     prior_unknowns = load_prior_unknowns(hist_path)
     for i in issues:
-        i["route"] = route_for(i, def_count=count_pointer_defs(args.main_repo, i.get("pointers", [])),
-                               family=families.get(i["number"]))
+        i["def_count"] = count_pointer_defs(args.main_repo, i.get("pointers", []))
+        i["family"] = families.get(i["number"])
+        i["route"] = route_for(i, def_count=i["def_count"], family=i["family"])
         i["prior_unknowns"] = prior_unknowns.get(i["number"], [])
     issues = order_by_route(issues)
     print(f"[refill] routes: " + ", ".join(f"#{i['number']}→{i['route']}" for i in issues[:8]),

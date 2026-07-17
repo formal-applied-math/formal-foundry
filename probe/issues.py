@@ -17,6 +17,12 @@ _DIFF_RANK = {"good-first": 0, "small": 1, "medium": 2}
 _GOOD_FIRST_TITLE = "good first issue"  # GitHub's built-in label
 
 
+def difficulty_rank(difficulty: str | None) -> int:
+    """Tractability rank for ordering (lower = attempt first); unknown
+    difficulties sort after the ranked ones."""
+    return _DIFF_RANK.get(difficulty or "", 3)
+
+
 def parse_labels(issue: dict) -> dict:
     """Map an issue's label list to its {status, type, difficulty, area} dims.
 
