@@ -25,7 +25,7 @@ import sys
 import time
 
 import embed as _embed
-from house_context import build_system_prompt, extract_signatures, read_pins
+from house_context import build_system_prompt, extract_signatures
 from issues import select_issues
 from pipeline_lib import AutoformalizeConfig
 from probe import daemon_check, mistral_chat, run_target
@@ -131,19 +131,6 @@ def _extract_json(text: str) -> dict | None:
     return None
 
 
-def parse_draft(reply: str) -> tuple[str, dict] | None:
-    """Parse a draft reply into `(stub, meta)` — the ```lean theorem block + a
-    ```json `{module_name, benchmark_id, docstring}` block. None if the lean block
-    is missing or the required naming metadata is absent."""
-    stub = extract_lean_code(reply)
-    if stub is None:
-        return None
-    meta = _extract_json(reply) or {}
-    if not meta.get("module_name") or not meta.get("benchmark_id"):
-        return None
-    return stub, meta
-
-
 def parse_verdict(reply: str) -> dict:
     """Parse a judge/roundtrip reply's JSON verdict. Fails CLOSED: an unparseable
     reply (or one lacking `faithful`) is treated as NOT faithful, so an unverified
@@ -154,42 +141,7 @@ def parse_verdict(reply: str) -> dict:
     return v
 
 
-# --- chat-mediated runners (magistral: draft, judge, roundtrip) ---------------
-
-DRAFT_SYSTEM = (
-    "You are an autoformalization assistant for MathFin, a Lean 4 library built on "
-    "Mathlib. Given a GitHub issue describing a mathematical-finance result (its Task "
-    "and Pointers), produce ONE Lean 4 theorem that faithfully formalizes it, ending "
-    "in `:= by sorry` (state only — no proof). Requirements:\n"
-    "- Output exactly one ```lean block: a single "
-    "`theorem NAME <binders> : <conclusion> := by sorry`.\n"
-    "- Then a ```json block: "
-    '{"module_name": "<CamelCase>", "benchmark_id": "mf-<area>-<slug>", "docstring": '
-    '"<one line>", "deferred": ["<remaining fact>", ...]}. `deferred` is [] when your '
-    "theorem covers the whole issue; when you formalize a SUBSET, list the facts you "
-    "left out (one short phrase each, verbatim intent) so a human can open follow-up "
-    "issues.\n"
-    "- Use Mathlib conventions (ℝ, Real.exp, …). CONSUME the existing declarations "
-    "shown below rather than reproving them.\n"
-    "- Use ASCII-parseable Lean operators: `^` for powers (write `σ^2`, NEVER the "
-    "Unicode superscript `σ²`); `*` for products; `Real.exp`/`Real.log`/`Real.sqrt`.\n"
-    "- Formalize the issue's facts FAITHFULLY: never weaken a fact you state (no "
-    "vacuity, no flipped inequality, no dropped hypothesis) and never silently drop "
-    "part of what you state. When the issue lists a small cluster (a ≤3 bundle), "
-    "prefer a single conjunction covering all of it.\n"
-    "- SUBSETTING IS ALLOWED. Cover the whole issue when you can; but when a bundle "
-    "mixes easy and hard facts and a faithful whole is out of reach in one clean "
-    "theorem, formalize a coherent, self-contained SUBSET rather than forcing or "
-    "weakening the whole — and DECLARE the omitted facts in the json `deferred` array "
-    "so they become follow-up issues. Deferring a fact is NOT weakening one: what you "
-    "DO state must still be exactly right.\n"
-    "- If the issue names a defined quantity (the premium π = (1+θ)·μ, the forward "
-    "F = …, a par rate, …), INTRODUCE it as a bound variable with a defining "
-    "hypothesis (e.g. `(π : ℝ) (hπ : π = (1 + θ) * μ)`) and state BOTH the definition "
-    "and the requested property — do not collapse a definition into only its "
-    "consequence.\n"
-    "- Take givens as hypotheses (positive reals, nonneg loadings, …)."
-)
+# --- chat-mediated runners (magistral: judge) ---------------------------------
 
 JUDGE_SYSTEM = (
     "You are a faithfulness judge for autoformalized Lean statements — a SAFETY NET "
@@ -216,47 +168,8 @@ JUDGE_SYSTEM = (
     '{"faithful": true|false, "verdict": "<one line>", "issues": ["<gross gap>", ...]}.'
 )
 
-# The round-trip is a CROSS-MODEL back-translation: magistral informalizes the draft,
-# LEANSTRAL independently re-formalizes the prose, magistral compares the two. The
-# independence (a different model re-formalizes) is what makes it a genuine consistency
-# check rather than a self-check.
-INFORMALIZE_SYSTEM = (
-    "You are given a Lean 4 theorem. Describe EXACTLY what it states in precise plain "
-    "mathematical prose — every hypothesis and the full conclusion — as a mathematician "
-    "would read it off the Lean. Do not judge, prove, or improve it; render its meaning "
-    "faithfully in words. Output only the prose."
-)
-
-REFORMALIZE_SYSTEM = (
-    "You are an autoformalization model. Given a mathematical statement in plain prose, "
-    "produce ONE Lean 4 theorem that formalizes it, ending in `:= by sorry` (state only, "
-    "no proof). Output exactly one ```lean block with a single "
-    "`theorem NAME <binders> : <conclusion> := by sorry`. Mathlib conventions; "
-    "ASCII-parseable operators (`^`, `Real.exp`)."
-)
-
-COMPARE_SYSTEM = (
-    "You are given TWO Lean 4 theorems produced by DIFFERENT models from the same "
-    "mathematics. Decide whether they state the SAME result (same hypotheses and "
-    "conclusion up to trivial renaming/reordering/rephrasing). Agreement is evidence the "
-    "statement is unambiguous and faithful; a genuine divergence is a flag for review. "
-    "Respond with ONLY a JSON object: "
-    '{"faithful": true|false, "verdict": "<one line>", "issues": ["<difference>", ...]}.'
-)
-
-
 def _issue_prose(issue: dict) -> str:
     return f"{issue.get('title', '')}\n{issue.get('body', '')}"
-
-
-def draft_messages(issue: dict, context_pack: str, pins: str) -> list[dict]:
-    user = f"ISSUE #{issue.get('number')}: {_issue_prose(issue)}\n"
-    if context_pack:
-        user += "\n" + context_pack
-    if pins:
-        user += "\n" + pins
-    return [{"role": "system", "content": DRAFT_SYSTEM},
-            {"role": "user", "content": user}]
 
 
 def judge_messages(issue: dict, stub: str, deferred: list[str] | None = None) -> list[dict]:
@@ -271,22 +184,6 @@ def judge_messages(issue: dict, stub: str, deferred: list[str] | None = None) ->
              "content": f"ISSUE:\n{_issue_prose(issue)}\n\nCANDIDATE:\n```lean\n{stub}\n```{declared}"}]
 
 
-def informalize_messages(stub: str) -> list[dict]:
-    return [{"role": "system", "content": INFORMALIZE_SYSTEM},
-            {"role": "user", "content": f"```lean\n{stub}\n```"}]
-
-
-def reformalize_messages(prose: str) -> list[dict]:
-    return [{"role": "system", "content": REFORMALIZE_SYSTEM},
-            {"role": "user", "content": prose}]
-
-
-def compare_messages(stub_a: str, stub_b: str) -> list[dict]:
-    return [{"role": "system", "content": COMPARE_SYSTEM},
-            {"role": "user",
-             "content": f"THEOREM A:\n```lean\n{stub_a}\n```\n\nTHEOREM B:\n```lean\n{stub_b}\n```"}]
-
-
 def judge_faithfulness(issue: dict, stub: str, *, chat_fn,
                        deferred: list[str] | None = None) -> dict:
     """Semantic judge: does the stub say what the issue asks? A declared-subset
@@ -299,89 +196,12 @@ def judge_faithfulness(issue: dict, stub: str, *, chat_fn,
     return v
 
 
-def roundtrip_check(issue: dict, stub: str, *, reason_fn, prove_fn) -> dict:
-    """CROSS-MODEL round-trip (back-translation): magistral (`reason_fn`) informalizes
-    the draft to prose → **Leanstral** (`prove_fn`) INDEPENDENTLY re-formalizes that
-    prose → magistral compares the two Lean statements. Agreement is evidence the
-    statement is unambiguous + faithful; an explicit divergence flags it. It is a SOFT,
-    lenient signal: it rejects ONLY on a clear "these disagree" verdict, and if Leanstral
-    yields no statement the check is inconclusive (not a rejection). Returns
-    `{faithful, tokens, [inconclusive], verdict}`.
-
-    (`issue` is unused — the round-trip checks the stub's self-consistency, not its
-    issue-alignment, which is `judge_faithfulness`. The independence — Leanstral, a
-    different model, does the re-formalize — is what makes this a genuine cross-check
-    rather than the earlier magistral-grades-magistral self-check.)"""
-    prose, t1 = reason_fn(informalize_messages(stub))
-    reply, t2 = prove_fn(reformalize_messages(prose))
-    stub2 = extract_lean_code(reply)
-    if stub2 is None:
-        return {"faithful": True, "inconclusive": True, "tokens": t1 + t2,
-                "verdict": "leanstral re-formalize produced no statement"}
-    content, t3 = reason_fn(compare_messages(stub, stub2))
-    v = _extract_json(content) or {}
-    return {"faithful": v.get("faithful") is not False,   # reject ONLY on an explicit false
-            "verdict": v.get("verdict", ""), "tokens": t1 + t2 + t3}
-
-
 def _assistant(content: str) -> dict:
     """An assistant turn safe to re-send. Mistral 400s on an empty-content assistant message
     ("Assistant message must have either content or tool_calls, but not none") — which a
     free-tier empty reply produces once threaded into a repair round — so substitute a
     placeholder (caught #61 in the 2026-07-15 forced tick)."""
     return {"role": "assistant", "content": content or "(no output)"}
-
-
-def draft_with_repair(issue: dict, context_pack: str, pins: str, *, chat_fn, check_fn,
-                      emit_fn, rounds: int = 2) -> dict:
-    """Draft a stub and repair it against the elaborator (compiler feedback, the
-    lever that makes autoformalization work): draft → emit → elaborate; on a parse
-    failure or an elaboration error, feed the reason back — with a `^`-not-`²`
-    syntax hint — and re-draft, up to `rounds` times. Returns
-    `{ok, stub, meta, lean_text, entry, tokens}`."""
-    messages = draft_messages(issue, context_pack, pins)
-    tokens = 0
-    for _ in range(max(1, rounds)):
-        content, tk = chat_fn(messages)
-        tokens += tk
-        parsed = parse_draft(content)
-        if parsed is None:
-            messages += [
-                _assistant(content),
-                {"role": "user", "content":
-                 "Output exactly one ```lean block with a single "
-                 "`theorem NAME <binders> : <conclusion> := by sorry`, then one ```json "
-                 '{"module_name", "benchmark_id", "docstring"} block.'}]
-            continue
-        stub, meta = parsed
-        try:
-            lean_text, entry, _placement = emit_fn(issue, stub, meta)
-        except Exception as e:  # noqa: BLE001 — surface the assembly failure to the model
-            messages += [
-                _assistant(content),
-                {"role": "user", "content":
-                 f"The theorem could not be assembled ({e}). Re-output a single "
-                 "well-formed `theorem … := by sorry`."}]
-            continue
-        # a well-formed stub elaborates with NO errors and exactly one `sorry`.
-        # (the daemon reports success=False whenever a `sorry` remains — the sorry
-        # is a warning, not an error — so gate on `errors`, like build_manifest does,
-        # NOT on `success`.)
-        elab = check_fn(lean_text)
-        if not elab.get("errors") and elab.get("sorry_count", 0) == 1:
-            return {"ok": True, "stub": stub, "meta": meta,
-                    "lean_text": lean_text, "entry": entry, "tokens": tokens}
-        errs = "\n".join(str(e) for e in elab.get("errors", [])[:8])
-        messages += [
-            _assistant(content),
-            {"role": "user", "content":
-             f"That statement does not elaborate in Lean:\n```\n{errs}\n```\n"
-             "Fix ONLY the statement, keeping it faithful to the issue and still "
-             "ending in `:= by sorry`. Use `^` for powers (write `x^2`, never the "
-             "Unicode superscript `x²`); use `Real.exp`/`Real.log`/`Real.sqrt`. "
-             "Re-output the ```lean and ```json blocks."}]
-    return {"ok": False, "stub": None, "meta": None,
-            "lean_text": None, "entry": None, "tokens": tokens}
 
 
 # --- two-stage draft: intent (magistral) + formalize (leanstral) --------------
@@ -909,7 +729,7 @@ def _write_target(queue_dir: str, n: int, lean_text: str, entry: dict) -> list[s
 
 
 def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn,
-           queue_dir: str, budget: int, pins: str = "", max_issues: int = 1,
+           queue_dir: str, budget: int, max_issues: int = 1,
            max_attempt_issues: int = 3, gate_budget: int = 20_000, formalize_rounds: int = 3,
            formalize_token_budget: int = 40_000, formalize_fn=None, retrieve_fn=None,
            proactive_fn=None, depth_gate: bool = True, triviality_gate: bool = True,
@@ -1064,12 +884,10 @@ def main() -> int:
     p.add_argument("--max-issues", type=int, default=None)
     p.add_argument("--max-attempt-issues", type=int, default=None)
     p.add_argument("--gate-budget", type=int, default=None)
-    p.add_argument("--draft-model", default=None)
     p.add_argument("--intent-model", default=None, help="magistral: stage-1 intent (default: config)")
     p.add_argument("--formalize-model", default=None, help="leanstral: stage-2 formalize (default: config)")
     p.add_argument("--prover-model", default=None)
     p.add_argument("--draft-max-tokens", type=int, default=None)
-    p.add_argument("--draft-rounds", type=int, default=None)
     p.add_argument("--formalize-rounds", type=int, default=None)
     p.add_argument("--depth-gate", dest="depth_gate", action=argparse.BooleanOptionalAction,
                    default=None, help="pointers-scoped depth gate (default: config)")
@@ -1115,9 +933,6 @@ def main() -> int:
         print(json.dumps({"seeded": [], "tokens": 0, "reason": "no unseeded ready issues"}))
         return 0
 
-    pins_d = read_pins(args.main_repo)
-    pins = (f"── PINS ──\nLean {pins_d['toolchain']}, Mathlib @ {pins_d['mathlib']}, "
-            f"BrownianMotion @ {pins_d['brownianmotion']}. Target this API surface exactly.")
     prove_system = build_system_prompt(args.main_repo)   # the leaf-prover gate doctrine
 
     def reason_fn(msgs):   # magistral: stage-1 intent + judge + intent-fidelity
@@ -1146,7 +961,7 @@ def main() -> int:
         retrieve_fn, proactive_fn = None, None
 
     res = refill(issues, reason_fn=reason_fn, prove_fn=prove_fn, check_fn=daemon_check,
-                 context_fn=context_fn, queue_dir=queue_dir, budget=budget, pins=pins,
+                 context_fn=context_fn, queue_dir=queue_dir, budget=budget,
                  max_issues=max_issues, max_attempt_issues=max_attempt, gate_budget=gate_budget,
                  formalize_rounds=formalize_rounds, formalize_token_budget=formalize_token_budget,
                  formalize_fn=formalize_fn, retrieve_fn=retrieve_fn, proactive_fn=proactive_fn,

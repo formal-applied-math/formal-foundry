@@ -15,7 +15,6 @@ def test_autoformalize_config_defaults():
     cfg = pl.AutoformalizeConfig.load(None)
     assert cfg.enabled is True
     assert cfg.budget > 0
-    assert cfg.draft_model == "magistral-medium-latest"
     assert cfg.prover_model == "labs-leanstral-1-5"
 
 
@@ -53,15 +52,14 @@ def test_autoformalize_config_retrieval_backend_defaults():
     assert cfg.retrieval_backend == "embedding"
     assert cfg.retrieval_k == 8
     assert cfg.embed_model == "mistral-embed"
-    assert cfg.autop is True
 
 
 def test_autoformalize_config_retrieval_backend_reads_toml(tmp_path):
     toml = tmp_path / "pipeline.toml"
-    toml.write_text('[autoformalize]\nretrieval_backend = "loogle"\nautop = false\n')
+    toml.write_text('[autoformalize]\nretrieval_backend = "loogle"\nretrieval_k = 4\n')
     cfg = pl.AutoformalizeConfig.load(str(toml))
     assert cfg.retrieval_backend == "loogle"
-    assert cfg.autop is False
+    assert cfg.retrieval_k == 4
 
 
 def test_autoformalize_config_semantic_cascade_defaults():
@@ -222,12 +220,16 @@ def test_normalize_deferred_cleans_and_coerces():
     assert af.normalize_deferred(["x", 3]) == ["x", "3"]         # non-str coerced
 
 
-def test_draft_system_documents_subset_and_deferred_contract():
-    joined = " ".join(m["content"] for m in af.draft_messages(
-        {"number": 88, "title": "t", "body": "b", "pointers": []}, "", ""))
-    assert "deferred" in joined      # the json field the drafter must emit on a subset
-    assert "SUBSET" in joined         # subsetting is explicitly allowed
-    assert ":= by sorry" in joined    # unchanged stub-format contract still present
+def test_two_stage_prompts_document_subset_and_stub_contract():
+    # the honest-subsetting contract lives in the INTENT prompt (deferred facts are
+    # declared there); the stub-format contract lives in the FORMALIZE prompt.
+    intent_joined = " ".join(m["content"] for m in af.intent_messages(
+        {"number": 88, "title": "t", "body": "b", "pointers": []}, ""))
+    assert "deferred" in intent_joined     # the json field declared on a subset
+    assert "SUBSET" in intent_joined       # subsetting is explicitly allowed
+    formalize_joined = " ".join(m["content"] for m in af.formalize_messages(
+        {"statement": "s", "objects": []}, ""))
+    assert ":= by sorry" in formalize_joined   # the stub-format contract
 
 
 def test_judge_system_does_not_fault_provable_hypotheses():
@@ -356,30 +358,6 @@ def test_disproof_goal_negates_conclusion():
 
 # --- magistral reply parsers -------------------------------------------------
 
-_DRAFT_REPLY = (
-    "Here's the formalization.\n\n"
-    "```lean\ntheorem foo (x : ℝ) : x = x := by sorry\n```\n\n"
-    '```json\n{"module_name": "Foo", "benchmark_id": "mf-fi-foo", "docstring": "reflexivity"}\n```\n'
-)
-
-
-def test_parse_draft_extracts_stub_and_meta():
-    stub, meta = af.parse_draft(_DRAFT_REPLY)
-    assert stub == "theorem foo (x : ℝ) : x = x := by sorry"
-    assert meta["module_name"] == "Foo"
-    assert meta["benchmark_id"] == "mf-fi-foo"
-    assert meta["docstring"] == "reflexivity"
-
-
-def test_parse_draft_none_when_no_lean_block():
-    assert af.parse_draft("no code fence here") is None
-
-
-def test_parse_draft_none_when_missing_required_meta():
-    reply = '```lean\ntheorem foo : True := by sorry\n```\n```json\n{"docstring": "x"}\n```'
-    assert af.parse_draft(reply) is None            # module_name/benchmark_id missing
-
-
 def test_parse_verdict_json_block():
     reply = '```json\n{"faithful": false, "verdict": "missing X", "issues": ["X"]}\n```'
     v = af.parse_verdict(reply)
@@ -398,15 +376,9 @@ def _canned_chat(reply, tokens=100):
     return lambda msgs: (reply, tokens)
 
 
-def test_draft_messages_includes_issue_context_and_contract():
-    msgs = af.draft_messages(
-        {"number": 88, "title": "Contango", "body": "F = S e^{rT}", "pointers": ["A.lean"]},
-        "CTXPACK", "PINSXYZ")
-    joined = " ".join(m["content"] for m in msgs)
-    assert any(m["role"] == "system" for m in msgs)
-    assert "Contango" in joined and "F = S e^{rT}" in joined
-    assert "CTXPACK" in joined and "PINSXYZ" in joined
-    assert ":= by sorry" in joined                    # the stub-format contract
+def _script_chat(replies, tokens=10):
+    it = iter(replies)
+    return lambda msgs: (next(it), tokens)
 
 
 def test_judge_faithfulness_parses_verdict():
@@ -415,106 +387,6 @@ def test_judge_faithfulness_parses_verdict():
                               "theorem foo : True := by sorry", chat_fn=chat)
     assert r["faithful"] is True
     assert r["tokens"] == 42
-
-
-def _lean_reply(concl="x = x", name="foo"):
-    return f"```lean\ntheorem {name} (x : ℝ) : {concl} := by sorry\n```"
-
-
-def test_roundtrip_is_cross_model_reformalize_uses_prove_fn():
-    # the point of (b): informalize (magistral reason_fn) → RE-FORMALIZE (LEANSTRAL
-    # prove_fn, independent of the drafter) → compare (magistral reason_fn).
-    order = []
-    reason_replies = iter(["prose describing the theorem", '{"faithful": true, "verdict": "same"}'])
-    def reason(m):
-        order.append("reason"); return (next(reason_replies), 5)
-    def prove(m):
-        order.append("prove"); return (_lean_reply(), 7)
-    r = af.roundtrip_check(_issue(5), "theorem foo (x : ℝ) : x = x := by sorry",
-                           reason_fn=reason, prove_fn=prove)
-    assert order == ["reason", "prove", "reason"]     # magistral → LEANSTRAL → magistral
-    assert r["faithful"] is True
-    assert r["tokens"] == 17                           # 5 + 7 + 5, all charged
-
-
-def test_roundtrip_flags_cross_model_divergence():
-    reason = _script_chat(["prose", '{"faithful": false, "verdict": "differ"}'])
-    r = af.roundtrip_check(_issue(5), "theorem foo (x : ℝ) : x = x := by sorry",
-                           reason_fn=reason, prove_fn=_script_chat([_lean_reply("x = y")]))
-    assert r["faithful"] is False
-
-
-def test_roundtrip_inconclusive_when_leanstral_gives_no_statement():
-    # leanstral re-formalize produced no Lean block → inconclusive → do NOT block
-    # the draft (a soft signal that could not run is not a rejection).
-    reason = _script_chat(["prose"])                   # compare is never reached
-    r = af.roundtrip_check(_issue(5), "theorem foo : True := by sorry",
-                           reason_fn=reason, prove_fn=_script_chat(["I cannot formalize this."]))
-    assert r["faithful"] is True
-    assert r.get("inconclusive") is True
-
-
-# --- draft-repair loop (compiler feedback on the draft) ----------------------
-
-def _script_chat(replies, tokens=10):
-    it = iter(replies)
-    return lambda msgs: (next(it), tokens)
-
-
-def _draft_reply(concl="x = x", name="foo", mod="Foo", bid="mf-fi-foo"):
-    return (f"```lean\ntheorem {name} (x : ℝ) : {concl} := by sorry\n```\n"
-            f'```json\n{{"module_name": "{mod}", "benchmark_id": "{bid}", "docstring": "d"}}\n```')
-
-
-def test_draft_with_repair_succeeds_first_round():
-    r = af.draft_with_repair(_issue(5), "", "", chat_fn=_script_chat([_draft_reply()]),
-                             check_fn=_ELAB_OK, emit_fn=af.emit_target_files, rounds=2)
-    assert r["ok"] is True
-    assert "theorem foo" in r["lean_text"]
-    assert r["tokens"] == 10
-
-
-def test_draft_with_repair_repairs_on_elaboration_failure():
-    replies = [_draft_reply(concl="x ²"), _draft_reply(concl="x = x")]
-    checks = iter([{"success": False, "errors": ["unexpected token '²'"], "sorry_count": 1},
-                   {"success": True, "errors": [], "sorry_count": 1}])
-    r = af.draft_with_repair(_issue(5), "", "", chat_fn=_script_chat(replies),
-                             check_fn=lambda c: next(checks), emit_fn=af.emit_target_files, rounds=2)
-    assert r["ok"] is True
-    assert "x = x" in r["lean_text"]        # the corrected statement is returned
-    assert r["tokens"] == 20                # both attempts charged
-
-
-def test_draft_with_repair_accepts_valid_stub_despite_success_false():
-    # the daemon reports success=False for a well-formed statement that still has
-    # its `sorry` (the sorry is a warning, not an error). A stub with EMPTY errors
-    # and exactly one sorry IS elaborating — accept it (regression: an earlier check
-    # keyed on `success` and rejected every valid draft).
-    r = af.draft_with_repair(_issue(5), "", "", chat_fn=_script_chat([_draft_reply()]),
-                             check_fn=lambda c: {"success": False, "errors": [], "sorry_count": 1},
-                             emit_fn=af.emit_target_files, rounds=2)
-    assert r["ok"] is True
-
-
-def test_draft_with_repair_gives_up_after_rounds():
-    replies = [_draft_reply(concl="bad ²"), _draft_reply(concl="worse ²")]
-    r = af.draft_with_repair(_issue(5), "", "", chat_fn=_script_chat(replies),
-                             check_fn=lambda c: {"success": False, "errors": ["e"], "sorry_count": 1},
-                             emit_fn=af.emit_target_files, rounds=2)
-    assert r["ok"] is False
-
-
-def test_draft_with_repair_feedback_carries_error_and_caret_hint():
-    seen = []
-    def chat(msgs):
-        seen.append(msgs)
-        return (_draft_reply(concl="x ²"), 10)
-    af.draft_with_repair(_issue(5), "", "", chat_fn=chat,
-                         check_fn=lambda c: {"success": False, "errors": ["unexpected token '²'"], "sorry_count": 1},
-                         emit_fn=af.emit_target_files, rounds=2)
-    round2 = " ".join(m["content"] for m in seen[1])
-    assert "unexpected token '²'" in round2      # the compiler error is fed back
-    assert "^" in round2                         # the "use ^ not ²" hint
 
 
 # --- kernel-gate runners (drive run_target with injected chat_fn/check_fn) ----

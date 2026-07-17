@@ -155,10 +155,6 @@ def _cmd_gate(args) -> int:
                 win = os.path.join(run_dir, f"{args.run_tag}-{target['id']}.lean")
                 with open(win, "w", encoding="utf-8") as f:
                     f.write(candidate)
-                try:
-                    os.remove(win + ".scout")      # author proof: clear any stale scout sidecar
-                except FileNotFoundError:
-                    pass
             else:
                 summary["outcome"] = "fail_gate"
                 summary["gate_reason"] = g["reason"]

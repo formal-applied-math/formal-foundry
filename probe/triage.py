@@ -24,8 +24,6 @@ def classify(row: dict) -> str:
     reason = row.get("gate_reason", "") or ""
     if outcome == "pass":
         return "solved"
-    if outcome == "pass_scout":
-        return "solved_scout"
     if outcome == "error":
         return "infra"
     if outcome == "max_rounds":
@@ -45,7 +43,6 @@ def classify(row: dict) -> str:
 
 FAMILY_HINT = {
     "solved": "candidate produced (expect runs/<tag>-<id>.lean)",
-    "solved_scout": "closed by a scout tactic, not the author model (legacy)",
     "infra": "daemon/lean-lsp/vibe failure or no capture — retryable; check the flip + READY wait",
     "prover_gave_up": "hit max_turns with a sorry left — raise --max-turns, or the target is too big (decompose)",
     "used_forbidden_tactic": "banned tactic (native_decide/exact?/…) — strengthen the task's values gate",

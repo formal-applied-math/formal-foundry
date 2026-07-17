@@ -17,26 +17,11 @@ escalate_hard_cap = 2000000
 max_issues_per_tick = 1
 reasoning_effort = "high"
 
-# pass@k harness knobs. The per-issue cap is spent as ~`fanout` whole-proof
-# attempts x `tokens_per_attempt`, then <=`repair_rounds` compiler-feedback
-# repairs on the best failure. Research basis: Kimina sample-efficiency knee at
-# ~pass@32, Goedel self-correction ablation at ~2 repair rounds, Leanstral's
-# dominant lever is tokens-per-attempt (PutnamBench 44→244→493→587 solves at
-# 50k→200k→1M→4M).
-# Shape (2026-07-11): fewer, bigger attempts. 4 x 120k ≈ the 500k cap in the
-# primary round (was 8 x 60k), shifting weight onto the tokens-per-attempt lever
-# per Leanstral's curve while keeping pass@4 diversity; repair still funds
-# escalated hard targets (2M cap). Retune toward 2 x 250k to push the per-attempt
-# lever harder once MathFin-Bench measures the knee on our distribution.
-fanout = 4
-repair_rounds = 2
-tokens_per_attempt = 120000
-
 # vibe ⇄ lean-lsp-mcp harness (the cron prove path since 2026-07-17): one deep
-# headless agentic session per target, bounded by TURNS (depth over breadth) — the
-# lever that replaces fanout×tokens. Leanstral drives lean_goal / lean_multi_attempt
-# / search itself, so more turns = more repair depth. The fanout/repair_rounds/
-# tokens_per_attempt above are now legacy (the retired text-loop calibration probe).
+# headless agentic session per target, bounded by TURNS (depth over breadth).
+# Leanstral drives lean_goal / lean_multi_attempt / search itself, so more turns
+# = more repair depth. (This lever replaced the retired text-loop's
+# fanout × tokens_per_attempt budget.)
 max_turns = 40
 
 # Issue -> stub autoformalizer (the self-feeding refill phase). When the queue has
@@ -52,12 +37,6 @@ budget = 400000
 max_issues = 1
 max_attempt_issues = 3
 gate_budget = 20000
-draft_rounds = 3         # draft attempts w/ compiler feedback — magistral drafts are
-                         # stochastic; 3 balances resampling vs per-issue wall-clock.
-                         # (the run-killing hang once blamed on rounds=5 was really the
-                         # daemon's missing elaboration timeout, since fixed; each
-                         # elaboration is now bounded, so rounds is purely cost/quality)
-draft_model = "magistral-medium-latest"   # legacy single-stage drafter (eval baseline only)
 prover_model = "labs-leanstral-1-5"
 draft_max_tokens = 16000   # reasoning headroom — magistral emits a think trace before the code
 # two-stage draft: magistral SPECIFIES the intended statement in prose (its strength),
@@ -80,7 +59,6 @@ retrieval_backend = "embedding"  # "embedding" (pin-accurate types.jsonl cosine,
                            # loogle when the embedding cache is absent.
 retrieval_k = 8            # top-k premises surfaced per query (formalize grounding + prove context)
 embed_model = "mistral-embed"    # Mistral /v1/embeddings model id (build cache: scripts/build-embeddings.sh)
-autop = true               # cheap tactic-menu prove probe — a SCOUT (draft PR, never a silent merge)
 # semantic repair cascade (docs/superpowers/specs/2026-07-17-semantic-repair-cascade-design.md):
 # a semantic-gate rejection (shallow / trivial / vacuous / false / unfaithful / drift) is fed
 # back — rejected stub + gate verdict + repair direction — and the issue is RE-DRAFTED, both
