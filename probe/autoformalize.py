@@ -431,10 +431,13 @@ FIDELITY_SYSTEM = (
 )
 
 
-def intent_messages(issue: dict, context_pack: str) -> list[dict]:
+def intent_messages(issue: dict, context_pack: str, feedback: str | None = None) -> list[dict]:
     user = f"ISSUE #{issue.get('number')}: {_issue_prose(issue)}\n"
     if context_pack:
         user += "\nAvailable declarations you may reference:\n" + context_pack
+    if feedback:
+        user += ("\n\n" + feedback
+                 + "\nProduce a REVISED intent that fixes this; respond with the same JSON shape.")
     return [{"role": "system", "content": INTENT_SYSTEM}, {"role": "user", "content": user}]
 
 
@@ -451,20 +454,23 @@ def parse_intent(reply: str) -> dict | None:
     return v
 
 
-def draft_intent(issue: dict, context_pack: str, *, chat_fn) -> dict:
+def draft_intent(issue: dict, context_pack: str, *, chat_fn, feedback: str | None = None) -> dict:
     """Stage 1: magistral SPECIFIES the intended statement (prose + objects + naming meta) from the
-    issue. No Lean. Returns `{ok, intent, tokens}`."""
-    content, tokens = chat_fn(intent_messages(issue, context_pack))
+    issue. No Lean. `feedback` (a `render_gate_feedback` block from a rejected previous attempt)
+    turns this into a REVISION round. Returns `{ok, intent, tokens}`."""
+    content, tokens = chat_fn(intent_messages(issue, context_pack, feedback))
     intent = parse_intent(content)
     return {"ok": intent is not None, "intent": intent, "tokens": tokens}
 
 
-def formalize_messages(intent: dict, grounding: str) -> list[dict]:
+def formalize_messages(intent: dict, grounding: str, revision_note: str = "") -> list[dict]:
     objs = ", ".join(intent.get("objects") or []) or "(none named)"
     user = (f"INTENDED STATEMENT:\n{intent['statement']}\n\n"
             f"CONSUME THESE DECLARATIONS: {objs}\n")
     if grounding:
         user += "\nAVAILABLE SIGNATURES:\n" + grounding
+    if revision_note:
+        user += "\n\n" + revision_note
     return [{"role": "system", "content": FORMALIZE_SYSTEM}, {"role": "user", "content": user}]
 
 
@@ -518,20 +524,22 @@ def _repair_hint(errors) -> str:
 def formalize_with_repair(intent: dict, grounding: str, *, issue: dict, chat_fn, check_fn,
                           emit_fn, rounds: int = 3, retrieve_fn=None,
                           token_budget: int = 40_000, proactive_premises: str = "",
-                          log=lambda m: None) -> dict:
+                          revision_note: str = "", log=lambda m: None) -> dict:
     """Stage 2: Leanstral FORMALIZES `intent` into an elaborating stub, repairing against the
     elaborator. On an error the compiler message is fed back to Leanstral; for `unknown identifier
     X`, `retrieve_fn(X)` (loogle) candidates are appended. The naming meta rides from `intent`.
     Early-aborts once cumulative tokens exceed `token_budget` so a doomed draft can't burn every
-    round (a hard issue like #61 else spends ~77k/draw). `log` receives a one-line diagnostic per
-    round (reply size, lean-block?, elab error) so a failure is not opaque. Returns
-    `{ok, stub, meta, lean_text, entry, tokens}`."""
+    round (a hard issue like #61 else spends ~77k/draw). `revision_note` (a `render_gate_feedback`
+    block) rides the opening message on semantic-repair rounds — the formalizer must see the gate
+    verdict too (the #67 shallow drafts inlined `let`s even when the INTENT named `MathFin.zcb`).
+    `log` receives a one-line diagnostic per round (reply size, lean-block?, elab error) so a
+    failure is not opaque. Returns `{ok, stub, meta, lean_text, entry, tokens}`."""
     if proactive_premises:
         grounding = (grounding + "\n\n── LIKELY-RELEVANT PREMISES (rank by cosine; "
                      "verify they elaborate under our pin) ──\n" + proactive_premises)
     meta = {"module_name": intent["module_name"], "benchmark_id": intent["benchmark_id"],
             "docstring": intent.get("docstring", ""), "deferred": intent.get("deferred", [])}
-    messages = formalize_messages(intent, grounding)
+    messages = formalize_messages(intent, grounding, revision_note)
     tokens = 0
     for i in range(max(1, rounds)):
         if tokens >= token_budget:
@@ -777,6 +785,62 @@ def prepare_issues(raw: list[dict], *, max_difficulty: str = "medium") -> list[d
         body = by_num.get(s["number"], {}).get("body") or ""
         out.append({**s, "body": body, "pointers": extract_pointers(body)})
     return out
+
+
+# --- semantic-gate feedback (the repair cascade's re-draft signal) ------------
+#
+# The only repaired failure class used to be compilation (formalize_with_repair);
+# every semantic gate was a terminal skip, so the drafter was never told WHY a
+# clean-elaborating draft was rejected (design: 2026-07-17-semantic-repair-cascade).
+# Each gate gets a repair DIRECTION here; the block is sent to BOTH stages of the
+# next attempt (magistral may need to re-frame the statement; leanstral must stop
+# inlining what it should consume).
+
+_GATE_INSTRUCTIONS = {
+    "intent": "Respond with ONLY one JSON object carrying statement, objects, "
+              "module_name, benchmark_id, docstring, deferred — no prose around it.",
+    "formalize": "The intended statement could not be rendered into elaborating Lean "
+                 "after all repair rounds. Re-specify it using ONLY objects from the "
+                 "declarations shown (name each exactly); prefer fewer, concrete "
+                 "objects over prose-only quantities.",
+    "depth": "The statement's TYPE consumes no definition from the issue's pointer "
+             "modules — it restates the mathematics over raw reals (e.g. via `let` or "
+             "inlined formulas). Re-state the theorem so its TYPE is EXPRESSED THROUGH "
+             "the named MathFin declarations, fully applied (e.g. `MathFin.zcb r 0 T`); "
+             "never re-derive or inline their formulas.",
+    "trivial": "The statement is closed by `rfl`/`simp` alone — a definitional "
+               "restatement with no mathematical content. State the SUBSTANTIVE fact "
+               "the issue asks for: an identity or inequality between INDEPENDENTLY "
+               "defined quantities, not a definition unfolded into itself.",
+    "vacuous": "The hypotheses are mutually contradictory (`False` is provable from "
+               "them), so the theorem is vacuously true. Fix the hypothesis set — "
+               "check inequality directions and degenerate parameter values.",
+    "false": "The NEGATION of the conclusion was PROVED under the hypotheses — the "
+             "statement is false AS WRITTEN. The issue's mathematics is presumed "
+             "right; the rendering flipped an inequality or sign, swapped arguments, "
+             "or omitted a needed hypothesis. Fix the rendering. Do NOT weaken the "
+             "conclusion.",
+    "unfaithful": "A faithfulness judge found the statement diverges grossly from "
+                  "the issue. Address each listed divergence without weakening any "
+                  "fact you state.",
+    "drift": "The Lean does not faithfully render the intended statement. Re-render "
+             "every hypothesis and the full conclusion exactly.",
+}
+
+
+def render_gate_feedback(gate: str, detail: str, stub: str | None) -> str:
+    """The re-draft feedback block for a semantic-gate rejection: the rejected stub
+    (when one exists), the gate's own verdict, and the gate-specific revision
+    instruction."""
+    txt = f"PREVIOUS ATTEMPT — rejected by the `{gate}` gate"
+    if detail:
+        txt += f": {detail}"
+    txt += "\n"
+    if stub:
+        txt += f"```lean\n{stub.strip()}\n```\n"
+    txt += "REVISE: " + _GATE_INSTRUCTIONS.get(
+        gate, "Fix the reported failure without weakening any fact.")
+    return txt
 
 
 # --- the refill orchestrator --------------------------------------------------

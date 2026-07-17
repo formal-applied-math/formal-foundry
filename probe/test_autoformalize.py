@@ -672,6 +672,76 @@ def test_triviality_rejection_fails_open_without_sorry():
     assert called["n"] == 0                            # daemon not consulted
 
 
+# --- gate feedback rendering (the repair cascade's re-draft signal) -----------
+
+def test_render_gate_feedback_depth_carries_stub_and_instruction():
+    fb = af.render_gate_feedback(
+        "depth", "type consumes no def from [MathFin.FixedIncome.ZCB]", _STUB)
+    assert "`depth` gate" in fb
+    assert "consumes no def" in fb                     # the gate's own verdict
+    assert "theorem fra_value" in fb                   # the rejected stub rides along
+    assert "EXPRESSED THROUGH" in fb                   # the repair direction
+    assert "inline" in fb
+
+
+def test_render_gate_feedback_false_never_weaken():
+    fb = af.render_gate_feedback("false", "", None)
+    assert "NEGATION" in fb
+    assert "Do NOT weaken" in fb
+    assert "```lean" not in fb                         # no stub block when none given
+
+
+def test_render_gate_feedback_unknown_gate_generic():
+    fb = af.render_gate_feedback("mystery", "d", None)
+    assert "mystery" in fb and "without weakening" in fb
+
+
+def test_intent_messages_carry_feedback():
+    msgs = af.intent_messages(_ISSUE, "SIGS", feedback="PREV-FB")
+    user = msgs[1]["content"]
+    assert "PREV-FB" in user
+    assert "REVISED intent" in user
+    assert user.index("SIGS") < user.index("PREV-FB")  # feedback lands after context
+
+
+def test_intent_messages_no_feedback_block_by_default():
+    user = af.intent_messages(_ISSUE, "SIGS")[1]["content"]
+    assert "REVISED intent" not in user
+
+
+def test_draft_intent_threads_feedback_to_chat():
+    seen = {}
+
+    def chat(msgs):
+        seen["user"] = msgs[1]["content"]
+        return ('{"statement": "s", "module_name": "M", "benchmark_id": "b"}', 7)
+    r = af.draft_intent(_ISSUE, "", chat_fn=chat, feedback="FIX-THIS")
+    assert r["ok"] is True
+    assert "FIX-THIS" in seen["user"]
+
+
+def test_formalize_messages_carry_revision_note():
+    intent = {"statement": "s", "objects": ["MathFin.zcb"]}
+    user = af.formalize_messages(intent, "SIGS", revision_note="NOTE-X")[1]["content"]
+    assert "NOTE-X" in user and "SIGS" in user
+
+
+def test_formalize_with_repair_threads_revision_note():
+    intent = {"statement": "s", "objects": [], "module_name": "M", "benchmark_id": "b"}
+    seen = {}
+
+    def chat(msgs):
+        seen["user"] = msgs[1]["content"]
+        return ("```lean\ntheorem t (h : p) : q := by sorry\n```", 5)
+    fr = af.formalize_with_repair(intent, "", issue=_ISSUE, chat_fn=chat,
+                                  check_fn=lambda c: {"success": True, "sorry_count": 1,
+                                                      "errors": []},
+                                  emit_fn=af.emit_target_files, rounds=1,
+                                  revision_note="NOTE-Y")
+    assert fr["ok"] is True
+    assert "NOTE-Y" in seen["user"]
+
+
 # --- refill orchestrator (monkeypatched steps; control flow only) ------------
 
 def _issue(n, **kw):
