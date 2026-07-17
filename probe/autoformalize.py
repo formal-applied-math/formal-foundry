@@ -29,7 +29,7 @@ from house_context import build_system_prompt, extract_signatures
 from issues import difficulty_rank, select_issues
 from pipeline_lib import AutoformalizeConfig
 from probe import daemon_check, mistral_chat, run_target
-from probe_lib import append_jsonl, extract_lean_code
+from probe_lib import DEF_RE, append_jsonl, extract_lean_code, lint_violations
 
 # theorem/lemma decl, line-anchored so prose "theorem ..." in a docstring never
 # matches. Captures the declaration name.
@@ -236,7 +236,10 @@ FORMALIZE_SYSTEM = (
     "- ASCII-parseable operators: `^` for powers (write `σ^2`, never the Unicode superscript `σ²`); "
     "`*` for products; `Real.exp`/`Real.log`/`Real.sqrt`.\n"
     "- Render every hypothesis and the full conclusion of the intended statement — do not weaken, "
-    "drop a hypothesis, or flip an inequality."
+    "drop a hypothesis, or flip an inequality.\n"
+    "- Lint-clean for the library's CI: every `def`/`abbrev`/`structure` carries a `/-- … -/` "
+    "docstring immediately above it, and definition names are lowerCamelCase (theorem names "
+    "stay snake_case)."
 )
 
 FIDELITY_SYSTEM = (
@@ -324,7 +327,8 @@ def formalize_messages(intent: dict, grounding: str, revision_note: str = "") ->
             for d in defs)
         user += ("\nNEW DEFINITIONS TO INTRODUCE (this module defines them):\n" + spec
                  + "\nEmit ONE ```lean block containing these definitions (complete — no "
-                 "sorry; each built from existing constants) followed by the single theorem "
+                 "sorry; each built from existing constants; lowerCamelCase names, each with "
+                 "a `/-- … -/` docstring above it) followed by the single theorem "
                  "stated THROUGH them, ending `:= by sorry`.\n")
     if grounding:
         user += "\nAVAILABLE SIGNATURES:\n" + grounding
@@ -436,9 +440,24 @@ def formalize_with_repair(intent: dict, grounding: str, *, issue: dict, chat_fn,
             continue
         elab = check_fn(lean_text)
         if not elab.get("errors") and elab.get("sorry_count", 0) == 1:
-            log(f"round {i + 1}: elaborates ✓ ({tokens} tok total)")
-            return {"ok": True, "stub": stub, "meta": round_meta, "lean_text": lean_text,
-                    "entry": entry, "tokens": tokens, "unknowns": unknowns}
+            lint = lint_violations(stub)
+            if not lint:
+                log(f"round {i + 1}: elaborates ✓ ({tokens} tok total)")
+                return {"ok": True, "stub": stub, "meta": round_meta, "lean_text": lean_text,
+                        "entry": entry, "tokens": tokens, "unknowns": unknowns}
+            # elaborates but the main repo's `lake lint` would reject it (the class
+            # that opened PR #123 red) — textual, so repair it here, not in review.
+            log(f"round {i + 1}: elaborates but lint-dirty ({len(lint)}); first: {lint[0][:140]}")
+            messages += [
+                _assistant(content),
+                {"role": "user", "content":
+                 "The statement elaborates but the library's CI `lake lint` rejects it:\n- "
+                 + "\n- ".join(lint)
+                 + "\nFix ONLY these: def names lowerCamelCase (theorem names stay "
+                 "snake_case); a `/-- … -/` docstring immediately above every "
+                 "def/abbrev/structure. Keep the mathematics identical, still ending "
+                 "`:= by sorry`."}]
+            continue
         errs = elab.get("errors", [])
         log(f"round {i + 1}: {len(errs)} elab error(s); first: {str(errs[0])[:180] if errs else '?'}")
         feedback = ("That statement does not elaborate in Lean:\n```\n"
@@ -645,23 +664,18 @@ def triviality_rejection(lean_text: str, *, check_fn) -> dict:
 # file as human-readable telemetry; they just don't steer.
 ROUTING_ARCH = "routing-v1-2026-07-17"
 
-_DEF_RE = re.compile(
-    r"^\s*(?:@\[[^\]]*\]\s*)?(?:noncomputable\s+)?(?:def|abbrev|structure)\s+([A-Za-z0-9_'.]+)",
-    re.MULTILINE,
-)
-
-
 def count_pointer_defs(main_repo: str, pointers: list[str]) -> int:
-    """Consumable exports (`def`/`abbrev`/`structure`) in the issue's pointer
-    modules — the routing measurement. 0 ⇒ a theorem-only stub's TYPE has nothing
-    to consume ⇒ the definitions path. Missing files count 0 (fail toward defs)."""
+    """Consumable exports (`def`/`abbrev`/`structure`, via the shared
+    `probe_lib.DEF_RE`) in the issue's pointer modules — the routing measurement.
+    0 ⇒ a theorem-only stub's TYPE has nothing to consume ⇒ the definitions path.
+    Missing files count 0 (fail toward defs)."""
     n = 0
     for p in pointers:
         if not p.endswith(".lean"):
             continue
         try:
             with open(os.path.join(main_repo, p), encoding="utf-8") as f:
-                n += len(_DEF_RE.findall(f.read()))
+                n += len(DEF_RE.findall(f.read()))
         except OSError:
             continue
     return n
@@ -799,7 +813,7 @@ _DEFS_MARKER = "defs-gate:"
 def drafted_def_names(stub: str) -> list[str]:
     """Names of the `def`/`abbrev`/`structure` declarations the stub introduces,
     in order (the theorem is not one of them)."""
-    return _DEF_RE.findall(stub)
+    return DEF_RE.findall(stub)
 
 
 def defs_probe(lean_text: str, thm_name: str, def_names: list[str]) -> str:

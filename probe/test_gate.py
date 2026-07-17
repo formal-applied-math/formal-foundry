@@ -28,6 +28,17 @@ def test_gate_rejects_forbidden_before_touching_daemon():
     assert calls == []  # slop screen fires first; the daemon is never hit
 
 
+def test_gate_rejects_lint_dirty_before_touching_daemon():
+    # kernel-green but lint-dirty (snake_case def, no docstring) — the class that
+    # opened autoform PR #123 red on the main repo's `lake lint`
+    bad = "def payer_swap_value (x : ℝ) : ℝ := x\ntheorem t : True := trivial"
+    calls = []
+    r = gate.gate(bad, "t", check_fn=lambda c: calls.append(c) or {"success": True})
+    assert r["passed"] is False
+    assert r["reason"].startswith("lint:")
+    assert calls == []  # textual screen — the daemon is never hit
+
+
 def test_gate_rejects_compile_failure():
     r = gate.gate(CLEAN, "t",
                   check_fn=lambda c: {"success": False, "sorry_count": 0, "errors": ["boom"]})

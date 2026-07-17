@@ -7,21 +7,27 @@ pure and unit-testable without a live Lean process.
 
 The bar (unchanged, this is where we are ahead of the field):
   1. no forbidden constructs (sorry/admit/native_decide/exact?/apply?/… via slop_report)
+     and lint-clean defs (defsWithUnderscore + docBlame via lint_violations — the
+     classes that opened autoform PR #123 red on the main repo's `lake lint`)
   2. compiles with no errors and no residual `sorry`
   3. axioms ⊆ {propext, Classical.choice, Quot.sound} (axiom_guard_block succeeds)
 """
 
 from __future__ import annotations
 
-from probe_lib import axiom_guard_block, slop_report
+from probe_lib import axiom_guard_block, lint_violations, slop_report
 
 
 def gate(candidate: str, sorry_name: str, *, check_fn) -> dict:
     """Return {passed, reason, axioms_clean, slop, errors}. `reason` is one of
-    `forbidden:<list>` / `compile_or_sorry` / `axiom_dirty` / `ok`."""
+    `forbidden:<list>` / `lint:<list>` / `compile_or_sorry` / `axiom_dirty` / `ok`."""
     slop = slop_report(candidate)
     if slop["forbidden"]:
         return {"passed": False, "reason": f"forbidden:{slop['forbidden']}",
+                "axioms_clean": None, "slop": slop, "errors": []}
+    lint = lint_violations(candidate)
+    if lint:
+        return {"passed": False, "reason": f"lint:{lint}",
                 "axioms_clean": None, "slop": slop, "errors": []}
     result = check_fn(candidate)
     if not (result.get("success") and result.get("sorry_count", 0) == 0):

@@ -10,6 +10,7 @@ from probe_lib import (
     build_initial_prompt,
     build_repair_prompt,
     extract_lean_code,
+    lint_violations,
     normalize_content,
     sha256_hex,
     slop_report,
@@ -124,3 +125,46 @@ def test_best_failure_ties_resolve_earliest():
 
 def test_best_failure_tolerates_missing_errors_key():
     assert best_failure([{"errors": ["a"]}, {}]) == 1
+
+
+# ── lint_violations: the textual mirror of the main repo's `lake lint` classes ──
+
+
+def test_lint_violations_clean_module_passes():
+    code = ("/-- The annuity. -/\n"
+            "noncomputable def annuity (x : ℝ) : ℝ := x\n\n"
+            "/-- Par rate. -/\n"
+            "@[simp]\ndef parSwapRate (x : ℝ) : ℝ := x\n\n"
+            "theorem parSwapRate_eq (x : ℝ) : x = x := by sorry\n")
+    assert lint_violations(code) == []
+
+
+def test_lint_violations_flags_underscore_def_with_camel_suggestion():
+    code = "/-- v. -/\ndef payer_swap_value (x : ℝ) : ℝ := x\n"
+    v = lint_violations(code)
+    assert len(v) == 1 and "payer_swap_value" in v[0] and "payerSwapValue" in v[0]
+
+
+def test_lint_violations_flags_missing_docstring():
+    v = lint_violations("noncomputable def annuity (x : ℝ) : ℝ := x\n")
+    assert len(v) == 1 and "docstring" in v[0]
+
+
+def test_lint_violations_theorem_names_exempt():
+    # theorem names are REQUIRED to be snake_case and docBlame skips proofs
+    assert lint_violations("theorem par_swap_rate_pos (x : ℝ) : x = x := by sorry\n") == []
+
+
+def test_lint_violations_module_doc_does_not_count_as_docstring():
+    v = lint_violations("/-! Swap module. -/\n\ndef annuity (x : ℝ) : ℝ := x\n")
+    assert len(v) == 1 and "docstring" in v[0]
+
+
+def test_lint_violations_match_pr123_live_failure():
+    # verbatim def block from autoform PR #123, which lake lint rejected with
+    # 5 errors: defsWithUnderscore ×2 + docBlame ×3
+    code = ("noncomputable def annuity {ι : Type*} (δ : ℝ) (P : ι → ℝ) (s : Finset ι) : ℝ "
+            ":= δ * Finset.sum s P\n\n"
+            "def payer_swap_value (P0 Pn K A : ℝ) : ℝ := P0 - Pn - K * A\n\n"
+            "noncomputable def par_swap_rate (P0 Pn A : ℝ) : ℝ := (P0 - Pn) / A\n")
+    assert len(lint_violations(code)) == 5

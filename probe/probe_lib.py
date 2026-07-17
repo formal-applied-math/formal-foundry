@@ -138,6 +138,40 @@ def slop_report(code: str) -> dict:
     }
 
 
+# consumable exports (`def`/`abbrev`/`structure`) — used both to MEASURE pointer
+# modules (routing) and to LINT drafted stubs. Deliberately excludes `theorem`.
+DEF_RE = re.compile(
+    r"^\s*(?:@\[[^\]]*\]\s*)?(?:noncomputable\s+)?(?:def|abbrev|structure)\s+([A-Za-z0-9_'.]+)",
+    re.MULTILINE,
+)
+
+
+def _camel(name: str) -> str:
+    return re.sub(r"_(\w)", lambda m: m.group(1).upper(), name)
+
+
+def lint_violations(code: str) -> list[str]:
+    """The main repo's `lake lint` classes checkable textually — the two that
+    rejected autoform PR #123: `defsWithUnderscore` (def names must be
+    lowerCamelCase; theorem names stay snake_case) and `docBlame` (every
+    def/abbrev/structure needs a `/-- … -/` immediately above — a `/-!` module
+    doc does not count). Structure FIELDS are not checked (no reliable textual
+    anchor); the main repo's CI stays the backstop for that class."""
+    out = []
+    for m in DEF_RE.finditer(code):
+        name = m.group(1)
+        if "_" in name:
+            out.append(f"def `{name}`: underscore in a definition name (defsWithUnderscore) "
+                       f"— rename to lowerCamelCase (e.g. `{_camel(name)}`)")
+        prefix = code[:m.start()].rstrip()
+        has_doc = (prefix.endswith("-/") and prefix.rfind("/--") != -1
+                   and prefix.rfind("/--") == prefix.rfind("/-"))
+        if not has_doc:
+            out.append(f"def `{name}`: missing docstring (docBlame) — put `/-- … -/` "
+                       f"immediately above the definition")
+    return out
+
+
 def sha256_hex(s: str) -> str:
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
 

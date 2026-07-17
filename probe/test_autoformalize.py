@@ -1379,6 +1379,42 @@ def test_formalize_with_repair_repairs_on_elaboration_error():
     assert r["ok"] is True and "x = x" in r["lean_text"]
 
 
+def test_formalize_with_repair_repairs_lint_violations():
+    # elaborates on round 1 but lint-dirty (snake_case def, missing docstring) —
+    # the loop must feed the lint report back and accept the clean round 2
+    dirty = ("```lean\ndef par_swap_rate (x : ℝ) : ℝ := x\n"
+             "theorem foo (x : ℝ) : x = x := by sorry\n```")
+    clean = ("```lean\n/-- Par rate. -/\ndef parSwapRate (x : ℝ) : ℝ := x\n"
+             "theorem foo (x : ℝ) : x = x := by sorry\n```")
+    seen = []
+
+    def chat(msgs):
+        seen.append(msgs)
+        return ([dirty, clean][len(seen) - 1], 10)
+    r = af.formalize_with_repair(_INTENT, "", issue=_issue(5), chat_fn=chat,
+                                 check_fn=_ELAB_OK, emit_fn=af.emit_target_files, rounds=3)
+    assert r["ok"] is True and "parSwapRate" in r["lean_text"]
+    fb = " ".join(m["content"] for m in seen[1])
+    assert "lake lint" in fb and "lowerCamelCase" in fb and "parSwapRate" in fb
+
+
+def test_formalize_with_repair_gives_up_on_persistent_lint_dirt():
+    dirty = ("```lean\ndef par_swap_rate (x : ℝ) : ℝ := x\n"
+             "theorem foo (x : ℝ) : x = x := by sorry\n```")
+    r = af.formalize_with_repair(_INTENT, "", issue=_issue(5),
+                                 chat_fn=_script_chat([dirty, dirty]),
+                                 check_fn=_ELAB_OK, emit_fn=af.emit_target_files, rounds=2)
+    assert r["ok"] is False
+
+
+def test_formalize_contract_demands_lint_cleanliness():
+    # the drafter is TOLD the lint bar (right-first-time), the gate enforces it
+    assert "docstring" in af.FORMALIZE_SYSTEM and "lowerCamelCase" in af.FORMALIZE_SYSTEM
+    intent = {**_INTENT, "definitions": [{"name": "annuity", "signature": "ℝ", "meaning": "m"}]}
+    joined = " ".join(m["content"] for m in af.formalize_messages(intent, ""))
+    assert "/--" in joined and "lowerCamelCase" in joined
+
+
 def test_formalize_with_repair_injects_loogle_on_unknown_identifier():
     replies = [_formalize_reply(concl="Foo.bar x"), _formalize_reply(concl="x = x")]
     seen = []

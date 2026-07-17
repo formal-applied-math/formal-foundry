@@ -117,3 +117,24 @@ budgets.
    Mistral — issue #53 is one of the two observed depth-rejections. Success =
    a deep, faithful stub seeded in the scratch queue; acceptable = bounded
    rounds exhausted with per-round telemetry showing the feedback was applied.
+
+## Addendum (2026-07-17, post PR #123): draft-time lint gate
+
+The first production PR (formal-mathfin #123) opened red on the main repo's
+`lake lint`: `defsWithUnderscore` on two snake_case def names + `docBlame` on
+three docstring-less defs. Both classes are textual, so they are now caught
+where repair is cheapest instead of at human review:
+
+- `probe_lib.lint_violations(code)` — the textual mirror of the two linter
+  classes (def/abbrev/structure names must be lowerCamelCase; each needs a
+  `/-- … -/` immediately above; theorem names exempt; structure FIELDS not
+  checked — main-repo CI remains the backstop there). `DEF_RE` moved to
+  probe_lib as the shared def-parser (routing measurement + lint).
+- `formalize_with_repair` treats an elaborating-but-lint-dirty round as a
+  repair round: the violation list rides the same feedback channel as
+  elaboration errors, bounded by the existing `rounds`/`token_budget`.
+- `gate.gate()` adds a `lint:<list>` textual screen beside the slop screen —
+  the backstop for statement text mutated after drafting (e.g. by the vibe
+  prover). A lint-dirty candidate records as `fail_gate`, never opens a PR.
+- The formalize contract states the bar up front (docstring + lowerCamelCase),
+  so round 1 is usually already clean.
