@@ -784,10 +784,17 @@ def defs_probe(lean_text: str, thm_name: str, def_names: list[str]) -> str:
         f'      | throwError "{_DEFS_MARKER} drafted def {{d}} not found"\n'
         "    let some v := ci.value?\n"
         f'      | throwError "{_DEFS_MARKER} ungrounded: {{d}} has no value"\n'
-        "    let ext := v.getUsedConstants.filter (fun c => (env.getModuleIdxFor? c).isSome)\n"
+        # grounding checks the BODY under the lambda binders: on the whole value,
+        # a binder type like `(x : ℝ)` already contributes `Real`, so the identity
+        # wrapper `def idw (x : ℝ) : ℝ := x` passed (caught by the 2026-07-17 live
+        # 3-case validation). Peeling lambdas leaves the computational content.
+        "    let mut body := v\n"
+        "    while body.isLambda do\n"
+        "      body := body.bindingBody!\n"
+        "    let ext := body.getUsedConstants.filter (fun c => (env.getModuleIdxFor? c).isSome)\n"
         "    unless ext.size > 0 do\n"
         f'      throwError "{_DEFS_MARKER} ungrounded: {{d}} is a free-floating wrapper '
-        '(its value uses no imported constant)"\n'
+        '(its body uses no imported constant)"\n'
     )
     return lean_text.rstrip() + "\n" + meta
 

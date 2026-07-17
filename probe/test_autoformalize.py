@@ -765,6 +765,8 @@ def test_defs_probe_checks_consumption_and_grounding():
     assert "`MathFin.in_out_parity" in probe           # theorem looked up by name
     assert "`MathFin.knockInPayoff" in probe and "`MathFin.knockOutPayoff" in probe
     assert "getUsedConstants" in probe
+    assert "bindingBody!" in probe                     # grounding peels lambda binders:
+    #                                                    binder types (ℝ) must not count
     assert "defs-gate:" in probe                       # the reject marker
     assert "newdef_depth" in probe and "ungrounded" in probe
 
