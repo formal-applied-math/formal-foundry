@@ -621,6 +621,57 @@ def test_depth_rejection_fails_open_on_daemon_error():
     assert r["shallow"] is False
 
 
+# --- triviality gate (the #67 class: rfl/simp-closable statements) ------------
+
+def test_triviality_goal_splices_tactic_over_sorry():
+    lean_text, _e, _p = af.emit_target_files(_ISSUE, _STUB, _META)
+    goal = af.triviality_goal(lean_text)
+    assert goal is not None
+    assert "sorry" not in goal
+    assert ":= by first | rfl | simp" in goal
+    assert "end MathFin" in goal                       # module scaffold intact
+
+
+def test_triviality_goal_handles_bare_sorry():
+    goal = af.triviality_goal("theorem t : True := sorry\n")
+    assert goal == "theorem t : True := by first | rfl | simp\n"
+
+
+def test_triviality_goal_none_without_sorry():
+    assert af.triviality_goal("theorem t : True := trivial") is None
+
+
+def test_triviality_rejection_flags_rfl_closable():
+    lean_text, _e, _p = af.emit_target_files(_ISSUE, _STUB, _META)
+    check = lambda code: {"success": True, "errors": [], "sorry_count": 0}
+    r = af.triviality_rejection(lean_text, check_fn=check)
+    assert r["trivial"] is True
+    assert r["tokens"] == 0                            # daemon elaboration, no prover
+    assert "rfl" in r["verdict"]
+
+
+def test_triviality_rejection_passes_substantive_statement():
+    # rfl and simp both fail on real content → elaboration errors → NOT trivial
+    # (the healthy case; also covers daemon-error fail-open, same dict shape).
+    lean_text, _e, _p = af.emit_target_files(_ISSUE, _STUB, _META)
+    check = lambda code: {"success": False,
+                          "errors": ["The rfl tactic failed", "simp made no progress"],
+                          "sorry_count": 0}
+    r = af.triviality_rejection(lean_text, check_fn=check)
+    assert r["trivial"] is False
+
+
+def test_triviality_rejection_fails_open_without_sorry():
+    called = {"n": 0}
+
+    def check(code):
+        called["n"] += 1
+        return {"success": True, "errors": [], "sorry_count": 0}
+    r = af.triviality_rejection("theorem t : True := trivial", check_fn=check)
+    assert r["trivial"] is False
+    assert called["n"] == 0                            # daemon not consulted
+
+
 # --- refill orchestrator (monkeypatched steps; control flow only) ------------
 
 def _issue(n, **kw):

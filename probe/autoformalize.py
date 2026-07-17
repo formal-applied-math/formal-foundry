@@ -711,6 +711,45 @@ def depth_rejection(lean_text: str, name: str, pointers: list[str], *, check_fn)
     return {"shallow": bool(depth_errs), "tokens": 0, "verdict": "; ".join(depth_errs[:2])}
 
 
+# --- triviality gate (the #67 class) ------------------------------------------
+#
+# The depth gate checks WHAT the type consumes; it does not check whether the
+# statement SAYS anything: cal-bk-67's type referenced `zcb` through `let`-bound
+# definitions and still proved by `rfl`. This gate catches that class at DRAFT
+# time (open-pr's rfl guard stays as defense in depth, but by then the prove
+# compute is already spent): splice the stub's `sorry` into `first | rfl | simp`
+# and elaborate — a clean close means the statement is a definitional/simp
+# restatement with no mathematical content. The boundary is deliberate: bare
+# `rfl` + goal-only `simp` (no `simp_all`, no `grind`), so easy-but-REAL content
+# is not over-filtered. Zero prover tokens; fail-open like the depth gate.
+
+_TRIV_TACTIC = "by first | rfl | simp"
+_SORRY_RE = re.compile(r":=\s*(?:by\s+)?sorry\b")
+
+
+def triviality_goal(lean_text: str) -> str | None:
+    """The stub with its `sorry` proof spliced to `first | rfl | simp`. None when
+    no `:= [by] sorry` is present to splice (malformed stub — fail open)."""
+    new, n = _SORRY_RE.subn(":= " + _TRIV_TACTIC, lean_text, count=1)
+    return new if n else None
+
+
+def triviality_rejection(lean_text: str, *, check_fn) -> dict:
+    """Elaborate the triviality goal via `check_fn` (the daemon). `trivial=True`
+    iff the splice closes CLEAN (no errors, no sorry left) — the statement holds
+    definitionally / by the vanilla simp set alone. The tactic FAILING (the
+    healthy case) and daemon errors both leave errors non-empty ⇒ not a verdict.
+    No prover call ⇒ `tokens=0`."""
+    goal = triviality_goal(lean_text)
+    if goal is None:
+        return {"trivial": False, "tokens": 0, "verdict": "no sorry to splice — skipped"}
+    res = check_fn(goal)
+    trivial = not res.get("errors") and res.get("sorry_count", 0) == 0
+    verdict = ("closed by `first | rfl | simp` — definitionally/simp-trivial, no content"
+               if trivial else "")
+    return {"trivial": trivial, "tokens": 0, "verdict": verdict}
+
+
 # --- issue preparation --------------------------------------------------------
 
 _POINTER_RE = re.compile(r"MathFin/[\w/]+\.lean")
