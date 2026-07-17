@@ -1,5 +1,45 @@
 {
   "toolchain": "leanprover/lean4:v4.31.0",
-  "main_commit": "25473166302368b7a53e7cdd67c3eef86c337c40",
-  "targets": []
+  "main_commit": "097735b44fde7e83e4faaf2d79137d4b0a6109a0",
+  "targets": [
+    {
+      "id": "cal-bk-67",
+      "stream": "backlog",
+      "kind": "prove",
+      "sorry_name": "forward_rate_iff",
+      "file": "cal-bk-67.lean",
+      "pointers": [
+        "MathFin/FixedIncome/ForwardRate.lean",
+        "MathFin/FixedIncome/ZCB.lean"
+      ],
+      "input_hash": "256f866703cc608caa6f39ef75068d09deb3ad19c0d4fef054872936ee650f7d",
+      "main_module": "MathFin/FixedIncome/FixedIncome.FRA.lean",
+      "benchmark": "benchmarks/mathematical_finance.json",
+      "benchmark_id": "mf-fixedincome-fra_value",
+      "source_issue": 67,
+      "benchmark_entry": {
+        "id": "mf-fixedincome-fra_value",
+        "name": "Formalize the FRA value \u03b4\u00b7P(0,T\u2082)\u00b7(F\u2212K) and simple forward rate F = (P(0,T\u2081)/P(0,T\u2082)\u22121)/\u03b4",
+        "description": "FRA value formula and fair forward rate identity",
+        "domain": "mathematical_finance",
+        "code": {
+          "lean": "import MathFin.FixedIncome.FixedIncome.FRA\n\nopen MathFin\n\n/-- FRA value formula and fair forward rate identity -/\ntheorem mf_fixedincome_fra_value (r K T\u2081 T\u2082 : \u211d) (hT : T\u2082 \u2260 T\u2081) :\n    let P\u2081 :=\n  MathFin.forward_rate_iff r K T\u2081 T\u2082 hT\n"
+        },
+        "metadata": {
+          "chapter": 0,
+          "reference": "Formalize the FRA value \u03b4\u00b7P(0,T\u2082)\u00b7(F\u2212K) and simple forward rate F = (P(0,T\u2081)/P(0,T\u2082)\u22121)/\u03b4",
+          "difficulty": "good-first",
+          "formalization_status": "full",
+          "formalization_scope": "Full formal proof in MathFin/FixedIncome/FixedIncome.FRA.lean (magistral-drafted statement, leanstral proof). Re-export from MathFin. Axioms-clean.",
+          "provenance": {
+            "statement_source": "magistral-autoform",
+            "statement_model": "magistral-medium",
+            "source": "leanstral-autoform",
+            "model": "labs-leanstral-1-5",
+            "issue": 67
+          }
+        }
+      }
+    }
+  ]
 }

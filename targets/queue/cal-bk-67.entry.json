@@ -1,0 +1,23 @@
+{
+  "id": "mf-fixedincome-fra_value",
+  "name": "Formalize the FRA value δ·P(0,T₂)·(F−K) and simple forward rate F = (P(0,T₁)/P(0,T₂)−1)/δ",
+  "description": "FRA value formula and fair forward rate identity",
+  "domain": "mathematical_finance",
+  "code": {
+    "lean": "import MathFin.FixedIncome.FixedIncome.FRA\n\nopen MathFin\n\n/-- FRA value formula and fair forward rate identity -/\ntheorem mf_fixedincome_fra_value (r K T₁ T₂ : ℝ) (hT : T₂ ≠ T₁) :\n    let P₁ :=\n  MathFin.forward_rate_iff r K T₁ T₂ hT\n"
+  },
+  "metadata": {
+    "chapter": 0,
+    "reference": "Formalize the FRA value δ·P(0,T₂)·(F−K) and simple forward rate F = (P(0,T₁)/P(0,T₂)−1)/δ",
+    "difficulty": "good-first",
+    "formalization_status": "full",
+    "formalization_scope": "Full formal proof in MathFin/FixedIncome/FixedIncome.FRA.lean (magistral-drafted statement, leanstral proof). Re-export from MathFin. Axioms-clean.",
+    "provenance": {
+      "statement_source": "magistral-autoform",
+      "statement_model": "magistral-medium",
+      "source": "leanstral-autoform",
+      "model": "labs-leanstral-1-5",
+      "issue": 67
+    }
+  }
+}

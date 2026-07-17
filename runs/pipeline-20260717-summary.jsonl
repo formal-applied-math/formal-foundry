@@ -1,1 +1,2 @@
 {"target": "cal-bk-67", "stream": "backlog", "outcome": "pass", "rounds": 1, "tokens": 33589, "budget": 500000, "wall_s": 119.9, "axioms_clean": true, "slop": {"forbidden": [], "line_count": 43, "max_bracket_args": 1}, "model": "labs-leanstral-1-5", "ts": "2026-07-17T01:09:27", "autop": null, "scout": false}
+{"target": "cal-bk-67", "stream": "backlog", "ts": "2026-07-17T05:47:05", "harness": "vibe", "tokens": 0, "outcome": "pass", "axioms_clean": true}

@@ -30,21 +30,6 @@ theorem forward_rate_iff (r K T₁ T₂ : ℝ) (hT : T₂ ≠ T₁) :
     let F := (P₁ / P₂ - 1) / δ;
     let V := δ * P₂ * (F - K);
     V = 0 ↔ K = F := by
-  intro P₁ P₂ δ F V
-  have hP₂_ne : P₂ ≠ 0 := (zcb_pos r 0 T₂).ne'
-  have hδ_ne : δ ≠ 0 := sub_ne_zero.mpr hT
-  have hδP₂_ne : δ * P₂ ≠ 0 := mul_ne_zero hδ_ne hP₂_ne
-  constructor
-  · intro hV
-    have hzero : F - K = 0 := by
-      have := mul_eq_zero.mp hV
-      rcases this with (h | h)
-      · exact absurd h hδP₂_ne
-      · exact h
-    linarith
-  · intro hKF
-    dsimp [V]
-    rw [hKF]
-    ring
+  sorry
 
 end MathFin
