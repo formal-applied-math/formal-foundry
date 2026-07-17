@@ -19,10 +19,13 @@ MAIN="${MAIN_REPO:-/home/rapha/code/automated_proofs_quantfin}"
 BASE="$MAIN/docker/docker-compose.yml"
 LSP="$MAIN/docker/docker-compose.lean-lsp.yml"
 
-# 1. One Lean process: the lean-repl daemon must be down.
+# 1. One Lean process: the lean-repl daemon must be down. Use `stop`, never `down`:
+# `docker compose down` removes the shared `docker_default` network the daemon
+# publishes 7878 on, which breaks its later restart ("network not found"). `stop`
+# leaves the container + network intact so the tick can flip the slot back cleanly.
 if docker ps --format '{{.Names}}' | grep -q 'lean-repl'; then
-  echo "[leanstral-vibe] lean-repl daemon is UP — taking it down (one Lean process)…" >&2
-  docker compose -f "$BASE" down lean-repl
+  echo "[leanstral-vibe] lean-repl daemon is UP — stopping it (one Lean process)…" >&2
+  docker compose -f "$BASE" stop lean-repl
 fi
 
 # 2. Bring up the mem-capped lean-lsp service (idle; loads Lean only per session).

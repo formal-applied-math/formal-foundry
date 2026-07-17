@@ -2,15 +2,16 @@
 # One autoformalizer pipeline tick — the headless entrypoint the GitHub Actions
 # cron fires every `interval_days`. It:
 #   1. asks pipeline.py whether it's due + affordable + which target (plan)
-#   2. runs the prover on that target's queued stub (probe.py prove → daemon)
+#   2. proves that target's queued stub with the vibe ⇄ lean-lsp-mcp harness
 #   3. charges the budget + persists state (record)
 #   4. STOPS at "candidate ready → notify R".  It NEVER opens a PR — scout-not-
 #      author holds; a human runs the 8-lens refinery and authors the PR.
 #
-# The prover here is the metered text-loop probe against the lean-repl daemon
-# (exact tokens, clean standalone-stub integration). vibe+lean-lsp remains the
-# hands-on path for hard targets. The daemon must be UP (the workflow starts it
-# in-container; locally: docker compose ... up -d lean-repl).
+# The prover is now the vibe ⇄ lean-lsp-mcp harness Leanstral was trained for: a
+# headless agent driving live goal states + lean_multi_attempt + search, run for one
+# deep session per target (depth over breadth). The tick flips the single Lean slot
+# lean-lsp→daemon to gate the captured proof. Token metering is traded for a turn
+# budget (max_turns); the daemon serves refill + the gate.
 set -euo pipefail
 FOUNDRY="$(cd "$(dirname "$0")/.." && pwd)"
 MAIN="${MAIN_REPO:-/home/rapha/code/automated_proofs_quantfin}"
@@ -58,18 +59,32 @@ if [ "$ACTION" != "run" ]; then
   exit 0
 fi
 ID="$(printf '%s' "$DEC" | python3 -c 'import sys,json;print(json.load(sys.stdin)["target"]["id"])')"
-BUDGET="$(printf '%s' "$DEC" | python3 -c 'import sys,json;print(json.load(sys.stdin)["budget"])')"
-EFFORT="$(printf '%s' "$DEC" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("reasoning_effort","high"))')"
-FANOUT="$(printf '%s' "$DEC" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("fanout",1))')"
-REPAIR="$(printf '%s' "$DEC" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("repair_rounds",2))')"
-TPA="$(printf '%s' "$DEC" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("tokens_per_attempt",60000))')"
-echo "[tick] running target $ID (budget=$BUDGET, effort=$EFFORT, fanout=$FANOUT, repair=$REPAIR)" >&2
+TURNS="$(printf '%s' "$DEC" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("max_turns",40))')"
+echo "[tick] running target $ID via vibe ⇄ lean-lsp-mcp (max_turns=$TURNS)" >&2
 
-# 2. Prove (metered; writes runs/$TAG-summary.jsonl + winning candidate .lean).
+# 2. Prove via the trained-for vibe ⇄ lean-lsp-mcp harness (spec:
+#    docs/superpowers/specs/2026-07-17-leanstral-vibe-cron-harness-design.md).
+#    Phase A (lean-lsp UP): headless vibe drives lean_goal / lean_multi_attempt /
+#      search → runs/$TAG-$ID.candidate. leanstral-vibe.sh stops the daemon + brings
+#      lean-lsp up (one Lean process at a time).
+#    Flip: stop lean-lsp, restart the daemon — `stop`/`up`, NEVER `down` (down removes
+#      the shared docker_default network the daemon publishes 7878 on).
+#    Phase B (daemon UP): gate the candidate → runs/$TAG-$ID.lean + summary row.
+#    NOTE: the flip below is the LOCAL (compose) path. W5 adapts it for the CI runner
+#    (docker-run daemon + lean-lsp, vibe baked into the image). Do not deploy to CI
+#    until W5 — the live cron keeps running the old text-loop from main until then.
+BASE="$MAIN/docker/docker-compose.yml"
+LSP="$MAIN/docker/docker-compose.lean-lsp.yml"
 set +e
-python3 probe.py prove --manifest "$QUEUE" --only "$ID" --budget "$BUDGET" \
-  --reasoning-effort "$EFFORT" --fanout "$FANOUT" --repair-rounds "$REPAIR" \
-  --max-tokens "$TPA" --run-tag "$TAG" --main-repo "$MAIN"
+python3 vibe_prove.py run --manifest "$QUEUE" --only "$ID" \
+  --max-turns "$TURNS" --run-tag "$TAG" --main-repo "$MAIN"
+echo "[tick] flipping the Lean slot back to the daemon for the gate…" >&2
+docker compose -f "$BASE" -f "$LSP" stop lean-lsp >/dev/null 2>&1
+docker compose -f "$BASE" -p docker up -d lean-repl >/dev/null 2>&1
+# Probe the port until the daemon actually serves — NOT `docker logs | grep READY:`,
+# which matches the stale READY from before the restart and races the cold load.
+python3 wait_daemon.py || echo "[tick] WARNING: daemon not ready after probes; gate may fail" >&2
+python3 vibe_prove.py gate --manifest "$QUEUE" --only "$ID" --run-tag "$TAG" --main-repo "$MAIN"
 set -e
 
 # 3. Read the outcome + actual tokens from the run summary.

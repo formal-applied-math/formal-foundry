@@ -32,6 +32,13 @@ fanout = 4
 repair_rounds = 2
 tokens_per_attempt = 120000
 
+# vibe ⇄ lean-lsp-mcp harness (the cron prove path since 2026-07-17): one deep
+# headless agentic session per target, bounded by TURNS (depth over breadth) — the
+# lever that replaces fanout×tokens. Leanstral drives lean_goal / lean_multi_attempt
+# / search itself, so more turns = more repair depth. The fanout/repair_rounds/
+# tokens_per_attempt above are now legacy (the retired text-loop calibration probe).
+max_turns = 40
+
 # Issue -> stub autoformalizer (the self-feeding refill phase). When the queue has
 # no unattempted target, the tick drafts one from the next `status:ready`+`type:proof`
 # issue: magistral drafts+judges+roundtrips a faithful stub, leanstral runs the

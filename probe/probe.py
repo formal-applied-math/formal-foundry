@@ -1,4 +1,10 @@
-"""Leanstral calibration probe: prove targets via Mistral API + lean-repl daemon.
+"""Leanstral text-loop calibration probe: prove targets via Mistral API + lean-repl daemon.
+
+LEGACY / calibration only. The cron prove path is now `vibe_prove.py` (the trained-for
+vibe ⇄ lean-lsp-mcp harness). This text-loop remains for token-metered calibration
+sweeps and as the home of the shared `daemon_check` + `mistral_chat` + `run_target`
+helpers. Premise retrieval (Track A) and the autop scout have been removed here — the
+vibe agent drives search + multi-attempt itself.
 
 Usage:
   export MISTRAL_API_KEY=...   # or put in ../.env and `source` it
@@ -20,8 +26,6 @@ import time
 import urllib.error
 import urllib.request
 
-import embed as _embed
-from autop import autop_prove, scout_rescue
 from house_context import build_system_prompt, extract_signatures
 from probe_lib import (
     TokenLedger,
@@ -35,7 +39,6 @@ from probe_lib import (
     slop_report,
     window_messages,
 )
-from scout_index import default_index_dir
 
 # Reconfirmed 2026-07-11 against docs.mistral.ai: `labs-leanstral-1-5` is the
 # live Leanstral 1.5 id on api.mistral.ai/v1 (free until 2026-09-30). The older
@@ -272,11 +275,6 @@ def main() -> int:
                    help="max compiler-feedback repair rounds (default: --max-rounds)")
     p.add_argument("--max-tokens", type=int, default=16384,
                    help="max_tokens per attempt (Leanstral's lever is tokens-per-attempt)")
-    p.add_argument("--retrieval-backend", default="embedding", choices=["embedding", "loogle"])
-    p.add_argument("--retrieval-k", type=int, default=8)
-    p.add_argument("--embed-model", default="mistral-embed")
-    p.add_argument("--autop", dest="autop", action="store_true", default=True)
-    p.add_argument("--no-autop", dest="autop", action="store_false")
     args = ap.parse_args()
 
     api_key = os.environ.get("MISTRAL_API_KEY")
@@ -301,23 +299,6 @@ def main() -> int:
                             base_url=args.base_url, max_tokens=args.max_tokens,
                             reasoning_effort=args.reasoning_effort)
 
-    index_dir = default_index_dir()
-    _premises = _embed.load_premises(index_dir)
-    _eidx = (_embed.EmbeddingIndex.load(_embed.cache_path(index_dir, args.embed_model),
-                                        _premises, args.embed_model)
-             if (args.retrieval_backend == "embedding" and _premises) else None)
-    if args.retrieval_backend == "embedding" and _eidx is None:
-        print("[prove] embedding index absent → no prove-side premise retrieval", flush=True)
-    elif args.retrieval_backend != "embedding":
-        print(f"[prove] retrieval-backend={args.retrieval_backend} → prove-side premise "
-              "retrieval is embedding-only; none injected", flush=True)
-
-    def _retrieve_premises(statement):
-        if _eidx is None:
-            return ""
-        ef = lambda t: _embed.mistral_embed(t, api_key=api_key, model=args.embed_model)  # noqa: E731
-        return _eidx.retrieve(statement, args.retrieval_k, ef)
-
     for target in manifest["targets"]:
         if args.only and target["id"] != args.only:
             continue
@@ -326,17 +307,7 @@ def main() -> int:
         target["statement"] = open(os.path.join(root, target["file"])).read()
         pointers = target.get("pointers", [])
         context_pack = extract_signatures(args.main_repo, pointers) if pointers else ""
-        premises = _retrieve_premises(target["statement"])
-        if premises:
-            context_pack += ("\n── LIKELY-RELEVANT PREMISES (cosine-ranked; consume, "
-                             "don't reprove) ──\n" + premises)
-        print(f"[{target['id']}] budget={args.budget} pointers={len(pointers)} "
-              f"premises={'y' if premises else 'n'} autop={'y' if args.autop else 'n'} …",
-              flush=True)
-
-        # autop probe (evidence + scout safety net); leanstral still runs for an
-        # AUTHOR proof — autop never reduces leanstral effort, only rescues misses.
-        autop_res = autop_prove(target["statement"], check_fn=daemon_check) if args.autop else None
+        print(f"[{target['id']}] budget={args.budget} pointers={len(pointers)} …", flush=True)
 
         summary = run_target(target, budget=args.budget,
                              max_rounds=args.max_rounds, chat_fn=chat_fn,
@@ -346,30 +317,13 @@ def main() -> int:
                              fanout=args.fanout, repair_rounds=args.repair_rounds)
         summary["model"] = args.model
         summary["ts"] = time.strftime("%Y-%m-%dT%H:%M:%S")
-        summary["autop"] = autop_res["tactic"] if autop_res else None   # prove-wall evidence
-        summary["scout"] = False
-        rescue = scout_rescue(summary["outcome"] == "pass", autop_res)
-        if rescue:
-            # leanstral missed but a cheap tactic closes it → SCOUT rescue (draft PR)
-            target["_winning_candidate"] = rescue["winning_candidate"]
-            target["_proof_source"] = rescue["proof_source"]
-            summary["outcome"] = "pass_scout"
-            summary["scout"] = True
         append_jsonl(summary_log, summary)
         print(f"  -> {summary['outcome']} rounds={summary['rounds']} "
-              f"tokens={summary['tokens']} autop={summary['autop']}", flush=True)
+              f"tokens={summary['tokens']}", flush=True)
         if "_winning_candidate" in target:
             win_path = os.path.join(run_dir, f"{args.run_tag}-{target['id']}.lean")
             with open(win_path, "w") as f:
                 f.write(target["_winning_candidate"])
-            if target.get("_proof_source"):
-                with open(win_path + ".scout", "w") as f:
-                    f.write(target["_proof_source"])
-            else:
-                try:
-                    os.remove(win_path + ".scout")   # author proof: clear any stale scout sidecar
-                except FileNotFoundError:
-                    pass
     return 0
 
 
