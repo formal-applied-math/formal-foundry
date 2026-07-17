@@ -18,7 +18,10 @@ MAIN="${MAIN_REPO:-/home/rapha/code/automated_proofs_quantfin}"
 CFG="$FOUNDRY/pipeline.toml"
 STATE="$FOUNDRY/pipeline_state.json"
 QUEUE="$FOUNDRY/targets/queue/manifest.json"
-TAG="pipeline-$(date -u +%Y%m%d)"
+# per-INVOCATION tag: two ticks on the same day must never share artifacts —
+# run 5 gated run 4's telemetry-committed .candidate under the shared day-tag
+# after its own prove phase had failed, replaying a stale (broken) module.
+TAG="pipeline-$(date -u +%Y%m%d-%H%M%S)"
 mkdir -p "$FOUNDRY/runs"
 cd "$FOUNDRY/probe"
 
