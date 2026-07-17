@@ -81,3 +81,11 @@ retrieval_backend = "embedding"  # "embedding" (pin-accurate types.jsonl cosine,
 retrieval_k = 8            # top-k premises surfaced per query (formalize grounding + prove context)
 embed_model = "mistral-embed"    # Mistral /v1/embeddings model id (build cache: scripts/build-embeddings.sh)
 autop = true               # cheap tactic-menu prove probe — a SCOUT (draft PR, never a silent merge)
+# semantic repair cascade (docs/superpowers/specs/2026-07-17-semantic-repair-cascade-design.md):
+# a semantic-gate rejection (shallow / trivial / vacuous / false / unfaithful / drift) is fed
+# back — rejected stub + gate verdict + repair direction — and the issue is RE-DRAFTED, both
+# stages seeing the feedback, up to semantic_rounds total attempts. 1 = old terminal-skip.
+semantic_rounds = 2
+triviality_gate = true     # splice `first | rfl | simp` over the sorry at draft time: a clean
+                           # close means a definitional restatement with no content (the
+                           # cal-bk-67 class, caught before prove-compute instead of at open-pr)

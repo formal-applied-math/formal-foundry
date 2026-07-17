@@ -64,6 +64,20 @@ def test_autoformalize_config_retrieval_backend_reads_toml(tmp_path):
     assert cfg.autop is False
 
 
+def test_autoformalize_config_semantic_cascade_defaults():
+    cfg = pl.AutoformalizeConfig.load(None)
+    assert cfg.semantic_rounds == 2        # one fresh draft + one feedback re-draft
+    assert cfg.triviality_gate is True
+
+
+def test_autoformalize_config_semantic_cascade_reads_toml(tmp_path):
+    toml = tmp_path / "pipeline.toml"
+    toml.write_text("[autoformalize]\nsemantic_rounds = 3\ntriviality_gate = false\n")
+    cfg = pl.AutoformalizeConfig.load(str(toml))
+    assert cfg.semantic_rounds == 3
+    assert cfg.triviality_gate is False
+
+
 # --- split_statement ---------------------------------------------------------
 
 def test_split_statement_simple():

@@ -99,6 +99,13 @@ class AutoformalizeConfig:
     embed_model: str = "mistral-embed"      # Mistral /v1/embeddings model id
     # cheap prove probe: try a fixed tactic menu as whole-proof scripts (scout).
     autop: bool = True
+    # semantic repair cascade (design: 2026-07-17-semantic-repair-cascade): a semantic
+    # gate rejection (shallow/trivial/vacuous/false/unfaithful/drift) re-drafts BOTH
+    # stages with the gate verdict as feedback, up to semantic_rounds total attempts
+    # per issue (1 = the old terminal-skip behavior). triviality_gate splices
+    # `first | rfl | simp` over the sorry at draft time (the cal-bk-67 rfl class).
+    semantic_rounds: int = 2
+    triviality_gate: bool = True
 
     @staticmethod
     def load(path: str | None) -> "AutoformalizeConfig":

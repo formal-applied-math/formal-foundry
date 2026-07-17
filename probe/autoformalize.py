@@ -6,9 +6,11 @@ has something to prove. Two engines: a Mistral general reasoner (magistral) draf
 the statement + judges faithfulness + roundtrips; the Leanstral leaf-prover runs
 the kernel gates (hypothesis-rejection, disproof) and the proof itself.
 
-Design of record: docs/superpowers/specs/2026-07-12-issue-to-stub-autoformalizer-design.md.
-Pure logic here is unit-tested with injected chat_fn/check_fn (no Lean/API/network).
-Stdlib only.
+Design of record: docs/superpowers/specs/2026-07-12-issue-to-stub-autoformalizer-design.md,
+extended by 2026-07-17-semantic-repair-cascade-design.md (semantic gate rejections feed a
+bounded re-draft loop instead of terminally skipping the issue; triviality gate; obstruction
+telemetry). Pure logic here is unit-tested with injected chat_fn/check_fn (no Lean/API/
+network). Stdlib only.
 """
 
 from __future__ import annotations
@@ -20,13 +22,14 @@ import os
 import re
 import subprocess
 import sys
+import time
 
 import embed as _embed
 from house_context import build_system_prompt, extract_signatures, read_pins
 from issues import select_issues
 from pipeline_lib import AutoformalizeConfig
 from probe import daemon_check, mistral_chat, run_target
-from probe_lib import extract_lean_code
+from probe_lib import append_jsonl, extract_lean_code
 
 # theorem/lemma decl, line-anchored so prose "theorem ..." in a docstring never
 # matches. Captures the declaration name.
@@ -1070,6 +1073,11 @@ def main() -> int:
     p.add_argument("--formalize-rounds", type=int, default=None)
     p.add_argument("--depth-gate", dest="depth_gate", action=argparse.BooleanOptionalAction,
                    default=None, help="pointers-scoped depth gate (default: config)")
+    p.add_argument("--triviality-gate", dest="triviality_gate",
+                   action=argparse.BooleanOptionalAction, default=None,
+                   help="rfl/simp triviality gate (default: config)")
+    p.add_argument("--semantic-rounds", type=int, default=None,
+                   help="total draft attempts per issue incl. feedback re-drafts (default: config)")
     p.add_argument("--retrieval", dest="retrieval", action=argparse.BooleanOptionalAction,
                    default=None, help="loogle-augmented repair retrieval (default: config)")
     args = ap.parse_args()
@@ -1089,6 +1097,8 @@ def main() -> int:
     prover_model = pick(args.prover_model, cfg.prover_model)
     draft_max_tokens = pick(args.draft_max_tokens, cfg.draft_max_tokens)
     depth_gate = pick(args.depth_gate, cfg.depth_gate)
+    triviality_gate = pick(args.triviality_gate, cfg.triviality_gate)
+    semantic_rounds = pick(args.semantic_rounds, cfg.semantic_rounds)
     intent_model = pick(args.intent_model, cfg.intent_model)
     formalize_model = pick(args.formalize_model, cfg.formalize_model)
     formalize_rounds = pick(args.formalize_rounds, cfg.formalize_rounds)
@@ -1140,8 +1150,19 @@ def main() -> int:
                  max_issues=max_issues, max_attempt_issues=max_attempt, gate_budget=gate_budget,
                  formalize_rounds=formalize_rounds, formalize_token_budget=formalize_token_budget,
                  formalize_fn=formalize_fn, retrieve_fn=retrieve_fn, proactive_fn=proactive_fn,
-                 depth_gate=depth_gate, system_prompt=prove_system,
+                 depth_gate=depth_gate, triviality_gate=triviality_gate,
+                 semantic_rounds=semantic_rounds, system_prompt=prove_system,
                  log=lambda m: print(f"[refill] {m}", file=sys.stderr))
+
+    # obstruction telemetry: one row per issue tried, so a zero-seed tick says which
+    # gate ate each issue and whether feedback moved the draft between rounds
+    # (triage.py's analogue for the drafter).
+    hist = os.path.join(_foundry_root(), "runs", "refill-history.jsonl")
+    os.makedirs(os.path.dirname(hist), exist_ok=True)
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%S")
+    for rec in res.get("attempted", []):
+        append_jsonl(hist, {"ts": stamp, **rec})
+
     print(json.dumps(res))
     return 0
 
