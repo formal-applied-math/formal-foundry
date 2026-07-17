@@ -15,7 +15,6 @@ def test_autoformalize_config_defaults():
     cfg = pl.AutoformalizeConfig.load(None)
     assert cfg.enabled is True
     assert cfg.budget > 0
-    assert cfg.draft_model == "magistral-medium-latest"
     assert cfg.prover_model == "labs-leanstral-1-5"
 
 
@@ -53,15 +52,28 @@ def test_autoformalize_config_retrieval_backend_defaults():
     assert cfg.retrieval_backend == "embedding"
     assert cfg.retrieval_k == 8
     assert cfg.embed_model == "mistral-embed"
-    assert cfg.autop is True
 
 
 def test_autoformalize_config_retrieval_backend_reads_toml(tmp_path):
     toml = tmp_path / "pipeline.toml"
-    toml.write_text('[autoformalize]\nretrieval_backend = "loogle"\nautop = false\n')
+    toml.write_text('[autoformalize]\nretrieval_backend = "loogle"\nretrieval_k = 4\n')
     cfg = pl.AutoformalizeConfig.load(str(toml))
     assert cfg.retrieval_backend == "loogle"
-    assert cfg.autop is False
+    assert cfg.retrieval_k == 4
+
+
+def test_autoformalize_config_semantic_cascade_defaults():
+    cfg = pl.AutoformalizeConfig.load(None)
+    assert cfg.semantic_rounds == 2        # one fresh draft + one feedback re-draft
+    assert cfg.triviality_gate is True
+
+
+def test_autoformalize_config_semantic_cascade_reads_toml(tmp_path):
+    toml = tmp_path / "pipeline.toml"
+    toml.write_text("[autoformalize]\nsemantic_rounds = 3\ntriviality_gate = false\n")
+    cfg = pl.AutoformalizeConfig.load(str(toml))
+    assert cfg.semantic_rounds == 3
+    assert cfg.triviality_gate is False
 
 
 # --- split_statement ---------------------------------------------------------
@@ -208,12 +220,16 @@ def test_normalize_deferred_cleans_and_coerces():
     assert af.normalize_deferred(["x", 3]) == ["x", "3"]         # non-str coerced
 
 
-def test_draft_system_documents_subset_and_deferred_contract():
-    joined = " ".join(m["content"] for m in af.draft_messages(
-        {"number": 88, "title": "t", "body": "b", "pointers": []}, "", ""))
-    assert "deferred" in joined      # the json field the drafter must emit on a subset
-    assert "SUBSET" in joined         # subsetting is explicitly allowed
-    assert ":= by sorry" in joined    # unchanged stub-format contract still present
+def test_two_stage_prompts_document_subset_and_stub_contract():
+    # the honest-subsetting contract lives in the INTENT prompt (deferred facts are
+    # declared there); the stub-format contract lives in the FORMALIZE prompt.
+    intent_joined = " ".join(m["content"] for m in af.intent_messages(
+        {"number": 88, "title": "t", "body": "b", "pointers": []}, ""))
+    assert "deferred" in intent_joined     # the json field declared on a subset
+    assert "SUBSET" in intent_joined       # subsetting is explicitly allowed
+    formalize_joined = " ".join(m["content"] for m in af.formalize_messages(
+        {"statement": "s", "objects": []}, ""))
+    assert ":= by sorry" in formalize_joined   # the stub-format contract
 
 
 def test_judge_system_does_not_fault_provable_hypotheses():
@@ -342,30 +358,6 @@ def test_disproof_goal_negates_conclusion():
 
 # --- magistral reply parsers -------------------------------------------------
 
-_DRAFT_REPLY = (
-    "Here's the formalization.\n\n"
-    "```lean\ntheorem foo (x : ℝ) : x = x := by sorry\n```\n\n"
-    '```json\n{"module_name": "Foo", "benchmark_id": "mf-fi-foo", "docstring": "reflexivity"}\n```\n'
-)
-
-
-def test_parse_draft_extracts_stub_and_meta():
-    stub, meta = af.parse_draft(_DRAFT_REPLY)
-    assert stub == "theorem foo (x : ℝ) : x = x := by sorry"
-    assert meta["module_name"] == "Foo"
-    assert meta["benchmark_id"] == "mf-fi-foo"
-    assert meta["docstring"] == "reflexivity"
-
-
-def test_parse_draft_none_when_no_lean_block():
-    assert af.parse_draft("no code fence here") is None
-
-
-def test_parse_draft_none_when_missing_required_meta():
-    reply = '```lean\ntheorem foo : True := by sorry\n```\n```json\n{"docstring": "x"}\n```'
-    assert af.parse_draft(reply) is None            # module_name/benchmark_id missing
-
-
 def test_parse_verdict_json_block():
     reply = '```json\n{"faithful": false, "verdict": "missing X", "issues": ["X"]}\n```'
     v = af.parse_verdict(reply)
@@ -384,15 +376,9 @@ def _canned_chat(reply, tokens=100):
     return lambda msgs: (reply, tokens)
 
 
-def test_draft_messages_includes_issue_context_and_contract():
-    msgs = af.draft_messages(
-        {"number": 88, "title": "Contango", "body": "F = S e^{rT}", "pointers": ["A.lean"]},
-        "CTXPACK", "PINSXYZ")
-    joined = " ".join(m["content"] for m in msgs)
-    assert any(m["role"] == "system" for m in msgs)
-    assert "Contango" in joined and "F = S e^{rT}" in joined
-    assert "CTXPACK" in joined and "PINSXYZ" in joined
-    assert ":= by sorry" in joined                    # the stub-format contract
+def _script_chat(replies, tokens=10):
+    it = iter(replies)
+    return lambda msgs: (next(it), tokens)
 
 
 def test_judge_faithfulness_parses_verdict():
@@ -401,106 +387,6 @@ def test_judge_faithfulness_parses_verdict():
                               "theorem foo : True := by sorry", chat_fn=chat)
     assert r["faithful"] is True
     assert r["tokens"] == 42
-
-
-def _lean_reply(concl="x = x", name="foo"):
-    return f"```lean\ntheorem {name} (x : ℝ) : {concl} := by sorry\n```"
-
-
-def test_roundtrip_is_cross_model_reformalize_uses_prove_fn():
-    # the point of (b): informalize (magistral reason_fn) → RE-FORMALIZE (LEANSTRAL
-    # prove_fn, independent of the drafter) → compare (magistral reason_fn).
-    order = []
-    reason_replies = iter(["prose describing the theorem", '{"faithful": true, "verdict": "same"}'])
-    def reason(m):
-        order.append("reason"); return (next(reason_replies), 5)
-    def prove(m):
-        order.append("prove"); return (_lean_reply(), 7)
-    r = af.roundtrip_check(_issue(5), "theorem foo (x : ℝ) : x = x := by sorry",
-                           reason_fn=reason, prove_fn=prove)
-    assert order == ["reason", "prove", "reason"]     # magistral → LEANSTRAL → magistral
-    assert r["faithful"] is True
-    assert r["tokens"] == 17                           # 5 + 7 + 5, all charged
-
-
-def test_roundtrip_flags_cross_model_divergence():
-    reason = _script_chat(["prose", '{"faithful": false, "verdict": "differ"}'])
-    r = af.roundtrip_check(_issue(5), "theorem foo (x : ℝ) : x = x := by sorry",
-                           reason_fn=reason, prove_fn=_script_chat([_lean_reply("x = y")]))
-    assert r["faithful"] is False
-
-
-def test_roundtrip_inconclusive_when_leanstral_gives_no_statement():
-    # leanstral re-formalize produced no Lean block → inconclusive → do NOT block
-    # the draft (a soft signal that could not run is not a rejection).
-    reason = _script_chat(["prose"])                   # compare is never reached
-    r = af.roundtrip_check(_issue(5), "theorem foo : True := by sorry",
-                           reason_fn=reason, prove_fn=_script_chat(["I cannot formalize this."]))
-    assert r["faithful"] is True
-    assert r.get("inconclusive") is True
-
-
-# --- draft-repair loop (compiler feedback on the draft) ----------------------
-
-def _script_chat(replies, tokens=10):
-    it = iter(replies)
-    return lambda msgs: (next(it), tokens)
-
-
-def _draft_reply(concl="x = x", name="foo", mod="Foo", bid="mf-fi-foo"):
-    return (f"```lean\ntheorem {name} (x : ℝ) : {concl} := by sorry\n```\n"
-            f'```json\n{{"module_name": "{mod}", "benchmark_id": "{bid}", "docstring": "d"}}\n```')
-
-
-def test_draft_with_repair_succeeds_first_round():
-    r = af.draft_with_repair(_issue(5), "", "", chat_fn=_script_chat([_draft_reply()]),
-                             check_fn=_ELAB_OK, emit_fn=af.emit_target_files, rounds=2)
-    assert r["ok"] is True
-    assert "theorem foo" in r["lean_text"]
-    assert r["tokens"] == 10
-
-
-def test_draft_with_repair_repairs_on_elaboration_failure():
-    replies = [_draft_reply(concl="x ²"), _draft_reply(concl="x = x")]
-    checks = iter([{"success": False, "errors": ["unexpected token '²'"], "sorry_count": 1},
-                   {"success": True, "errors": [], "sorry_count": 1}])
-    r = af.draft_with_repair(_issue(5), "", "", chat_fn=_script_chat(replies),
-                             check_fn=lambda c: next(checks), emit_fn=af.emit_target_files, rounds=2)
-    assert r["ok"] is True
-    assert "x = x" in r["lean_text"]        # the corrected statement is returned
-    assert r["tokens"] == 20                # both attempts charged
-
-
-def test_draft_with_repair_accepts_valid_stub_despite_success_false():
-    # the daemon reports success=False for a well-formed statement that still has
-    # its `sorry` (the sorry is a warning, not an error). A stub with EMPTY errors
-    # and exactly one sorry IS elaborating — accept it (regression: an earlier check
-    # keyed on `success` and rejected every valid draft).
-    r = af.draft_with_repair(_issue(5), "", "", chat_fn=_script_chat([_draft_reply()]),
-                             check_fn=lambda c: {"success": False, "errors": [], "sorry_count": 1},
-                             emit_fn=af.emit_target_files, rounds=2)
-    assert r["ok"] is True
-
-
-def test_draft_with_repair_gives_up_after_rounds():
-    replies = [_draft_reply(concl="bad ²"), _draft_reply(concl="worse ²")]
-    r = af.draft_with_repair(_issue(5), "", "", chat_fn=_script_chat(replies),
-                             check_fn=lambda c: {"success": False, "errors": ["e"], "sorry_count": 1},
-                             emit_fn=af.emit_target_files, rounds=2)
-    assert r["ok"] is False
-
-
-def test_draft_with_repair_feedback_carries_error_and_caret_hint():
-    seen = []
-    def chat(msgs):
-        seen.append(msgs)
-        return (_draft_reply(concl="x ²"), 10)
-    af.draft_with_repair(_issue(5), "", "", chat_fn=chat,
-                         check_fn=lambda c: {"success": False, "errors": ["unexpected token '²'"], "sorry_count": 1},
-                         emit_fn=af.emit_target_files, rounds=2)
-    round2 = " ".join(m["content"] for m in seen[1])
-    assert "unexpected token '²'" in round2      # the compiler error is fed back
-    assert "^" in round2                         # the "use ^ not ²" hint
 
 
 # --- kernel-gate runners (drive run_target with injected chat_fn/check_fn) ----
@@ -621,6 +507,127 @@ def test_depth_rejection_fails_open_on_daemon_error():
     assert r["shallow"] is False
 
 
+# --- triviality gate (the #67 class: rfl/simp-closable statements) ------------
+
+def test_triviality_goal_splices_tactic_over_sorry():
+    lean_text, _e, _p = af.emit_target_files(_ISSUE, _STUB, _META)
+    goal = af.triviality_goal(lean_text)
+    assert goal is not None
+    assert "sorry" not in goal
+    assert ":= by first | rfl | simp" in goal
+    assert "end MathFin" in goal                       # module scaffold intact
+
+
+def test_triviality_goal_handles_bare_sorry():
+    goal = af.triviality_goal("theorem t : True := sorry\n")
+    assert goal == "theorem t : True := by first | rfl | simp\n"
+
+
+def test_triviality_goal_none_without_sorry():
+    assert af.triviality_goal("theorem t : True := trivial") is None
+
+
+def test_triviality_rejection_flags_rfl_closable():
+    lean_text, _e, _p = af.emit_target_files(_ISSUE, _STUB, _META)
+    check = lambda code: {"success": True, "errors": [], "sorry_count": 0}
+    r = af.triviality_rejection(lean_text, check_fn=check)
+    assert r["trivial"] is True
+    assert r["tokens"] == 0                            # daemon elaboration, no prover
+    assert "rfl" in r["verdict"]
+
+
+def test_triviality_rejection_passes_substantive_statement():
+    # rfl and simp both fail on real content → elaboration errors → NOT trivial
+    # (the healthy case; also covers daemon-error fail-open, same dict shape).
+    lean_text, _e, _p = af.emit_target_files(_ISSUE, _STUB, _META)
+    check = lambda code: {"success": False,
+                          "errors": ["The rfl tactic failed", "simp made no progress"],
+                          "sorry_count": 0}
+    r = af.triviality_rejection(lean_text, check_fn=check)
+    assert r["trivial"] is False
+
+
+def test_triviality_rejection_fails_open_without_sorry():
+    called = {"n": 0}
+
+    def check(code):
+        called["n"] += 1
+        return {"success": True, "errors": [], "sorry_count": 0}
+    r = af.triviality_rejection("theorem t : True := trivial", check_fn=check)
+    assert r["trivial"] is False
+    assert called["n"] == 0                            # daemon not consulted
+
+
+# --- gate feedback rendering (the repair cascade's re-draft signal) -----------
+
+def test_render_gate_feedback_depth_carries_stub_and_instruction():
+    fb = af.render_gate_feedback(
+        "depth", "type consumes no def from [MathFin.FixedIncome.ZCB]", _STUB)
+    assert "`depth` gate" in fb
+    assert "consumes no def" in fb                     # the gate's own verdict
+    assert "theorem fra_value" in fb                   # the rejected stub rides along
+    assert "EXPRESSED THROUGH" in fb                   # the repair direction
+    assert "inline" in fb
+
+
+def test_render_gate_feedback_false_never_weaken():
+    fb = af.render_gate_feedback("false", "", None)
+    assert "NEGATION" in fb
+    assert "Do NOT weaken" in fb
+    assert "```lean" not in fb                         # no stub block when none given
+
+
+def test_render_gate_feedback_unknown_gate_generic():
+    fb = af.render_gate_feedback("mystery", "d", None)
+    assert "mystery" in fb and "without weakening" in fb
+
+
+def test_intent_messages_carry_feedback():
+    msgs = af.intent_messages(_ISSUE, "SIGS", feedback="PREV-FB")
+    user = msgs[1]["content"]
+    assert "PREV-FB" in user
+    assert "REVISED intent" in user
+    assert user.index("SIGS") < user.index("PREV-FB")  # feedback lands after context
+
+
+def test_intent_messages_no_feedback_block_by_default():
+    user = af.intent_messages(_ISSUE, "SIGS")[1]["content"]
+    assert "REVISED intent" not in user
+
+
+def test_draft_intent_threads_feedback_to_chat():
+    seen = {}
+
+    def chat(msgs):
+        seen["user"] = msgs[1]["content"]
+        return ('{"statement": "s", "module_name": "M", "benchmark_id": "b"}', 7)
+    r = af.draft_intent(_ISSUE, "", chat_fn=chat, feedback="FIX-THIS")
+    assert r["ok"] is True
+    assert "FIX-THIS" in seen["user"]
+
+
+def test_formalize_messages_carry_revision_note():
+    intent = {"statement": "s", "objects": ["MathFin.zcb"]}
+    user = af.formalize_messages(intent, "SIGS", revision_note="NOTE-X")[1]["content"]
+    assert "NOTE-X" in user and "SIGS" in user
+
+
+def test_formalize_with_repair_threads_revision_note():
+    intent = {"statement": "s", "objects": [], "module_name": "M", "benchmark_id": "b"}
+    seen = {}
+
+    def chat(msgs):
+        seen["user"] = msgs[1]["content"]
+        return ("```lean\ntheorem t (h : p) : q := by sorry\n```", 5)
+    fr = af.formalize_with_repair(intent, "", issue=_ISSUE, chat_fn=chat,
+                                  check_fn=lambda c: {"success": True, "sorry_count": 1,
+                                                      "errors": []},
+                                  emit_fn=af.emit_target_files, rounds=1,
+                                  revision_note="NOTE-Y")
+    assert fr["ok"] is True
+    assert "NOTE-Y" in seen["user"]
+
+
 # --- refill orchestrator (monkeypatched steps; control flow only) ------------
 
 def _issue(n, **kw):
@@ -630,7 +637,7 @@ def _issue(n, **kw):
     return d
 
 
-def _good_intent(i, ctx, *, chat_fn):
+def _good_intent(i, ctx, *, chat_fn, feedback=None):
     """Stand-in for draft_intent — a parseable intent with naming meta."""
     n = i["number"]
     return {"ok": True, "tokens": 5, "intent": {
@@ -639,7 +646,8 @@ def _good_intent(i, ctx, *, chat_fn):
 
 
 def _good_formalize(intent, grounding, *, issue, chat_fn, check_fn, emit_fn, rounds,
-                    retrieve_fn=None, token_budget=None, proactive_premises=None, log=None):
+                    retrieve_fn=None, token_budget=None, proactive_premises=None,
+                    revision_note="", log=None):
     """Stand-in for formalize_with_repair — emits a real lean_text/entry from the intent meta."""
     n = issue["number"]
     stub = f"theorem t{n} (h : p) : q := by sorry"
@@ -682,7 +690,7 @@ def test_refill_stages_a_good_issue(monkeypatch, tmp_path):
 def test_refill_skips_when_intent_unparseable(monkeypatch, tmp_path):
     # stage 1 (magistral) fails to produce a parseable intent → skip before formalizing.
     monkeypatch.setattr(af, "draft_intent",
-                        lambda i, ctx, *, chat_fn: {"ok": False, "intent": None, "tokens": 3})
+                        lambda i, ctx, *, chat_fn, feedback=None: {"ok": False, "intent": None, "tokens": 3})
     _pass_gates(monkeypatch)
     res = af.refill([_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
                     context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
@@ -779,7 +787,7 @@ def test_refill_skips_intent_drift(monkeypatch, tmp_path):
 def test_refill_skips_issue_on_step_exception(monkeypatch, tmp_path):
     # a transient error (e.g. HTTP 429 exhaustion) on one issue must not crash the
     # whole refill — log it and skip to the next issue.
-    def boom(i, ctx, *, chat_fn):
+    def boom(i, ctx, *, chat_fn, feedback=None):
         if i["number"] == 1:
             raise RuntimeError("HTTP 429 from Mistral API")
         return _good_intent(i, ctx, chat_fn=chat_fn)
@@ -796,11 +804,12 @@ def test_refill_wires_intent_formalize_prove_fns(monkeypatch, tmp_path):
     seen = {}
     monkeypatch.setattr(
         af, "draft_intent",
-        lambda i, ctx, *, chat_fn: seen.update(intent=chat_fn) or _good_intent(i, ctx, chat_fn=chat_fn))
+        lambda i, ctx, *, chat_fn, feedback=None:
+        seen.update(intent=chat_fn) or _good_intent(i, ctx, chat_fn=chat_fn))
     monkeypatch.setattr(
         af, "formalize_with_repair",
         lambda intent, g, *, issue, chat_fn, check_fn, emit_fn, rounds, retrieve_fn=None,
-        token_budget=None, proactive_premises=None, log=None:
+        token_budget=None, proactive_premises=None, revision_note="", log=None:
         seen.update(formalize=chat_fn) or _good_formalize(intent, g, issue=issue, chat_fn=chat_fn,
                                                           check_fn=check_fn, emit_fn=emit_fn, rounds=rounds))
     monkeypatch.setattr(af, "depth_rejection", lambda lt, nm, ptr, **k: {"shallow": False, "tokens": 0})
@@ -818,6 +827,153 @@ def test_refill_wires_intent_formalize_prove_fns(monkeypatch, tmp_path):
     assert seen["intent"] is R and seen["judge"] is R    # magistral: intent + judge
     assert seen["formalize"] is F                        # leanstral: formalize
     assert seen["gate"] is P                             # leanstral: kernel gates
+
+
+# --- semantic repair cascade (bounded feedback re-draft loop) -----------------
+
+def test_semantic_verdict_cheapest_first_short_circuits(monkeypatch):
+    # structural gates run before any prover-token gate; the first failure stops
+    # the battery.
+    order = []
+    monkeypatch.setattr(af, "depth_rejection",
+                        lambda *a, **k: order.append("depth") or {"shallow": False, "tokens": 0})
+    monkeypatch.setattr(af, "triviality_rejection",
+                        lambda *a, **k: order.append("triv") or {"trivial": True,
+                                                                 "verdict": "rfl", "tokens": 0})
+    called = {"vac": False}
+    monkeypatch.setattr(af, "hypothesis_rejection",
+                        lambda *a, **k: called.update(vac=True) or {"vacuous": False, "tokens": 1})
+    fail, tokens = af.semantic_verdict(
+        lean_text="lt", stub="s", name="n", intent={}, issue={"pointers": ["MathFin/A.lean"]},
+        deferred=[], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK, gate_budget=1000)
+    assert fail == {"gate": "trivial", "detail": "rfl"}
+    assert order == ["depth", "triv"]
+    assert called["vac"] is False
+    assert tokens == 0
+
+
+def test_refill_repairs_shallow_draft_with_feedback(monkeypatch, tmp_path):
+    # attempt 1 is depth-rejected; the re-draft (attempt 2) must carry the depth
+    # feedback into BOTH stages, then seed. This is the observed #53/#66 failure.
+    seen = {"intent_feedback": [], "revision_notes": []}
+
+    def intent(i, ctx, *, chat_fn, feedback=None):
+        seen["intent_feedback"].append(feedback)
+        return _good_intent(i, ctx, chat_fn=chat_fn)
+
+    def formalize(intent_, g, *, issue, chat_fn, check_fn, emit_fn, rounds,
+                  retrieve_fn=None, token_budget=None, proactive_premises=None,
+                  revision_note="", log=None):
+        seen["revision_notes"].append(revision_note)
+        return _good_formalize(intent_, g, issue=issue, chat_fn=chat_fn,
+                               check_fn=check_fn, emit_fn=emit_fn, rounds=rounds)
+
+    monkeypatch.setattr(af, "draft_intent", intent)
+    monkeypatch.setattr(af, "formalize_with_repair", formalize)
+    _pass_gates(monkeypatch)
+    calls = {"n": 0}
+
+    def dep(lt, nm, ptr, **k):
+        calls["n"] += 1
+        return {"shallow": calls["n"] == 1, "verdict": "no pointer def", "tokens": 0}
+    monkeypatch.setattr(af, "depth_rejection", dep)
+    res = af.refill([_issue(5, pointers=["MathFin/FixedIncome/ZCB.lean"])],
+                    reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
+                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
+    assert [s["issue"] for s in res["seeded"]] == [5]
+    assert seen["intent_feedback"][0] is None                       # round 1: fresh
+    assert "depth" in seen["intent_feedback"][1]                    # round 2: the verdict
+    assert "EXPRESSED THROUGH" in seen["intent_feedback"][1]        # the repair direction
+    assert "theorem t5" in seen["intent_feedback"][1]               # rejected stub included
+    assert seen["revision_notes"][0] == ""                          # round 1: no note
+    assert seen["revision_notes"][1] == seen["intent_feedback"][1]  # both stages see it
+
+
+def test_refill_repairs_trivial_draft_with_feedback(monkeypatch, tmp_path):
+    _two_stage_ok(monkeypatch)
+    _pass_gates(monkeypatch)
+    calls = {"n": 0}
+
+    def triv(lt, *, check_fn):
+        calls["n"] += 1
+        return {"trivial": calls["n"] == 1, "verdict": "closed by rfl", "tokens": 0}
+    monkeypatch.setattr(af, "triviality_rejection", triv)
+    res = af.refill([_issue(6)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
+                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
+    assert [s["issue"] for s in res["seeded"]] == [6]
+    assert calls["n"] == 2
+
+
+def test_refill_exhausts_semantic_rounds_and_records_obstruction(monkeypatch, tmp_path):
+    _two_stage_ok(monkeypatch)
+    _pass_gates(monkeypatch)
+    monkeypatch.setattr(af, "depth_rejection",
+                        lambda lt, nm, ptr, **k: {"shallow": True, "verdict": "v", "tokens": 0})
+    res = af.refill([_issue(5, pointers=["MathFin/A.lean"])], reason_fn=_NOOP, prove_fn=_NOOP,
+                    check_fn=_ELAB_OK, context_fn=lambda i: "", queue_dir=str(tmp_path),
+                    budget=100000, semantic_rounds=2)
+    assert res["seeded"] == []
+    rec = res["attempted"][0]
+    assert rec["issue"] == 5 and rec["outcome"] == "depth" and rec["attempts"] == 2
+    assert [h["gate"] for h in rec["history"]] == ["depth", "depth"]
+
+
+def test_refill_semantic_rounds_one_is_single_shot(monkeypatch, tmp_path):
+    calls = {"n": 0}
+
+    def intent(i, ctx, *, chat_fn, feedback=None):
+        calls["n"] += 1
+        return _good_intent(i, ctx, chat_fn=chat_fn)
+    monkeypatch.setattr(af, "draft_intent", intent)
+    monkeypatch.setattr(af, "formalize_with_repair", _good_formalize)
+    _pass_gates(monkeypatch)
+    monkeypatch.setattr(af, "depth_rejection",
+                        lambda lt, nm, ptr, **k: {"shallow": True, "verdict": "v", "tokens": 0})
+    res = af.refill([_issue(5, pointers=["MathFin/A.lean"])], reason_fn=_NOOP, prove_fn=_NOOP,
+                    check_fn=_ELAB_OK, context_fn=lambda i: "", queue_dir=str(tmp_path),
+                    budget=100000, semantic_rounds=1)
+    assert res["seeded"] == []
+    assert calls["n"] == 1                              # the old single-shot behavior
+
+
+def test_refill_attempted_records_success(monkeypatch, tmp_path):
+    _two_stage_ok(monkeypatch)
+    _pass_gates(monkeypatch)
+    res = af.refill([_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
+                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
+    rec = res["attempted"][0]
+    assert rec["issue"] == 5 and rec["outcome"] == "seeded" and rec["attempts"] == 1
+    assert rec["history"] == []
+
+
+def test_refill_budget_stops_semantic_loop(monkeypatch, tmp_path):
+    # intent (5 tok) + formalize (10 tok) exceed budget=8 after attempt 1 → the
+    # loop must stop instead of re-drafting, and say so in the history.
+    calls = {"n": 0}
+
+    def intent(i, ctx, *, chat_fn, feedback=None):
+        calls["n"] += 1
+        return _good_intent(i, ctx, chat_fn=chat_fn)
+    monkeypatch.setattr(af, "draft_intent", intent)
+    monkeypatch.setattr(af, "formalize_with_repair", _good_formalize)
+    _pass_gates(monkeypatch)
+    monkeypatch.setattr(af, "depth_rejection",
+                        lambda lt, nm, ptr, **k: {"shallow": True, "verdict": "v", "tokens": 0})
+    res = af.refill([_issue(5, pointers=["MathFin/A.lean"])], reason_fn=_NOOP, prove_fn=_NOOP,
+                    check_fn=_ELAB_OK, context_fn=lambda i: "", queue_dir=str(tmp_path),
+                    budget=8, semantic_rounds=3)
+    assert calls["n"] == 1
+    assert res["attempted"][0]["history"][-1]["gate"] == "budget"
+
+
+def test_refill_records_error_outcome(monkeypatch, tmp_path):
+    def boom(i, ctx, *, chat_fn, feedback=None):
+        raise RuntimeError("HTTP 429 from Mistral API")
+    monkeypatch.setattr(af, "draft_intent", boom)
+    res = af.refill([_issue(1)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
+                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
+    assert res["seeded"] == []
+    assert res["attempted"][0]["outcome"] == "error"
 
 
 # --- two-stage draft components: intent (magistral) + formalize (leanstral) ---

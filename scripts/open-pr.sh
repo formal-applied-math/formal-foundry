@@ -80,36 +80,17 @@ else
   CLOSE_KW="closes"; CLOSE_LINE="closes #$ISSUE"; TITLE_SUFFIX="(closes #$ISSUE)"
 fi
 
-# scout proofs (autop-closed) open as DRAFT + labeled — a lead to refactor, never
-# a silent merge (values gate). Author (leanstral) proofs open as normal PRs.
-# All scout-vs-author variables are set HERE in one place, then referenced by the
-# commit + PR-body steps below: PR metadata (PR_FLAGS/SCOUT_NOTE), the closing
-# keyword (a scout must NEVER auto-close its parent issue on an accidental merge,
-# so CLOSE_KW/CLOSE_LINE/TITLE_SUFFIX are overridden to `refs` here regardless of
-# the subset logic above), and the commit/PR-body attribution strings (autop is
-# NOT leanstral, and a scout is NOT axiom-guarded).
+# Author (leanstral) provenance strings for the commit + PR body. (The autop
+# scout path — draft PRs, `.scout` sidecars, `refs`-not-`closes` — was removed
+# with autop itself; every candidate now comes from the vibe ⇄ lean-lsp-mcp
+# author prover and is axiom-guarded by the gate.)
 MODEL="${MODEL:-labs-leanstral-1-5}"   # the prover, for attribution + the PR body
 PR_FLAGS=()
-if [ -f "${CAND}.scout" ]; then
-  SCOUT_TACTIC="$(cat "${CAND}.scout")"
-  PR_FLAGS+=(--draft --label scout-proof)
-  SCOUT_NOTE=$'\n\n> scout proof: closed by `'"$SCOUT_TACTIC"$'`. needs refactor to the conceptually-right proof before merge.'
-  CLOSE_KW="refs"
-  CLOSE_LINE="refs #$ISSUE (scout — needs refactor; not auto-closed on merge)"
-  TITLE_SUFFIX="(refs #$ISSUE)"
-  PROVER_DESC="Closed by the autop probe (${SCOUT_TACTIC}) via the mathfin-foundry pipeline — a SCOUT lead; refactor to the conceptually-right proof before merge."
-  COMMIT_TRAILER=()
-  PROVENANCE_DESC="autop probe (${SCOUT_TACTIC})"
-  BODY_INTRO="this pr's proof was closed by the autop probe (\`${SCOUT_TACTIC}\`) in the mathfin-foundry pipeline — a SCOUT lead, not an author proof, and is NOT axiom-guarded."
-  PROOF_BULLET="- \`$MODULE\` — the proof (a SCOUT lead closed by the autop probe \`${SCOUT_TACTIC}\`; needs refactor to the conceptually-right proof; NOT axiom-guarded)."
-else
-  SCOUT_NOTE=""
-  PROVER_DESC="Proved by Leanstral (${MODEL}) via the mathfin-foundry autoform pipeline; human-reviewed before merge."
-  COMMIT_TRAILER=(-m "Co-Authored-By: Leanstral <${MODEL}@users.noreply.mistral.ai>")
-  PROVENANCE_DESC="leanstral"
-  BODY_INTRO="this pr was produced by the autoform pipeline (leanstral $MODEL), then assembled and validated green in ci."
-  PROOF_BULLET="- \`$MODULE\` — the proof (axioms-clean; the probe's axiom guard passed)."
-fi
+PROVER_DESC="Proved by Leanstral (${MODEL}) via the mathfin-foundry autoform pipeline; human-reviewed before merge."
+COMMIT_TRAILER=(-m "Co-Authored-By: Leanstral <${MODEL}@users.noreply.mistral.ai>")
+PROVENANCE_DESC="leanstral"
+BODY_INTRO="this pr was produced by the autoform pipeline (leanstral $MODEL), then assembled and validated green in ci."
+PROOF_BULLET="- \`$MODULE\` — the proof (axioms-clean; the probe's axiom guard passed)."
 
 FOUNDRY_SLUG="${FOUNDRY_REPO:-raphaelrrcoelho/mathfin-foundry}"
 
@@ -200,12 +181,11 @@ fi
 # import, and whichever regenerated artifacts exist.
 git add "$MODULE" "$BENCH" MathFin.lean formalization.yaml
 git add MathFin/AxiomAuditGen.lean verification_ledger.json 2>/dev/null || true
-# Attribution rule (honest provenance, set above in the scout-vs-author branch):
-# an author (leanstral) PR credits the prover that did the mathematical work,
-# matching the benchmark entry's metadata.provenance and the formalization.yaml
-# automation count; a scout PR credits the autop probe that closed it, never
-# leanstral. Distinct from the standing rule that Claude / the coding assistant
-# is never attributed anywhere.
+# Attribution rule (honest provenance): the PR credits the prover that did the
+# mathematical work (leanstral), matching the benchmark entry's
+# metadata.provenance and the formalization.yaml automation count. Distinct from
+# the standing rule that Claude / the coding assistant is never attributed
+# anywhere.
 git -c user.name="mathfin-autoform" -c user.email="autoform@users.noreply.github.com" \
     commit -q \
     -m "feat(autoform): $ID — prove $(basename "$MODULE" .lean) ($CLOSE_KW #$ISSUE)" \
@@ -249,7 +229,7 @@ review checklist (8-lens, before merge):
 - [ ] the statement faithfully formalizes (its stated subset of) issue #$ISSUE — no vacuity, no weaker restatement of what it states; a declared subset is fine (see follow-ups).
 - [ ] the proof is idiomatic and consumes existing lemmas, not a wrapper.
 - [ ] ledger row present (run \`ledger verify\` if ci is red on it).
-- [ ] axioms clean; no slop.$FOLLOWUPS$SCOUT_NOTE
+- [ ] axioms clean; no slop.$FOLLOWUPS
 
 <details><summary>statement-fidelity notes</summary>
 
@@ -260,10 +240,6 @@ EOF
 )"
 gh label create autoform --repo "$SLUG" --color 0E8A16 \
   --description "opened by the autoform pipeline; review before merge" 2>/dev/null || true
-if [ -n "$SCOUT_NOTE" ]; then
-  gh label create scout-proof --repo "$SLUG" --color FBCA04 \
-    --description "autop-closed scout; needs refactor to the conceptually-right proof" 2>/dev/null || true
-fi
 gh pr create --repo "$SLUG" --head "$BRANCH" --label autoform "${PR_FLAGS[@]}" \
   --title "autoform: $(basename "$MODULE" .lean) $TITLE_SUFFIX" \
   --body "$BODY" || blocked "gh pr create failed"

@@ -1,12 +1,12 @@
-"""Draft-elaboration eval: measure how often the drafter produces an ELABORATING statement,
-draft-only (no prove), against the warm local daemon. A/B the two-stage drafter (magistral
-intent -> leanstral formalize) vs the legacy single-stage magistral drafter, with/without
-retrieval, so each lever's delta on the elaboration rate is visible in minutes, not 45-min
-CI rolls. Design: docs/superpowers/specs/2026-07-14-leanstral-drafter-two-stage-design.md.
+"""Draft-elaboration eval: measure how often the two-stage drafter (magistral intent ->
+leanstral formalize) produces an ELABORATING statement, draft-only (no prove), against the
+warm local daemon — with/without retrieval, so each lever's delta on the elaboration +
+depth rates is visible in minutes, not 45-min CI rolls. Design:
+docs/superpowers/specs/2026-07-14-leanstral-drafter-two-stage-design.md. (The single-stage
+baseline mode was retired with the legacy drafter once the two-stage A/B decided 3/3 vs 0/3.)
 
 Usage (daemon up):
   python3 eval_draft.py --main-repo /path/to/formal-mathfin --issues 53,61,67
-  python3 eval_draft.py --main-repo /path/to/formal-mathfin --mode baseline --limit 8
   python3 eval_draft.py --main-repo /path/to/formal-mathfin --issues 67 --no-retrieval
 
 `summarize`/`format_table` are pure (unit-tested); the rest drives the models + daemon.
@@ -48,29 +48,22 @@ def format_table(results: list[dict]) -> str:
     return "\n".join(rows)
 
 
-def eval_issue(issue: dict, *, mode: str, intent_fn, formalize_fn, check_fn, main_repo: str,
-               formalize_rounds: int, retrieve_fn, pins: str = "") -> dict:
+def eval_issue(issue: dict, *, intent_fn, formalize_fn, check_fn, main_repo: str,
+               formalize_rounds: int, retrieve_fn) -> dict:
     """Draft ONLY (no prove) one issue; record whether it elaborates and passes the depth gate."""
     ctx = extract_signatures(main_repo, issue.get("pointers", [])) if issue.get("pointers") else ""
     t0 = time.time()
     tokens, ok, lean_text, name = 0, False, None, None
-    if mode == "baseline":
-        dr = af.draft_with_repair(issue, ctx, pins, chat_fn=intent_fn, check_fn=check_fn,
-                                  emit_fn=af.emit_target_files, rounds=formalize_rounds)
-        tokens, ok = dr["tokens"], dr["ok"]
+    di = af.draft_intent(issue, ctx, chat_fn=intent_fn)
+    tokens += di["tokens"]
+    if di["ok"]:
+        fr = af.formalize_with_repair(di["intent"], ctx, issue=issue, chat_fn=formalize_fn,
+                                      check_fn=check_fn, emit_fn=af.emit_target_files,
+                                      rounds=formalize_rounds, retrieve_fn=retrieve_fn)
+        tokens += fr["tokens"]
+        ok = fr["ok"]
         if ok:
-            lean_text, name = dr["lean_text"], af.split_statement(dr["stub"])[0]
-    else:  # two-stage
-        di = af.draft_intent(issue, ctx, chat_fn=intent_fn)
-        tokens += di["tokens"]
-        if di["ok"]:
-            fr = af.formalize_with_repair(di["intent"], ctx, issue=issue, chat_fn=formalize_fn,
-                                          check_fn=check_fn, emit_fn=af.emit_target_files,
-                                          rounds=formalize_rounds, retrieve_fn=retrieve_fn)
-            tokens += fr["tokens"]
-            ok = fr["ok"]
-            if ok:
-                lean_text, name = fr["lean_text"], af.split_statement(fr["stub"])[0]
+            lean_text, name = fr["lean_text"], af.split_statement(fr["stub"])[0]
     depth_pass = None
     if ok:
         depth_pass = not af.depth_rejection(lean_text, name, issue.get("pointers", []),
@@ -84,7 +77,6 @@ def main() -> int:
     ap.add_argument("--main-repo", required=True)
     ap.add_argument("--issues", default=None, help="comma-separated issue numbers (default: first --limit ready)")
     ap.add_argument("--slug", default="raphaelrrcoelho/formal-mathfin")
-    ap.add_argument("--mode", choices=["two-stage", "baseline"], default="two-stage")
     ap.add_argument("--limit", type=int, default=10)
     ap.add_argument("--config", default=None)
     ap.add_argument("--no-retrieval", dest="retrieval", action="store_false")
@@ -121,7 +113,7 @@ def main() -> int:
     results = []
     for issue in issues:
         for s in range(max(1, args.samples)):
-            r = eval_issue(issue, mode=args.mode, intent_fn=intent_fn, formalize_fn=formalize_fn,
+            r = eval_issue(issue, intent_fn=intent_fn, formalize_fn=formalize_fn,
                            check_fn=daemon_check, main_repo=args.main_repo,
                            formalize_rounds=formalize_rounds, retrieve_fn=retrieve_fn)
             r["sample"] = s
@@ -137,7 +129,7 @@ def main() -> int:
     for iss in sorted(tally):
         print(f"[tally] #{iss}: elaborated {tally[iss]['elab']}/{tally[iss]['n']}", file=sys.stderr)
     print(format_table(results))
-    print(json.dumps({"mode": args.mode, "retrieval": args.retrieval, "samples": args.samples,
+    print(json.dumps({"retrieval": args.retrieval, "samples": args.samples,
                       **summarize(results)}))
     return 0
 

@@ -39,17 +39,10 @@ class PipelineConfig:
     escalate_hard_cap: int = 2_000_000
     max_issues_per_tick: int = 1
     reasoning_effort: str = "high"
-    # pass@k harness knobs (research: Kimina knee ~pass@32, Goedel ~2 repair
-    # rounds, Leanstral's lever is tokens-PER-attempt). The per-issue cap is
-    # spent as ~fanout attempts x tokens_per_attempt, then <=repair_rounds
-    # compiler-feedback repairs on the best failure.
-    fanout: int = 8
-    repair_rounds: int = 2
-    tokens_per_attempt: int = 60_000
     # vibe ⇄ lean-lsp-mcp harness (the cron prove path since 2026-07-17): one deep
     # agentic session per target, bounded by turns (depth over breadth) — the lever
-    # that replaces the fanout×tokens text-loop budget. fanout/repair_rounds/
-    # tokens_per_attempt are retained for the legacy calibration probe only.
+    # that replaced the retired text-loop's fanout×tokens budget. (The legacy
+    # calibration probe carries its own defaults; it no longer reads this config.)
     max_turns: int = 40
 
     @staticmethod
@@ -76,8 +69,6 @@ class AutoformalizeConfig:
     max_issues: int = 1
     max_attempt_issues: int = 3
     gate_budget: int = 20_000
-    draft_rounds: int = 2   # compiler-feedback repair rounds on the draft
-    draft_model: str = "magistral-medium-latest"   # legacy single-stage drafter (eval baseline)
     prover_model: str = "labs-leanstral-1-5"
     draft_max_tokens: int = 16_000   # reasoning headroom (magistral emits a think trace)
     # pointers-scoped depth gate: reject a true-but-shallow stub whose TYPE consumes
@@ -97,8 +88,13 @@ class AutoformalizeConfig:
     retrieval_backend: str = "embedding"   # "embedding" | "loogle"
     retrieval_k: int = 8                    # top-k premises surfaced per query
     embed_model: str = "mistral-embed"      # Mistral /v1/embeddings model id
-    # cheap prove probe: try a fixed tactic menu as whole-proof scripts (scout).
-    autop: bool = True
+    # semantic repair cascade (design: 2026-07-17-semantic-repair-cascade): a semantic
+    # gate rejection (shallow/trivial/vacuous/false/unfaithful/drift) re-drafts BOTH
+    # stages with the gate verdict as feedback, up to semantic_rounds total attempts
+    # per issue (1 = the old terminal-skip behavior). triviality_gate splices
+    # `first | rfl | simp` over the sorry at draft time (the cal-bk-67 rfl class).
+    semantic_rounds: int = 2
+    triviality_gate: bool = True
 
     @staticmethod
     def load(path: str | None) -> "AutoformalizeConfig":

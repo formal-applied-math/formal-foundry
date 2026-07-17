@@ -118,7 +118,7 @@ def mistral_chat(messages, *, api_key, model=DEFAULT_MODEL,
 def _parse_daemon_response(raw: bytes) -> dict:
     """Parse the daemon's JSON reply. A degraded daemon (OOM-restarted mid-request
     under load) can return an empty or truncated payload — surface that as an error
-    dict rather than raising, so callers (run_target / draft_with_repair) treat it
+    dict rather than raising, so callers (run_target / formalize_with_repair) treat it
     as a failed check and retry instead of crashing the target."""
     try:
         return json.loads(raw.decode("utf-8"))

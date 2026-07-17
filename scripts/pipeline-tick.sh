@@ -108,7 +108,7 @@ echo "[tick] outcome=$OUTCOME tokens=$TOKENS" >&2
 #    (any local run) we fall back to candidate-notify and never try to PR.
 CAND="$FOUNDRY/runs/$TAG-$ID.lean"
 PR_OPENED=0
-if { [ "$OUTCOME" = "pass" ] || [ "$OUTCOME" = "pass_scout" ]; } && [ -f "$CAND" ]; then
+if [ "$OUTCOME" = "pass" ] && [ -f "$CAND" ]; then
   if [ -n "${MAIN_PR_TOKEN:-}" ]; then
     echo "[tick] $OUTCOME → opening PR on formal-mathfin…" >&2
     if GH_TOKEN="$MAIN_PR_TOKEN" "$FOUNDRY/scripts/open-pr.sh" --id "$ID" --tag "$TAG"; then
@@ -129,7 +129,7 @@ fi
 #    record, so the pipeline moves on instead of re-spending on a hard target.
 if [ "$OUTCOME" = "error" ]; then
   echo "[tick] outcome=error → NOT recording (retryable next tick)" >&2
-elif { [ "$OUTCOME" = "pass" ] || [ "$OUTCOME" = "pass_scout" ]; } && [ "$PR_OPENED" = 0 ] && [ -n "${MAIN_PR_TOKEN:-}" ]; then
+elif [ "$OUTCOME" = "pass" ] && [ "$PR_OPENED" = 0 ] && [ -n "${MAIN_PR_TOKEN:-}" ]; then
   echo "[tick] pass but PR not opened → NOT recording (retryable next tick)" >&2
 else
   python3 pipeline.py record --config "$CFG" --state "$STATE" --id "$ID" \

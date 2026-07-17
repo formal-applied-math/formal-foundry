@@ -60,7 +60,7 @@ def test_daemon_check_connection_refused_returns_error_dict(monkeypatch):
 
 def test_parse_daemon_response_empty_is_error_not_raise():
     # a degraded daemon can return an empty/truncated payload — surface it as an
-    # error dict (so run_target / draft_with_repair retries), never raise.
+    # error dict (so run_target / formalize_with_repair retries), never raise.
     r = _parse_daemon_response(b"")
     assert r["success"] is False
     assert r["errors"]
