@@ -767,13 +767,14 @@ _DEMOTED_FAMILIES = {"undraftable", "fidelity", "statement_wrong", "trivial_rest
 
 
 def order_by_route(issues: list[dict]) -> list[dict]:
-    """Attempt order: theorem route before defs route; within each group, fresh
-    issues before current-arch lemons, easier difficulty first, then MORE pointer
-    consumables (a def-richer context gives the drafter more to consume), then
-    issue number. Stable for ties."""
+    """Attempt order: fresh issues before current-arch lemons, easier difficulty
+    first, then MORE pointer consumables (a def-richer context gives the drafter
+    more to consume), then issue number. The ROUTE deliberately does NOT rank:
+    it selects the PATH, not the priority — a needs_primitives issue carries
+    positive evidence + hints (run 2 would otherwise have parked the evidenced
+    defs backlog behind ~45 untested theorem issues for ~15 ticks). Stable ties."""
     def key(i: dict):
-        return (0 if i.get("route", "theorem") == "theorem" else 1,
-                1 if i.get("family") in _DEMOTED_FAMILIES else 0,
+        return (1 if i.get("family") in _DEMOTED_FAMILIES else 0,
                 difficulty_rank(i.get("difficulty")),
                 -int(i.get("def_count", 0) or 0),
                 i.get("number", 0))

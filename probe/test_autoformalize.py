@@ -687,7 +687,7 @@ def test_order_by_route_prefers_def_rich_and_demotes_lemons():
         {"number": 108, "route": "theorem", "difficulty": "small", "def_count": 4},
         {"number": 7, "route": "defs", "difficulty": "small", "def_count": 0},
     ]
-    assert [i["number"] for i in af.order_by_route(xs)] == [108, 53, 61, 7]
+    assert [i["number"] for i in af.order_by_route(xs)] == [108, 53, 7, 61]
 
 
 def test_route_for_history_beats_measurement():
@@ -700,10 +700,12 @@ def test_route_for_history_beats_measurement():
     assert af.route_for({}, def_count=1, family="seeded") == "theorem"
 
 
-def test_order_by_route_theorem_first_stable():
+def test_order_by_route_route_does_not_rank():
+    # the route selects the PATH, not the priority — defs-routed issues carry
+    # positive evidence and must not queue behind the whole theorem backlog.
     xs = [{"number": 1, "route": "defs"}, {"number": 2, "route": "theorem"},
           {"number": 3, "route": "defs"}, {"number": 4, "route": "theorem"}]
-    assert [i["number"] for i in af.order_by_route(xs)] == [2, 4, 1, 3]
+    assert [i["number"] for i in af.order_by_route(xs)] == [1, 2, 3, 4]
 
 
 def test_load_refill_families_latest_wins_and_tolerates_junk(tmp_path):
