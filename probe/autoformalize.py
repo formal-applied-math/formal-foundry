@@ -297,7 +297,11 @@ def formalize_messages(intent: dict, grounding: str, revision_note: str = "") ->
     return [{"role": "system", "content": FORMALIZE_SYSTEM}, {"role": "user", "content": user}]
 
 
-_UNKNOWN_RE = re.compile(r"unknown (?:identifier|constant) '([^']+)'")
+# the elaborator emits BOTH spellings across versions: `Unknown identifier
+# \`X\`` (capital U, backticks — the live 2026-07-17 format) and `unknown
+# constant 'X'`. The original straight-quote-only pattern silently never fired
+# in production (pinned by test_unknown_identifiers_match_live_elaborator_format).
+_UNKNOWN_RE = re.compile(r"[Uu]nknown (?:identifier|constant) [`']([^`']+)[`']")
 
 
 def _unknown_identifiers(errors) -> list[str]:
@@ -364,6 +368,8 @@ def formalize_with_repair(intent: dict, grounding: str, *, issue: dict, chat_fn,
             "docstring": intent.get("docstring", ""), "deferred": intent.get("deferred", [])}
     messages = formalize_messages(intent, grounding, revision_note)
     tokens = 0
+    unknowns: list[str] = []   # every `Unknown identifier X` guessed across rounds —
+    #                            the defs the model thinks SHOULD exist (routing evidence)
     for i in range(max(1, rounds)):
         if tokens >= token_budget:
             log(f"round {i + 1}: aborted — token budget reached ({tokens} >= {token_budget})")
@@ -392,8 +398,8 @@ def formalize_with_repair(intent: dict, grounding: str, *, issue: dict, chat_fn,
         elab = check_fn(lean_text)
         if not elab.get("errors") and elab.get("sorry_count", 0) == 1:
             log(f"round {i + 1}: elaborates ✓ ({tokens} tok total)")
-            return {"ok": True, "stub": stub, "meta": meta,
-                    "lean_text": lean_text, "entry": entry, "tokens": tokens}
+            return {"ok": True, "stub": stub, "meta": meta, "lean_text": lean_text,
+                    "entry": entry, "tokens": tokens, "unknowns": unknowns}
         errs = elab.get("errors", [])
         log(f"round {i + 1}: {len(errs)} elab error(s); first: {str(errs[0])[:180] if errs else '?'}")
         feedback = ("That statement does not elaborate in Lean:\n```\n"
@@ -402,15 +408,17 @@ def formalize_with_repair(intent: dict, grounding: str, *, issue: dict, chat_fn,
                     "ending in `:= by sorry`. Use `^` for powers (never Unicode `²`); "
                     "`Real.exp`/`Real.log`/`Real.sqrt`.")
         feedback += _repair_hint(errs)
-        if retrieve_fn:
-            for nm in _unknown_identifiers(errs):
+        for nm in _unknown_identifiers(errs):
+            if nm not in unknowns:
+                unknowns.append(nm)
+            if retrieve_fn:
                 cand = retrieve_fn(nm)
                 if cand:
                     feedback += f"\n\nCandidates for `{nm}` (verify they elaborate under our pin):\n{cand}"
         messages += [_assistant(content),
                      {"role": "user", "content": feedback}]
     return {"ok": False, "stub": None, "meta": None,
-            "lean_text": None, "entry": None, "tokens": tokens}
+            "lean_text": None, "entry": None, "tokens": tokens, "unknowns": unknowns}
 
 
 def fidelity_messages(intent: dict, stub: str) -> list[dict]:
@@ -579,6 +587,96 @@ def triviality_rejection(lean_text: str, *, check_fn) -> dict:
     verdict = ("closed by `first | rfl | simp` — definitionally/simp-trivial, no content"
                if trivial else "")
     return {"trivial": trivial, "tokens": 0, "verdict": verdict}
+
+
+# --- primitives-aware routing (F3+F2 of the composed design) ------------------
+#
+# One measured property routes every issue: does the library already have the
+# primitives its statement needs? Static measurement (pointer modules export
+# consumables) + runtime evidence (a prior depth-exhausted attempt) pick between
+# the theorem-stub path and the definitions path. Design:
+# docs/superpowers/specs/2026-07-17-primitives-aware-routing-design.md.
+
+_DEF_RE = re.compile(
+    r"^\s*(?:@\[[^\]]*\]\s*)?(?:noncomputable\s+)?(?:def|abbrev|structure)\s+([A-Za-z0-9_'.]+)",
+    re.MULTILINE,
+)
+
+
+def count_pointer_defs(main_repo: str, pointers: list[str]) -> int:
+    """Consumable exports (`def`/`abbrev`/`structure`) in the issue's pointer
+    modules — the routing measurement. 0 ⇒ a theorem-only stub's TYPE has nothing
+    to consume ⇒ the definitions path. Missing files count 0 (fail toward defs)."""
+    n = 0
+    for p in pointers:
+        if not p.endswith(".lean"):
+            continue
+        try:
+            with open(os.path.join(main_repo, p), encoding="utf-8") as f:
+                n += len(_DEF_RE.findall(f.read()))
+        except OSError:
+            continue
+    return n
+
+
+def classify_refill(rec: dict) -> str:
+    """Obstruction family for a refill `attempted` record — the drafter's triage
+    analogue. Computed at write time (rides the record in refill-history.jsonl)
+    and at read time for records written before the field existed."""
+    out = rec.get("outcome", "")
+    if out == "seeded":
+        return "seeded"
+    if out == "depth":
+        return "needs_primitives"
+    if out in ("newdef_depth", "ungrounded"):
+        return "defs_rejected"
+    if out == "trivial":
+        return "trivial_restatement"
+    if out in ("unfaithful", "drift"):
+        return "fidelity"
+    if out in ("intent", "formalize"):
+        return "undraftable"
+    if out in ("vacuous", "false"):
+        return "statement_wrong"
+    if out == "budget":
+        return "budget"
+    return "infra"
+
+
+def load_refill_families(history_path: str) -> dict[int, str]:
+    """Issue number → family of its LATEST refill-history record. The router's
+    runtime evidence; tolerant of junk lines and of the file being absent."""
+    fams: dict[int, str] = {}
+    try:
+        with open(history_path, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(rec, dict) and rec.get("issue") is not None:
+                    fams[int(rec["issue"])] = rec.get("family") or classify_refill(rec)
+    except OSError:
+        pass
+    return fams
+
+
+def route_for(issue: dict, *, def_count: int, family: str | None) -> str:
+    """`theorem` (statement can consume existing pointer defs) or `defs` (the
+    library lacks the primitives — draft definitions + the theorem). Runtime
+    evidence beats static measurement: #53 measures consumable via chooserPrice,
+    but its faithful statement can't use it, so its depth-exhaustion routes it."""
+    if family == "needs_primitives":
+        return "defs"
+    if def_count == 0:
+        return "defs"
+    return "theorem"
+
+
+def order_by_route(issues: list[dict]) -> list[dict]:
+    """Theorem-route issues first (cheap wins), stable within each group."""
+    return ([i for i in issues if i.get("route", "theorem") == "theorem"]
+            + [i for i in issues if i.get("route", "theorem") == "defs"])
 
 
 # --- issue preparation --------------------------------------------------------
@@ -787,10 +885,14 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn,
                                            revision_note=feedback or "",
                                            log=lambda m: log(f"#{n} formalize {m}"))
                 spent += fr["tokens"]
+                unknowns = fr.get("unknowns") or []
                 if not fr["ok"]:
                     fail = {"gate": "formalize",
                             "detail": f"no elaborating Lean after {formalize_rounds} rounds"}
-                    history.append({"attempt": attempt, **fail})
+                    row = {"attempt": attempt, **fail}
+                    if unknowns:
+                        row["unknown_identifiers"] = unknowns
+                    history.append(row)
                     log(f"#{n}: {fail['detail']} (attempt {attempt})")
                     feedback = render_gate_feedback(fail["gate"], fail["detail"], None)
                     continue
@@ -810,19 +912,25 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn,
                     staged = True
                     log(f"#{n}: staged cal-bk-{n} (attempt {attempt})")
                     break
-                history.append({"attempt": attempt, **fail})
+                row = {"attempt": attempt, **fail}
+                if unknowns:
+                    row["unknown_identifiers"] = unknowns
+                history.append(row)
                 log(f"#{n}: {fail['gate']} — {fail['detail']} (attempt {attempt})\n"
                     f"  statement: {stub}")
                 feedback = render_gate_feedback(fail["gate"], fail["detail"], stub)
             outcome = "seeded" if staged else (history[-1]["gate"] if history else "error")
-            attempted.append({"issue": n, "attempts": attempt, "outcome": outcome,
-                              "history": history})
+            rec = {"issue": n, "attempts": attempt, "outcome": outcome, "history": history}
+            rec["family"] = classify_refill(rec)
+            attempted.append(rec)
         except Exception as e:  # noqa: BLE001 — resilience: skip the issue, not the tick
             log(f"#{n}: error ({type(e).__name__}: {e}) — skipping")
             history.append({"attempt": len(history) + 1, "gate": "error",
                             "detail": f"{type(e).__name__}: {e}"})
-            attempted.append({"issue": n, "attempts": len(history), "outcome": "error",
-                              "history": history})
+            rec = {"issue": n, "attempts": len(history), "outcome": "error",
+                   "history": history}
+            rec["family"] = classify_refill(rec)
+            attempted.append(rec)
             continue
     return {"seeded": seeded, "tokens": spent, "attempted": attempted}
 
@@ -932,6 +1040,16 @@ def main() -> int:
     if not issues:
         print(json.dumps({"seeded": [], "tokens": 0, "reason": "no unseeded ready issues"}))
         return 0
+
+    # primitives-aware routing: measure each issue's consumables, consult the
+    # refill history's runtime evidence, route theorem/defs, cheap wins first.
+    families = load_refill_families(os.path.join(_foundry_root(), "runs", "refill-history.jsonl"))
+    for i in issues:
+        i["route"] = route_for(i, def_count=count_pointer_defs(args.main_repo, i.get("pointers", [])),
+                               family=families.get(i["number"]))
+    issues = order_by_route(issues)
+    print(f"[refill] routes: " + ", ".join(f"#{i['number']}→{i['route']}" for i in issues[:8]),
+          file=sys.stderr)
 
     prove_system = build_system_prompt(args.main_repo)   # the leaf-prover gate doctrine
 

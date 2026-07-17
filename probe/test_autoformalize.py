@@ -628,6 +628,109 @@ def test_formalize_with_repair_threads_revision_note():
     assert "NOTE-Y" in seen["user"]
 
 
+# --- primitives-aware routing (F3+F2): measure, classify, route ---------------
+
+def test_count_pointer_defs_counts_consumable_exports(tmp_path):
+    mod = tmp_path / "MathFin" / "X" / "A.lean"
+    mod.parent.mkdir(parents=True)
+    mod.write_text("noncomputable def a : ℝ := 0\n"
+                   "abbrev b := ℝ\n"
+                   "structure C where\n  x : ℝ\n"
+                   "@[simp] def d : ℕ := 1\n"
+                   "theorem t : True := trivial\n"    # theorems are not consumables
+                   "-- def commented : not counted\n")
+    assert af.count_pointer_defs(str(tmp_path), ["MathFin/X/A.lean"]) == 4
+
+
+def test_count_pointer_defs_missing_file_counts_zero(tmp_path):
+    assert af.count_pointer_defs(str(tmp_path), ["MathFin/Nope.lean", "notlean"]) == 0
+
+
+def test_classify_refill_families():
+    assert af.classify_refill({"outcome": "seeded"}) == "seeded"
+    assert af.classify_refill({"outcome": "depth"}) == "needs_primitives"
+    assert af.classify_refill({"outcome": "newdef_depth"}) == "defs_rejected"
+    assert af.classify_refill({"outcome": "ungrounded"}) == "defs_rejected"
+    assert af.classify_refill({"outcome": "trivial"}) == "trivial_restatement"
+    assert af.classify_refill({"outcome": "unfaithful"}) == "fidelity"
+    assert af.classify_refill({"outcome": "drift"}) == "fidelity"
+    assert af.classify_refill({"outcome": "intent"}) == "undraftable"
+    assert af.classify_refill({"outcome": "formalize"}) == "undraftable"
+    assert af.classify_refill({"outcome": "vacuous"}) == "statement_wrong"
+    assert af.classify_refill({"outcome": "false"}) == "statement_wrong"
+    assert af.classify_refill({"outcome": "budget"}) == "budget"
+    assert af.classify_refill({"outcome": "error"}) == "infra"
+
+
+def test_route_for_history_beats_measurement():
+    # runtime evidence (needs_primitives) routes to defs even when the pointer
+    # modules export defs — the #53 case (chooserPrice exists; the faithful
+    # statement can't use it).
+    assert af.route_for({}, def_count=3, family="needs_primitives") == "defs"
+    assert af.route_for({}, def_count=0, family=None) == "defs"
+    assert af.route_for({}, def_count=1, family=None) == "theorem"
+    assert af.route_for({}, def_count=1, family="seeded") == "theorem"
+
+
+def test_order_by_route_theorem_first_stable():
+    xs = [{"number": 1, "route": "defs"}, {"number": 2, "route": "theorem"},
+          {"number": 3, "route": "defs"}, {"number": 4, "route": "theorem"}]
+    assert [i["number"] for i in af.order_by_route(xs)] == [2, 4, 1, 3]
+
+
+def test_load_refill_families_latest_wins_and_tolerates_junk(tmp_path):
+    p = tmp_path / "h.jsonl"
+    p.write_text('{"issue": 53, "outcome": "depth"}\n'          # no family → classified
+                 '{"issue": 9, "outcome": "trivial"}\n'
+                 'not-json\n'
+                 '{"issue": 53, "outcome": "seeded", "family": "seeded"}\n')
+    fams = af.load_refill_families(str(p))
+    assert fams[53] == "seeded"                      # latest record wins
+    assert fams[9] == "trivial_restatement"
+    assert af.load_refill_families(str(tmp_path / "absent.jsonl")) == {}
+
+
+def test_unknown_identifiers_match_live_elaborator_format():
+    # the VERBATIM error from the 2026-07-17 live run — capital U + backticks.
+    # the old regex (lowercase + straight quotes) never matched it, so the
+    # retrieval hook silently never fired in production.
+    live = "line 28:36: Unknown identifier `MathFin.vanillaPayoff`"
+    legacy = "unknown constant 'Foo.bar'"
+    assert af._unknown_identifiers([live, legacy]) == ["MathFin.vanillaPayoff", "Foo.bar"]
+
+
+def test_formalize_with_repair_returns_collected_unknowns():
+    checks = iter([{"errors": ["Unknown identifier `MathFin.vanillaPayoff`"], "sorry_count": 1},
+                   {"errors": [], "sorry_count": 1}])
+    r = af.formalize_with_repair(_INTENT, "", issue=_issue(5),
+                                 chat_fn=_script_chat([_formalize_reply(), _formalize_reply()]),
+                                 check_fn=lambda c: next(checks),
+                                 emit_fn=af.emit_target_files, rounds=2)
+    assert r["ok"] is True
+    assert r["unknowns"] == ["MathFin.vanillaPayoff"]
+
+
+def test_refill_history_rows_carry_unknowns_and_family(monkeypatch, tmp_path):
+    def formalize(intent, g, **kw):
+        stub = "theorem t5 (h : p) : q := by sorry"
+        lean_text, entry, _ = kw["emit_fn"]({"number": 5, "area": "fixed-income",
+                                             "pointers": []}, stub,
+                                            {"module_name": "T5", "benchmark_id": "b"})
+        return {"ok": True, "stub": stub, "meta": {}, "lean_text": lean_text,
+                "entry": entry, "tokens": 10, "unknowns": ["MathFin.wanted"]}
+    monkeypatch.setattr(af, "draft_intent", _good_intent)
+    monkeypatch.setattr(af, "formalize_with_repair", formalize)
+    _pass_gates(monkeypatch)
+    monkeypatch.setattr(af, "depth_rejection",
+                        lambda lt, nm, ptr, **k: {"shallow": True, "verdict": "v", "tokens": 0})
+    res = af.refill([_issue(5, pointers=["MathFin/A.lean"])], reason_fn=_NOOP, prove_fn=_NOOP,
+                    check_fn=_ELAB_OK, context_fn=lambda i: "", queue_dir=str(tmp_path),
+                    budget=100000, semantic_rounds=1)
+    rec = res["attempted"][0]
+    assert rec["family"] == "needs_primitives"
+    assert rec["history"][0]["unknown_identifiers"] == ["MathFin.wanted"]
+
+
 # --- refill orchestrator (monkeypatched steps; control flow only) ------------
 
 def _issue(n, **kw):
