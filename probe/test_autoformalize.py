@@ -679,23 +679,47 @@ def test_order_by_route_theorem_first_stable():
 
 
 def test_load_refill_families_latest_wins_and_tolerates_junk(tmp_path):
+    A = af.ROUTING_ARCH
     p = tmp_path / "h.jsonl"
-    p.write_text('{"issue": 53, "outcome": "depth"}\n'          # no family → classified
-                 '{"issue": 9, "outcome": "trivial"}\n'
+    p.write_text(f'{{"issue": 53, "outcome": "depth", "arch": "{A}"}}\n'   # no family → classified
+                 f'{{"issue": 9, "outcome": "trivial", "arch": "{A}"}}\n'
                  'not-json\n'
-                 '{"issue": 53, "outcome": "seeded", "family": "seeded"}\n')
+                 f'{{"issue": 53, "outcome": "seeded", "family": "seeded", "arch": "{A}"}}\n')
     fams = af.load_refill_families(str(p))
     assert fams[53] == "seeded"                      # latest record wins
     assert fams[9] == "trivial_restatement"
     assert af.load_refill_families(str(tmp_path / "absent.jsonl")) == {}
 
 
-def test_load_prior_unknowns_unions_across_records(tmp_path):
+def test_evidence_is_architecture_scoped(tmp_path):
+    # R's rule: never steer the current architecture by a past architecture's
+    # failures. Unstamped and foreign-arch records are inert for routing (they
+    # stay in the file as telemetry); an arch bump runs from zero automatically.
     p = tmp_path / "h.jsonl"
     p.write_text(
-        '{"issue": 53, "history": [{"gate": "depth", "unknown_identifiers": ["MathFin.a"]}]}\n'
-        '{"issue": 53, "history": [{"gate": "depth", "unknown_identifiers": ["MathFin.a", "MathFin.b"]}]}\n'
-        '{"issue": 9, "history": [{"gate": "trivial"}]}\n')
+        '{"issue": 53, "outcome": "depth"}\n'                              # pre-stamp era
+        '{"issue": 53, "outcome": "depth", "arch": "routing-v0-old"}\n'    # old architecture
+        '{"issue": 53, "history": [{"unknown_identifiers": ["MathFin.old"]}], '
+        '"arch": "routing-v0-old"}\n')
+    assert af.load_refill_families(str(p)) == {}
+    assert af.load_prior_unknowns(str(p)) == {}
+
+
+def test_refill_records_carry_arch_stamp(monkeypatch, tmp_path):
+    _two_stage_ok(monkeypatch)
+    _pass_gates(monkeypatch)
+    res = af.refill([_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
+                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
+    assert res["attempted"][0]["arch"] == af.ROUTING_ARCH
+
+
+def test_load_prior_unknowns_unions_across_records(tmp_path):
+    A = af.ROUTING_ARCH
+    p = tmp_path / "h.jsonl"
+    p.write_text(
+        f'{{"issue": 53, "history": [{{"gate": "depth", "unknown_identifiers": ["MathFin.a"]}}], "arch": "{A}"}}\n'
+        f'{{"issue": 53, "history": [{{"gate": "depth", "unknown_identifiers": ["MathFin.a", "MathFin.b"]}}], "arch": "{A}"}}\n'
+        f'{{"issue": 9, "history": [{{"gate": "trivial"}}], "arch": "{A}"}}\n')
     u = af.load_prior_unknowns(str(p))
     assert u[53] == ["MathFin.a", "MathFin.b"]
     assert u.get(9, []) == []

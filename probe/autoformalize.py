@@ -636,6 +636,15 @@ def triviality_rejection(lean_text: str, *, check_fn) -> dict:
 # the theorem-stub path and the definitions path. Design:
 # docs/superpowers/specs/2026-07-17-primitives-aware-routing-design.md.
 
+# Evidence is ARCHITECTURE-SCOPED (R: "don't optimize the current architecture
+# for past architecture failures"): every attempted-record is stamped with
+# ROUTING_ARCH and the routing loaders trust ONLY current-architecture records.
+# Bumping this constant on an architecture change makes the pipeline run from
+# zero evidence automatically, while within-version memory (don't re-buy the
+# same failure every tick) keeps working. Unstamped/foreign records stay in the
+# file as human-readable telemetry; they just don't steer.
+ROUTING_ARCH = "routing-v1-2026-07-17"
+
 _DEF_RE = re.compile(
     r"^\s*(?:@\[[^\]]*\]\s*)?(?:noncomputable\s+)?(?:def|abbrev|structure)\s+([A-Za-z0-9_'.]+)",
     re.MULTILINE,
@@ -683,8 +692,10 @@ def classify_refill(rec: dict) -> str:
 
 
 def load_refill_families(history_path: str) -> dict[int, str]:
-    """Issue number → family of its LATEST refill-history record. The router's
-    runtime evidence; tolerant of junk lines and of the file being absent."""
+    """Issue number → family of its LATEST current-architecture refill-history
+    record. Records stamped with a different (or no) ROUTING_ARCH are ignored —
+    a past architecture's failures never steer this one. Tolerant of junk lines
+    and of the file being absent."""
     fams: dict[int, str] = {}
     try:
         with open(history_path, encoding="utf-8") as f:
@@ -693,7 +704,9 @@ def load_refill_families(history_path: str) -> dict[int, str]:
                     rec = json.loads(line)
                 except ValueError:
                     continue
-                if isinstance(rec, dict) and rec.get("issue") is not None:
+                if not isinstance(rec, dict) or rec.get("arch") != ROUTING_ARCH:
+                    continue
+                if rec.get("issue") is not None:
                     fams[int(rec["issue"])] = rec.get("family") or classify_refill(rec)
     except OSError:
         pass
@@ -702,8 +715,9 @@ def load_refill_families(history_path: str) -> dict[int, str]:
 
 def load_prior_unknowns(history_path: str) -> dict[int, list[str]]:
     """Issue → union (first-seen order) of `unknown_identifiers` across its
-    refill-history rows — the missing declarations earlier drafts guessed at;
-    they become defs-route hints ("define equivalents where sensible")."""
+    current-architecture refill-history rows — the missing declarations earlier
+    drafts guessed at; they become defs-route hints ("define equivalents where
+    sensible"). Foreign-architecture records are ignored, like the families."""
     out: dict[int, list[str]] = {}
     try:
         with open(history_path, encoding="utf-8") as f:
@@ -712,7 +726,8 @@ def load_prior_unknowns(history_path: str) -> dict[int, list[str]]:
                     rec = json.loads(line)
                 except ValueError:
                     continue
-                if not isinstance(rec, dict) or rec.get("issue") is None:
+                if not isinstance(rec, dict) or rec.get("issue") is None \
+                        or rec.get("arch") != ROUTING_ARCH:
                     continue
                 bucket = out.setdefault(int(rec["issue"]), [])
                 for row in rec.get("history", []) or []:
@@ -1082,7 +1097,8 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn,
                     f"  statement: {stub}")
                 feedback = render_gate_feedback(fail["gate"], fail["detail"], stub)
             outcome = "seeded" if staged else (history[-1]["gate"] if history else "error")
-            rec = {"issue": n, "attempts": attempt, "outcome": outcome, "history": history}
+            rec = {"issue": n, "attempts": attempt, "outcome": outcome, "history": history,
+                   "arch": ROUTING_ARCH}
             rec["family"] = classify_refill(rec)
             attempted.append(rec)
         except Exception as e:  # noqa: BLE001 — resilience: skip the issue, not the tick
@@ -1090,7 +1106,7 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn,
             history.append({"attempt": len(history) + 1, "gate": "error",
                             "detail": f"{type(e).__name__}: {e}"})
             rec = {"issue": n, "attempts": len(history), "outcome": "error",
-                   "history": history}
+                   "history": history, "arch": ROUTING_ARCH}
             rec["family"] = classify_refill(rec)
             attempted.append(rec)
             continue
