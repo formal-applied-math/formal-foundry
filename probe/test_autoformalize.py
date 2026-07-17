@@ -751,7 +751,7 @@ def _issue(n, **kw):
     return d
 
 
-def _good_intent(i, ctx, *, chat_fn):
+def _good_intent(i, ctx, *, chat_fn, feedback=None):
     """Stand-in for draft_intent — a parseable intent with naming meta."""
     n = i["number"]
     return {"ok": True, "tokens": 5, "intent": {
@@ -760,7 +760,8 @@ def _good_intent(i, ctx, *, chat_fn):
 
 
 def _good_formalize(intent, grounding, *, issue, chat_fn, check_fn, emit_fn, rounds,
-                    retrieve_fn=None, token_budget=None, proactive_premises=None, log=None):
+                    retrieve_fn=None, token_budget=None, proactive_premises=None,
+                    revision_note="", log=None):
     """Stand-in for formalize_with_repair — emits a real lean_text/entry from the intent meta."""
     n = issue["number"]
     stub = f"theorem t{n} (h : p) : q := by sorry"
@@ -803,7 +804,7 @@ def test_refill_stages_a_good_issue(monkeypatch, tmp_path):
 def test_refill_skips_when_intent_unparseable(monkeypatch, tmp_path):
     # stage 1 (magistral) fails to produce a parseable intent → skip before formalizing.
     monkeypatch.setattr(af, "draft_intent",
-                        lambda i, ctx, *, chat_fn: {"ok": False, "intent": None, "tokens": 3})
+                        lambda i, ctx, *, chat_fn, feedback=None: {"ok": False, "intent": None, "tokens": 3})
     _pass_gates(monkeypatch)
     res = af.refill([_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
                     context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
@@ -900,7 +901,7 @@ def test_refill_skips_intent_drift(monkeypatch, tmp_path):
 def test_refill_skips_issue_on_step_exception(monkeypatch, tmp_path):
     # a transient error (e.g. HTTP 429 exhaustion) on one issue must not crash the
     # whole refill — log it and skip to the next issue.
-    def boom(i, ctx, *, chat_fn):
+    def boom(i, ctx, *, chat_fn, feedback=None):
         if i["number"] == 1:
             raise RuntimeError("HTTP 429 from Mistral API")
         return _good_intent(i, ctx, chat_fn=chat_fn)
@@ -917,11 +918,12 @@ def test_refill_wires_intent_formalize_prove_fns(monkeypatch, tmp_path):
     seen = {}
     monkeypatch.setattr(
         af, "draft_intent",
-        lambda i, ctx, *, chat_fn: seen.update(intent=chat_fn) or _good_intent(i, ctx, chat_fn=chat_fn))
+        lambda i, ctx, *, chat_fn, feedback=None:
+        seen.update(intent=chat_fn) or _good_intent(i, ctx, chat_fn=chat_fn))
     monkeypatch.setattr(
         af, "formalize_with_repair",
         lambda intent, g, *, issue, chat_fn, check_fn, emit_fn, rounds, retrieve_fn=None,
-        token_budget=None, proactive_premises=None, log=None:
+        token_budget=None, proactive_premises=None, revision_note="", log=None:
         seen.update(formalize=chat_fn) or _good_formalize(intent, g, issue=issue, chat_fn=chat_fn,
                                                           check_fn=check_fn, emit_fn=emit_fn, rounds=rounds))
     monkeypatch.setattr(af, "depth_rejection", lambda lt, nm, ptr, **k: {"shallow": False, "tokens": 0})
@@ -939,6 +941,153 @@ def test_refill_wires_intent_formalize_prove_fns(monkeypatch, tmp_path):
     assert seen["intent"] is R and seen["judge"] is R    # magistral: intent + judge
     assert seen["formalize"] is F                        # leanstral: formalize
     assert seen["gate"] is P                             # leanstral: kernel gates
+
+
+# --- semantic repair cascade (bounded feedback re-draft loop) -----------------
+
+def test_semantic_verdict_cheapest_first_short_circuits(monkeypatch):
+    # structural gates run before any prover-token gate; the first failure stops
+    # the battery.
+    order = []
+    monkeypatch.setattr(af, "depth_rejection",
+                        lambda *a, **k: order.append("depth") or {"shallow": False, "tokens": 0})
+    monkeypatch.setattr(af, "triviality_rejection",
+                        lambda *a, **k: order.append("triv") or {"trivial": True,
+                                                                 "verdict": "rfl", "tokens": 0})
+    called = {"vac": False}
+    monkeypatch.setattr(af, "hypothesis_rejection",
+                        lambda *a, **k: called.update(vac=True) or {"vacuous": False, "tokens": 1})
+    fail, tokens = af.semantic_verdict(
+        lean_text="lt", stub="s", name="n", intent={}, issue={"pointers": ["MathFin/A.lean"]},
+        deferred=[], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK, gate_budget=1000)
+    assert fail == {"gate": "trivial", "detail": "rfl"}
+    assert order == ["depth", "triv"]
+    assert called["vac"] is False
+    assert tokens == 0
+
+
+def test_refill_repairs_shallow_draft_with_feedback(monkeypatch, tmp_path):
+    # attempt 1 is depth-rejected; the re-draft (attempt 2) must carry the depth
+    # feedback into BOTH stages, then seed. This is the observed #53/#66 failure.
+    seen = {"intent_feedback": [], "revision_notes": []}
+
+    def intent(i, ctx, *, chat_fn, feedback=None):
+        seen["intent_feedback"].append(feedback)
+        return _good_intent(i, ctx, chat_fn=chat_fn)
+
+    def formalize(intent_, g, *, issue, chat_fn, check_fn, emit_fn, rounds,
+                  retrieve_fn=None, token_budget=None, proactive_premises=None,
+                  revision_note="", log=None):
+        seen["revision_notes"].append(revision_note)
+        return _good_formalize(intent_, g, issue=issue, chat_fn=chat_fn,
+                               check_fn=check_fn, emit_fn=emit_fn, rounds=rounds)
+
+    monkeypatch.setattr(af, "draft_intent", intent)
+    monkeypatch.setattr(af, "formalize_with_repair", formalize)
+    _pass_gates(monkeypatch)
+    calls = {"n": 0}
+
+    def dep(lt, nm, ptr, **k):
+        calls["n"] += 1
+        return {"shallow": calls["n"] == 1, "verdict": "no pointer def", "tokens": 0}
+    monkeypatch.setattr(af, "depth_rejection", dep)
+    res = af.refill([_issue(5, pointers=["MathFin/FixedIncome/ZCB.lean"])],
+                    reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
+                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
+    assert [s["issue"] for s in res["seeded"]] == [5]
+    assert seen["intent_feedback"][0] is None                       # round 1: fresh
+    assert "depth" in seen["intent_feedback"][1]                    # round 2: the verdict
+    assert "EXPRESSED THROUGH" in seen["intent_feedback"][1]        # the repair direction
+    assert "theorem t5" in seen["intent_feedback"][1]               # rejected stub included
+    assert seen["revision_notes"][0] == ""                          # round 1: no note
+    assert seen["revision_notes"][1] == seen["intent_feedback"][1]  # both stages see it
+
+
+def test_refill_repairs_trivial_draft_with_feedback(monkeypatch, tmp_path):
+    _two_stage_ok(monkeypatch)
+    _pass_gates(monkeypatch)
+    calls = {"n": 0}
+
+    def triv(lt, *, check_fn):
+        calls["n"] += 1
+        return {"trivial": calls["n"] == 1, "verdict": "closed by rfl", "tokens": 0}
+    monkeypatch.setattr(af, "triviality_rejection", triv)
+    res = af.refill([_issue(6)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
+                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
+    assert [s["issue"] for s in res["seeded"]] == [6]
+    assert calls["n"] == 2
+
+
+def test_refill_exhausts_semantic_rounds_and_records_obstruction(monkeypatch, tmp_path):
+    _two_stage_ok(monkeypatch)
+    _pass_gates(monkeypatch)
+    monkeypatch.setattr(af, "depth_rejection",
+                        lambda lt, nm, ptr, **k: {"shallow": True, "verdict": "v", "tokens": 0})
+    res = af.refill([_issue(5, pointers=["MathFin/A.lean"])], reason_fn=_NOOP, prove_fn=_NOOP,
+                    check_fn=_ELAB_OK, context_fn=lambda i: "", queue_dir=str(tmp_path),
+                    budget=100000, semantic_rounds=2)
+    assert res["seeded"] == []
+    rec = res["attempted"][0]
+    assert rec["issue"] == 5 and rec["outcome"] == "depth" and rec["attempts"] == 2
+    assert [h["gate"] for h in rec["history"]] == ["depth", "depth"]
+
+
+def test_refill_semantic_rounds_one_is_single_shot(monkeypatch, tmp_path):
+    calls = {"n": 0}
+
+    def intent(i, ctx, *, chat_fn, feedback=None):
+        calls["n"] += 1
+        return _good_intent(i, ctx, chat_fn=chat_fn)
+    monkeypatch.setattr(af, "draft_intent", intent)
+    monkeypatch.setattr(af, "formalize_with_repair", _good_formalize)
+    _pass_gates(monkeypatch)
+    monkeypatch.setattr(af, "depth_rejection",
+                        lambda lt, nm, ptr, **k: {"shallow": True, "verdict": "v", "tokens": 0})
+    res = af.refill([_issue(5, pointers=["MathFin/A.lean"])], reason_fn=_NOOP, prove_fn=_NOOP,
+                    check_fn=_ELAB_OK, context_fn=lambda i: "", queue_dir=str(tmp_path),
+                    budget=100000, semantic_rounds=1)
+    assert res["seeded"] == []
+    assert calls["n"] == 1                              # the old single-shot behavior
+
+
+def test_refill_attempted_records_success(monkeypatch, tmp_path):
+    _two_stage_ok(monkeypatch)
+    _pass_gates(monkeypatch)
+    res = af.refill([_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
+                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
+    rec = res["attempted"][0]
+    assert rec["issue"] == 5 and rec["outcome"] == "seeded" and rec["attempts"] == 1
+    assert rec["history"] == []
+
+
+def test_refill_budget_stops_semantic_loop(monkeypatch, tmp_path):
+    # intent (5 tok) + formalize (10 tok) exceed budget=8 after attempt 1 → the
+    # loop must stop instead of re-drafting, and say so in the history.
+    calls = {"n": 0}
+
+    def intent(i, ctx, *, chat_fn, feedback=None):
+        calls["n"] += 1
+        return _good_intent(i, ctx, chat_fn=chat_fn)
+    monkeypatch.setattr(af, "draft_intent", intent)
+    monkeypatch.setattr(af, "formalize_with_repair", _good_formalize)
+    _pass_gates(monkeypatch)
+    monkeypatch.setattr(af, "depth_rejection",
+                        lambda lt, nm, ptr, **k: {"shallow": True, "verdict": "v", "tokens": 0})
+    res = af.refill([_issue(5, pointers=["MathFin/A.lean"])], reason_fn=_NOOP, prove_fn=_NOOP,
+                    check_fn=_ELAB_OK, context_fn=lambda i: "", queue_dir=str(tmp_path),
+                    budget=8, semantic_rounds=3)
+    assert calls["n"] == 1
+    assert res["attempted"][0]["history"][-1]["gate"] == "budget"
+
+
+def test_refill_records_error_outcome(monkeypatch, tmp_path):
+    def boom(i, ctx, *, chat_fn, feedback=None):
+        raise RuntimeError("HTTP 429 from Mistral API")
+    monkeypatch.setattr(af, "draft_intent", boom)
+    res = af.refill([_issue(1)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
+                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
+    assert res["seeded"] == []
+    assert res["attempted"][0]["outcome"] == "error"
 
 
 # --- two-stage draft components: intent (magistral) + formalize (leanstral) ---

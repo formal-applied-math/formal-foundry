@@ -843,6 +843,52 @@ def render_gate_feedback(gate: str, detail: str, stub: str | None) -> str:
     return txt
 
 
+def semantic_verdict(*, lean_text: str, stub: str, name: str, intent: dict, issue: dict,
+                     deferred: list[str], reason_fn, prove_fn, check_fn, gate_budget: int,
+                     depth_gate: bool = True, triviality_gate: bool = True,
+                     system_prompt=None) -> tuple[dict | None, int]:
+    """Run the semantic gate battery on an ELABORATING draft, cheapest-first:
+    depth → triviality (structural, zero tokens) → hypothesis-rejection → disproof
+    (kernel, leanstral) → issue-faithfulness → intent-fidelity (magistral judges).
+    Returns `(failure, tokens)`: failure is None when every gate passes, else
+    `{gate, detail}` for `render_gate_feedback`. The battery's DIVERSITY is the
+    anti-Goodhart defense of the repair loop: a re-draft that games one gate still
+    faces five others (and open-pr's honesty guards + the human merge after that)."""
+    tokens = 0
+    if depth_gate:
+        dep = depth_rejection(lean_text, name, issue.get("pointers", []), check_fn=check_fn)
+        tokens += dep["tokens"]
+        if dep["shallow"]:
+            return {"gate": "depth", "detail": dep.get("verdict", "")}, tokens
+    if triviality_gate:
+        triv = triviality_rejection(lean_text, check_fn=check_fn)
+        tokens += triv["tokens"]
+        if triv["trivial"]:
+            return {"gate": "trivial", "detail": triv.get("verdict", "")}, tokens
+    vac = hypothesis_rejection(lean_text, name, chat_fn=prove_fn, check_fn=check_fn,
+                               budget=gate_budget, system_prompt=system_prompt)
+    tokens += vac["tokens"]
+    if vac["vacuous"]:
+        return {"gate": "vacuous", "detail": "False is provable from the hypotheses"}, tokens
+    dis = disproof(lean_text, name, chat_fn=prove_fn, check_fn=check_fn,
+                   budget=gate_budget, system_prompt=system_prompt)
+    tokens += dis["tokens"]
+    if dis["false"]:
+        return {"gate": "false", "detail": "the negated conclusion was proved"}, tokens
+    j = judge_faithfulness(issue, stub, chat_fn=reason_fn, deferred=deferred)
+    tokens += j["tokens"]
+    if not j.get("faithful"):
+        detail = j.get("verdict", "")
+        if j.get("issues"):
+            detail += "; issues: " + "; ".join(str(x) for x in j["issues"][:4])
+        return {"gate": "unfaithful", "detail": detail}, tokens
+    fid = intent_fidelity_check(intent, stub, reason_fn=reason_fn)
+    tokens += fid["tokens"]
+    if not fid.get("faithful"):
+        return {"gate": "drift", "detail": fid.get("verdict", "")}, tokens
+    return None, tokens
+
+
 # --- the refill orchestrator --------------------------------------------------
 
 def _write_target(queue_dir: str, n: int, lean_text: str, entry: dict) -> list[str]:
@@ -863,85 +909,99 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn,
            queue_dir: str, budget: int, pins: str = "", max_issues: int = 1,
            max_attempt_issues: int = 3, gate_budget: int = 20_000, formalize_rounds: int = 3,
            formalize_token_budget: int = 40_000, formalize_fn=None, retrieve_fn=None,
-           proactive_fn=None,
-           depth_gate: bool = True, system_prompt=None, log=lambda m: None) -> dict:
+           proactive_fn=None, depth_gate: bool = True, triviality_gate: bool = True,
+           semantic_rounds: int = 2, system_prompt=None, log=lambda m: None) -> dict:
     """Draft + gate + stage up to `max_issues` targets from `issues`.
 
-    For each candidate (up to `max_attempt_issues`), the cascade runs cheapest-first:
-    intent (magistral `reason_fn` SPECIFIES the statement) → formalize-with-repair
-    (leanstral `formalize_fn` writes elaborating Lean, retrieval-augmented) → depth gate
-    (structural: the type must consume a pointer-module def) → hypothesis-rejection +
-    disproof (leanstral `prove_fn`) → semantic judge (magistral) → intent-fidelity
-    (magistral: does the Lean render the intent). Any reject logs the reason and skips to
-    the next issue (it stays `status:ready` — never auto-closed). A passing target's stub +
-    `.entry.json` are written to `queue_dir`. `formalize_fn` defaults to `prove_fn` (both
-    leanstral). Returns `{seeded, tokens}`."""
+    For each candidate (up to `max_attempt_issues`): intent (magistral `reason_fn`
+    SPECIFIES the statement) → formalize-with-repair (leanstral `formalize_fn` writes
+    elaborating Lean, compiler-repaired + retrieval-augmented) → the semantic gate
+    battery (`semantic_verdict`: depth → triviality → vacuity → disproof → judge →
+    intent-fidelity). A gate rejection is NOT terminal: it becomes a
+    `render_gate_feedback` block and the issue is RE-DRAFTED — both stages see the
+    verdict — up to `semantic_rounds` total attempts (the repair cascade; design:
+    2026-07-17-semantic-repair-cascade). `semantic_rounds=1` is the old single-shot
+    behavior. An issue that exhausts its rounds stays `status:ready` (never
+    auto-closed). A passing target's stub + `.entry.json` are written to `queue_dir`.
+    `formalize_fn` defaults to `prove_fn` (both leanstral).
+
+    Returns `{seeded, tokens, attempted}` — `attempted` is the obstruction telemetry:
+    one `{issue, attempts, outcome: "seeded"|<last gate>|"error", history}` record per
+    issue tried, so a zero-seed tick says exactly which gate ate each issue."""
     formalize_fn = formalize_fn or prove_fn
-    seeded, spent = [], 0
+    seeded, attempted, spent = [], [], 0
     for issue in issues[:max_attempt_issues]:
         if len(seeded) >= max_issues or spent >= budget:
             break
         n = issue.get("number")
+        history, feedback, staged = [], None, False
         # A transient error on ONE issue (e.g. an HTTP 429 that exhausts retries,
         # a daemon hiccup, a malformed draft) must not kill the tick — log it and
         # move to the next candidate.
         try:
             ctx = context_fn(issue)
-            di = draft_intent(issue, ctx, chat_fn=reason_fn)
-            spent += di["tokens"]
-            if not di["ok"]:
-                log(f"#{n}: no parseable intent"); continue
-            intent = di["intent"]
+            for attempt in range(1, max(1, semantic_rounds) + 1):
+                if spent >= budget:
+                    history.append({"attempt": attempt, "gate": "budget",
+                                    "detail": f"refill budget exhausted ({spent} >= {budget})"})
+                    break
+                di = draft_intent(issue, ctx, chat_fn=reason_fn, feedback=feedback)
+                spent += di["tokens"]
+                if not di["ok"]:
+                    fail = {"gate": "intent", "detail": "no parseable intent reply"}
+                    history.append({"attempt": attempt, **fail})
+                    log(f"#{n}: no parseable intent (attempt {attempt})")
+                    feedback = render_gate_feedback(fail["gate"], fail["detail"], None)
+                    continue
+                intent = di["intent"]
 
-            proactive = proactive_fn(intent["statement"]) if proactive_fn else ""
-            fr = formalize_with_repair(intent, ctx, issue=issue, chat_fn=formalize_fn,
-                                       check_fn=check_fn, emit_fn=emit_target_files,
-                                       rounds=formalize_rounds, retrieve_fn=retrieve_fn,
-                                       token_budget=formalize_token_budget,
-                                       proactive_premises=proactive,
-                                       log=lambda m: log(f"#{n} formalize {m}"))
-            spent += fr["tokens"]
-            if not fr["ok"]:
-                log(f"#{n}: no elaborating formalization after {formalize_rounds} rounds"); continue
-            stub, lean_text, entry = fr["stub"], fr["lean_text"], fr["entry"]
-            name = split_statement(stub)[0]
-            deferred = normalize_deferred((fr.get("meta") or {}).get("deferred"))
+                proactive = proactive_fn(intent["statement"]) if proactive_fn else ""
+                fr = formalize_with_repair(intent, ctx, issue=issue, chat_fn=formalize_fn,
+                                           check_fn=check_fn, emit_fn=emit_target_files,
+                                           rounds=formalize_rounds, retrieve_fn=retrieve_fn,
+                                           token_budget=formalize_token_budget,
+                                           proactive_premises=proactive,
+                                           revision_note=feedback or "",
+                                           log=lambda m: log(f"#{n} formalize {m}"))
+                spent += fr["tokens"]
+                if not fr["ok"]:
+                    fail = {"gate": "formalize",
+                            "detail": f"no elaborating Lean after {formalize_rounds} rounds"}
+                    history.append({"attempt": attempt, **fail})
+                    log(f"#{n}: {fail['detail']} (attempt {attempt})")
+                    feedback = render_gate_feedback(fail["gate"], fail["detail"], None)
+                    continue
+                stub, lean_text, entry = fr["stub"], fr["lean_text"], fr["entry"]
+                name = split_statement(stub)[0]
+                deferred = normalize_deferred((fr.get("meta") or {}).get("deferred"))
 
-            if depth_gate:
-                dep = depth_rejection(lean_text, name, issue.get("pointers", []), check_fn=check_fn)
-                spent += dep["tokens"]
-                if dep["shallow"]:
-                    log(f"#{n}: shallow — {dep.get('verdict', '')}"); continue
-
-            vac = hypothesis_rejection(lean_text, name, chat_fn=prove_fn, check_fn=check_fn,
-                                       budget=gate_budget, system_prompt=system_prompt)
-            spent += vac["tokens"]
-            if vac["vacuous"]:
-                log(f"#{n}: retired — vacuous (hypotheses contradictory)"); continue
-
-            dis = disproof(lean_text, name, chat_fn=prove_fn, check_fn=check_fn,
-                           budget=gate_budget, system_prompt=system_prompt)
-            spent += dis["tokens"]
-            if dis["false"]:
-                log(f"#{n}: retired — false as written"); continue
-
-            j = judge_faithfulness(issue, stub, chat_fn=reason_fn, deferred=deferred)
-            spent += j["tokens"]
-            if not j.get("faithful"):
-                log(f"#{n}: unfaithful — {j.get('verdict', '')}\n  statement: {stub}"); continue
-
-            fid = intent_fidelity_check(intent, stub, reason_fn=reason_fn)
-            spent += fid["tokens"]
-            if not fid.get("faithful"):
-                log(f"#{n}: intent drift — {fid.get('verdict', '')}\n  statement: {stub}"); continue
-
-            paths = _write_target(queue_dir, n, lean_text, entry)
-            seeded.append({"id": f"cal-bk-{n}", "issue": n, "paths": paths})
-            log(f"#{n}: staged cal-bk-{n}")
+                fail, gate_tokens = semantic_verdict(
+                    lean_text=lean_text, stub=stub, name=name, intent=intent, issue=issue,
+                    deferred=deferred, reason_fn=reason_fn, prove_fn=prove_fn,
+                    check_fn=check_fn, gate_budget=gate_budget, depth_gate=depth_gate,
+                    triviality_gate=triviality_gate, system_prompt=system_prompt)
+                spent += gate_tokens
+                if fail is None:
+                    paths = _write_target(queue_dir, n, lean_text, entry)
+                    seeded.append({"id": f"cal-bk-{n}", "issue": n, "paths": paths})
+                    staged = True
+                    log(f"#{n}: staged cal-bk-{n} (attempt {attempt})")
+                    break
+                history.append({"attempt": attempt, **fail})
+                log(f"#{n}: {fail['gate']} — {fail['detail']} (attempt {attempt})\n"
+                    f"  statement: {stub}")
+                feedback = render_gate_feedback(fail["gate"], fail["detail"], stub)
+            outcome = "seeded" if staged else (history[-1]["gate"] if history else "error")
+            attempted.append({"issue": n, "attempts": attempt, "outcome": outcome,
+                              "history": history})
         except Exception as e:  # noqa: BLE001 — resilience: skip the issue, not the tick
             log(f"#{n}: error ({type(e).__name__}: {e}) — skipping")
+            history.append({"attempt": len(history) + 1, "gate": "error",
+                            "detail": f"{type(e).__name__}: {e}"})
+            attempted.append({"issue": n, "attempts": len(history), "outcome": "error",
+                              "history": history})
             continue
-    return {"seeded": seeded, "tokens": spent}
+    return {"seeded": seeded, "tokens": spent, "attempted": attempted}
 
 
 # --- CLI (the refill entrypoint pipeline-tick.sh calls) -----------------------
