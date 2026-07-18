@@ -21,19 +21,26 @@ table" sections to `patterns.md` — draft content included, ready to paste), **
 anger). See the doc for the full ranking and the convergence matrix behind it.
 
 **Execution order of record (2026-07-18):**
-`docs/superpowers/plans/2026-07-18-autoformalization-improvements.md` (v2, post
+`docs/superpowers/plans/2026-07-18-autoformalization-improvements.md` (v3, post
 critical review) sequences all of this: Phase 0 discriminating experiment →
 Phase 1 trust-hardening + diagnosis → **Phase 2 decomposition loop on Magistral**
 (the general-reasoner role filled in-family for now, model-agnostic interface,
 A/B'd against Claude centaur sessions — this reopens and resolves-for-now the
-"one strategic fork" below) → Phase 3 two-track contamination-aware bench →
-Phase 4 (brainstorm-gated). The v1 ordering in this file's §items stands as
-reference; where they disagree, the plan wins.
+"one strategic fork" below) → Phase 3 throughput substrate + field-evidence
+tuning → Phase 4 (brainstorm-gated). The v1 ordering in this file's §items stands
+as reference; where they disagree, the plan wins.
+
+**⛔ Dropped (R, 2026-07-18): the held-out evaluation/benchmark track ("MathFin-Bench").**
+Do not plan, design, or propose it — here or in the plan — until R reopens it. It
+had recurred across plans (this backlog's §B/§D caveats, the 2026-07-11 survey
+item 5, BIG-LEAP Phase 1); those references below are neutralized in place. Tuning
+and the decision gate now read the **live queue** (the obstruction-family report +
+the A/B scoreboard on real targets), not a synthetic set.
 
 **⏰ STANDING DECISION GATE — 2026-09-30 (Labs $0 retires):** decide
 keep-Magistral / frontier-decomposer / hybrid on the A/B scoreboard
-(`docs/research/ab-decomposer.md`), the Track-P/D bench numbers per arm,
-refinery-minutes-per-merged-PR, and the actual price sheet. Evidence collection
+(`docs/research/ab-decomposer.md`, real targets), refinery-minutes-per-merged-PR,
+leaves-closed-per-target per arm, and the actual price sheet. Evidence collection
 starts the day the plan's Phase 2 lands.
 
 Every item is tagged **[no reasoner]** (Leanstral-native or infra-only) or
@@ -97,9 +104,11 @@ doubles the per-attempt budget while keeping pass@4 diversity. Repair
 (`repair_rounds=2`) still funds escalated hard targets (2M cap). The survey's #2:
 *"2–4 attempts × high reasoning budget."*
 
-- **Caveat (unchanged):** absent MathFin-Bench this is an informed default from
-  Leanstral's curve, not a measured optimum. Retune toward `2 × 250k` to push the
-  per-attempt lever harder once the bench exists. One-line revert.
+- **Caveat:** this is a field-evidence default (Leanstral's curve + Delta/Numina's
+  depth>breadth finding), not tuned on our own data. The plan's Phase 3.2 applies
+  the depth retune (`fanout=2 × repair_rounds≥6`) and watches the **live-queue**
+  signal (obstruction-family report + queue outcomes); keep or one-line-revert on
+  that. (No held-out bench — dropped per R, see top.)
 - Sources: [Leanstral 1.5](https://mistral.ai/news/leanstral-1-5/), survey #2.
 
 ### C. Statement-side faithfulness filters — Leanstral-native; DESIGNED, ready to build
@@ -150,8 +159,9 @@ batch work:
   pass@k verification backend on CI.
 - or the same via lean-lsp-mcp's `lean_multi_attempt` (REPL-backed).
 
-This is what makes a higher `fanout` (or a larger MathFin-Bench sweep) affordable.
-Sources: [Kimina Lean Server](https://huggingface.co/blog/AI-MO/kimina-prover-rl),
+This is what makes a higher `fanout` — and the decomposition loop's parallel
+leaf-proving + faster corpus `ledger verify --exec` sweeps — affordable (plan
+Phase 3.1). Sources: [Kimina Lean Server](https://huggingface.co/blog/AI-MO/kimina-prover-rl),
 [lean-lsp-mcp](https://github.com/oOo0oOo/lean-lsp-mcp).
 
 ### E. Learned premise retrieval — next rung on the context packs

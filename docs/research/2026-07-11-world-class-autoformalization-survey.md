@@ -173,12 +173,14 @@ fits it.
    signatures of its dependency closure, plus the target file's preceding
    source, not just per-module signature lists.
 5. **EVALUATION — MathFin-Bench + Leanstral's pass@k curve on OUR
-   distribution** (nobody has measured the knee on out-of-distribution
-   measure-theory finance; open question from the research). Freeze ~30
-   already-proved corpus theorems (temporal split), strip proofs, run
-   pass@1/4/8 at 2–3 token budgets. Sets the per-issue budget empirically and
-   turns every harness change into a measured delta. (= BIG-LEAP Phase-1
-   MathFin-Bench, now with an evidence-based design.)
+   distribution** — **⛔ DROPPED as a recommendation (R, 2026-07-18): do not
+   propose or plan a held-out eval/benchmark until R reopens it**
+   ([[feedback_bench_dropped]]; `docs/upgrade-backlog.md` top). The field-finding
+   below stays as record; it is no longer a backlog item. Tuning now reads the
+   live queue (obstruction-family report + A/B scoreboard on real targets), not a
+   synthetic set. *(Historical description:* nobody had measured the knee on OOD
+   measure-theory finance; the proposal was to freeze ~30 proved theorems, strip
+   proofs, run pass@1/4/8 at 2–3 budgets — the former BIG-LEAP Phase-1 idea.*)*
 6. **STATEMENT SIDE — faithfulness gates in the autoformalize stream**
    (AlphaProof disprove-and-retire; DeepSeek hypothesis rejection; Harmonic
    judge). Before spending proof budget on an autoformalized statement:

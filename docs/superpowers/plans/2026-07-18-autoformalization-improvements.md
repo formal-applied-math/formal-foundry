@@ -1,12 +1,14 @@
-# Autoformalization Improvements — Implementation Plan (v2)
+# Autoformalization Improvements — Implementation Plan (v3)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Phases 0–2 are execution-ready (Phase 2 opens with a short mechanics design doc, not a strategic brainstorm). Phase 3 is Phase-2-informed; Phase 4 remains **brainstorm-gated**.
 
-**Revision note (v2, 2026-07-18).** v1 was rewritten after a critical review found it deferential to standing decisions instead of evidence. Changes of substance: (1) the discriminating experiment is now **Phase 0** (it was buried as an acceptance test); (2) the decomposition loop moves from "brainstorm-gated Phase 3" to **Phase 2, on Magistral** — the general-reasoner *role* is filled by a Mistral offering for now (no new vendor/cost/traffic surface), behind a model-agnostic interface, A/B'd against Claude-in-session centaur work, with a hard decision gate at **2026-09-30** (Labs $0 retirement); (3) the bench moves after the fork and is redesigned for contamination (post-model-release temporal split) and for the *drafter* (a drafting track with gold references from closed issues); (4) Phase 1 is cut to trust-hardening + diagnosis — the polish tail (rename cache, most trims, template retrieval) is explicitly deferred; (5) the cron is re-labeled **calibration + easy-harvest**, not the product, and the refinery bottleneck gets a first-pass automation task. Stale item removed: "run the cron on the vibe harness" — the cron already does (`pipeline-tick.sh` → `vibe_prove.py run`, since ee4dfc4); Phase 0's easy control confirms it end-to-end.
+> **⛔ Do-not-reintroduce (R, 2026-07-18):** a held-out **evaluation/benchmark track** (a "MathFin-Bench": frozen corpus theorems, pass@k, temporal splits, a drafting bench) is **dropped and must not be re-added to this plan** — or proposed, designed, or "thought of" — until R explicitly reopens it. It has recurred across plans (BIG-LEAP Phase 1, the 2026-07-11 survey item 5, this plan's earlier Phase 3); this marker exists to stop that. The tuning/feedback such a bench was meant to provide is instead taken from the **live queue** (see "How we know a change helped" below). Do not interpret its absence as an oversight.
 
-**Goal:** Make the mathfin-foundry pipeline the best version of what the evidence supports — a centaur architecture (general reasoner decomposes, leaf-prover discharges, human refines) with trust-hardened gates and measured tuning — starting from the grind-history harvest (`docs/research/2026-07-18-mainrepo-grind-lessons-harvest.md`) and the ML4TP/survey research.
+**Revision note.** v1 → v2: (1) the discriminating experiment became **Phase 0** (was a buried acceptance test); (2) the decomposition loop moved to **Phase 2, on Magistral** — the general-reasoner *role* filled in-family (no new vendor/cost/traffic), model-agnostic interface, A/B'd against Claude centaur sessions, hard decision gate **2026-09-30** (Labs $0 retirement); (3) Phase 1 cut to trust-hardening + diagnosis, polish tail deferred; (4) the cron re-labeled **calibration + easy-harvest**, not the product, with a first-pass refinery-automation task; stale "run the cron on the vibe harness" task removed (already wired). **v2 → v3 (2026-07-18):** removed the held-out evaluation track entirely per R's directive (above); the tuning it was meant to gate now runs on real-queue signal (the obstruction-family report, Task 1.7, and the A/B scoreboard on real targets, Task 2.6); the CI verification substrate that had lived with it is retained on its own merits (parallel leaf-proving + faster ledger sweeps) as the slim Phase 3.
 
-**Architecture:** Two-engine Mistral stack today (Magistral specifies/judges → Leanstral proves via vibe⇄lean-lsp-mcp → kernel gate + polish → auto-PR). This plan adds: a discriminating experiment (locate the bottleneck), trust hardening at the gates, a **Magistral-driven decomposition loop** wrapped in Lean-side verification gates (skeleton-elaboration, leaf gates, recomposition), lightweight A/B telemetry against the Claude centaur arm, and then a contamination-aware two-track bench for measured tuning.
+**Goal:** Make the mathfin-foundry pipeline the best version of what the evidence supports — a centaur architecture (general reasoner decomposes, leaf-prover discharges, human refines) with trust-hardened gates and tuning driven by the live queue — starting from the grind-history harvest (`docs/research/2026-07-18-mainrepo-grind-lessons-harvest.md`) and the ML4TP/survey research.
+
+**Architecture:** Two-engine Mistral stack today (Magistral specifies/judges → Leanstral proves via vibe⇄lean-lsp-mcp → kernel gate + polish → auto-PR). This plan adds: a discriminating experiment (locate the bottleneck), trust hardening at the gates, a **Magistral-driven decomposition loop** wrapped in Lean-side verification gates (skeleton-elaboration, leaf gates, recomposition), lightweight A/B telemetry against the Claude centaur arm, and a CI throughput substrate — all measured on the live issue queue.
 
 **Tech stack:** Python 3.11+ stdlib (host orchestration), `pytest` (`probe/test_*.py`), Lean 4 v4.31.0 + Mathlib + BrownianMotion (pinned), Docker (verify image + lean-repl/lean-lsp), Mistral API (Magistral/Leanstral), `gh` CLI.
 
@@ -22,7 +24,7 @@ Every task's requirements implicitly include this section (from `CLAUDE.md`, the
 - **Never `docker compose build` locally; foundry code changes do NOT republish the image** (probe/, tools/, benchmarks/ are bind-mounted). Image rebuilds are CI-only.
 - **Scout, not author.** Nothing merges to `formal-mathfin` without the human refinery + 8-lens pass. The pipeline OPENs ready-for-review PRs; it never merges.
 - **Kernel-clean floor:** axioms ⊆ `{propext, Classical.choice, Quot.sound}`; forbidden tactics auto-rejected; axiom gate stays `collectAxioms ⊆ allowlist`.
-- **API traffic carries only public-corpus + fresh-textbook statements** — never held-out eval content or named crown-theorem material. (Constrains Phase 3's bench manifests.)
+- **API traffic carries only public-corpus + fresh-textbook statements** — never held-out eval content or named crown-theorem material.
 - **Gates before push:** foundry — `python3 -m pytest probe/ -q` green. Main repo — rebuild then `lake build MathFin && lake lint`, regenerate `AxiomAuditGen`/`formalization.yaml` after benchmark edits, `ledger status` all-fresh.
 
 ---
@@ -31,14 +33,22 @@ Every task's requirements implicitly include this section (from `CLAUDE.md`, the
 
 1. **Centaur, not autonomous.** The most productive formalization ops (Gauss) and this repo's own history run the same shape: a general reasoner + human at the top, a prover fleet below. The cron's honest job is **calibration + easy-target harvesting**; hard targets go through the decomposition loop or centaur sessions.
 2. **The general-reasoner role is filled by Magistral for now.** No new vendor, auth, or traffic surface; $0 until 2026-09-30; precedent is DeepSeek-Prover-V2 (decomposer = their own house general model). Expect a smaller lift than the frontier headline numbers — compensate with **hard Lean-side verification gates around every reasoner step** (a mid-tier reasoner inside a verified protocol ≈ a frontier one free-styling). The interface is model-agnostic; the frontier arm (Claude centaur sessions) runs the same targets for comparison.
-3. **Decision gate 2026-09-30** (Labs $0 retires): choose keep-Magistral / switch-decomposer-to-frontier / hybrid, on measured evidence — leaves-closed-per-target, refinery-effort-per-PR, per-arm outcomes (Phase 2's A/B telemetry + Phase 3's bench).
+3. **Decision gate 2026-09-30** (Labs $0 retires): choose keep-Magistral / switch-decomposer-to-frontier / hybrid, on real-queue evidence — leaves-closed-per-target, refinery-effort-per-PR, per-arm outcomes (Phase 2's A/B scoreboard) — and the actual price sheet.
 4. **Depth-coherence, not theorem count.** Target selection continues to serve the theory (bridges, towers, promotions); Phase 4's supervised sourcing makes that machine-assisted, later.
+
+### How we know a change helped (the feedback signal, in place of a held-out bench)
+
+Tuning and the decision gate read the **live queue**, not a synthetic set:
+- **The obstruction-family report (Task 1.7)** — every tick, which failure class dominates (unknown-id-despite-retrieval / depth-gate / no-elaborating-draft / prover-max-rounds / gate-fail / infra-indeterminate) and its trend. A change "helped" if its target family shrinks.
+- **The A/B scoreboard (Task 2.6)** — per real target, per arm (cron / Magistral-decompose / Claude-centaur): leaves-closed, outcome, and refinery-minutes-at-merge. This is also the decision-gate evidence.
+- **Plain queue outcomes** — pass/fail and PR-merge rate on the actual `formal-mathfin` issue backlog.
+Where the field has *already measured* a lever (e.g. depth > breadth at fixed budget — Delta, Numina), apply it as a field-validated default and watch the obstruction report for regression, with a one-line revert.
 
 ---
 
 ## Phase 0 — The discriminating experiment (days; run before building anything)
 
-**Why first:** it locates the bottleneck (machinery vs task vs model) for a few sessions' cost and decides which later phases matter most. Building harnesses before running it is planning around the question.
+**Why first:** it locates the bottleneck (machinery vs task vs model) for a few sessions' cost and decides which later phases matter most. Building infrastructure before running it is planning around the question.
 
 **Files:** Create `docs/research/2026-07-XX-experiment-zero.md` (the report). No production code.
 
@@ -111,12 +121,12 @@ def test_repair_hint_nnreal_misparse():
 - [ ] **1.6.3** vibe LSP readiness: replace the log-grep-then-proceed with a port/health probe (reuse `wait_daemon.py`'s logic); on failure, abort the run as transient (exit 4 class) instead of proceeding.
 - [ ] **1.6.4** `pytest probe/ -q` PASS; commit.
 
-### Task 1.7 — Failure-log triage: obstruction families (pulled forward from v1 Phase 4)
+### Task 1.7 — Failure-log triage: obstruction families (the primary feedback signal)
 **Files:** Create `probe/obstructions.py` + `probe/test_obstructions.py` (NOT the dormant legacy `probe/triage.py`). Wire: tick prints the aggregate at end; report file `runs/obstructions-report.md` committed by the persist step.
 - [ ] **1.7.1 (RED)** `test_bucketing_families`: given fixture rows from `refill-history.jsonl` + `*-summary.jsonl`, the aggregator buckets into {unknown-id-despite-retrieval, depth-gate, no-elaborating-draft, prover-max-rounds, gate-fail, infra-indeterminate} with counts and per-issue history.
-- [ ] **1.7.2 (GREEN)** Implement (stdlib json/collections); render markdown. **1.7.3** Wire into `pipeline-tick.sh` (non-fatal); commit. *Cheapest high-information item in the whole plan — it names which fix the pipeline needs next, every tick.*
+- [ ] **1.7.2 (GREEN)** Implement (stdlib json/collections); render markdown with a per-tick trend line. **1.7.3** Wire into `pipeline-tick.sh` (non-fatal); commit. *This is the plan's standing feedback instrument — it names which fix the pipeline needs next, every tick, on real targets (see "How we know a change helped").*
 
-### Task 1.8 — Feasibility census at intent time (H12; pulled forward from v1 Phase 2)
+### Task 1.8 — Feasibility census at intent time (H12)
 **Files:** Modify `probe/autoformalize.py` (intent stage). Test: `probe/test_autoformalize.py`.
 - [ ] **1.8.1 (RED)** `test_route_feasibility_blocks_on_missing_primitives`: an intent whose statement names constants absent from the pointer modules and from a (fixture) pin index yields `blocked_on_infra` with the missing list — recorded to refill-history, no draft attempted.
 - [ ] **1.8.2 (GREEN)** `route_feasibility(intent, pointers, lookup_fn)`: count needed-but-absent primitives (lookup = scout index, fallback grep); ≥1 missing and not on the defs route ⇒ emit the distinct outcome + a suggested-defs note (feeds the defs route or a human issue comment). **1.8.3** PASS; commit. *Directly targets the #1 recorded death family (`needs_primitives`).*
@@ -128,7 +138,7 @@ def test_repair_hint_nnreal_misparse():
 ### Task 1.10 — Safe residue (5-minute trims only)
 - [ ] **1.10.1** `git rm` `targets/smoke.lean`, `targets/smoke_manifest.json`, `runs/smoke-*`; prune retired #67/#88 + hand-seeding prose from `targets/queue/README.md`; fix the two stale comments (`pipeline.toml:8-10` token-sizing prose; `autoformalize.py:1814` "unused import is harmless"). `pytest probe/ -q` PASS; commit.
 
-**Deferred tail (explicitly NOT on the critical path; do opportunistically or drop):** H6 rename cache (pin is frozen; renames bite mainly at bumps), H7 conclusion-head template retrieval (G-Research evidence says this class of scaffolding barely moves strong agents — bench-gate it in Phase 3), T3 duplicate lint layer, T5 config-drift consolidation, vacuous-premise probe (H10 — revisit when sourcing relaxes in Phase 4). **Keep (do not trim): T7** — `probe.py prove` CLI, `eval_draft.py`, `triage.py`, `contribute.sh` are deliberate calibration keeps.
+**Deferred tail (explicitly NOT on the critical path; do opportunistically or drop):** H6 rename cache (pin is frozen; renames bite mainly at bumps), H7 conclusion-head template retrieval (G-Research evidence says this class of scaffolding barely moves strong agents — deferred; revisit only if the obstruction report shows a retrieval-shaped failure family dominating), T3 duplicate lint layer, T5 config-drift consolidation, vacuous-premise probe (H10 — revisit when sourcing relaxes in Phase 4). **Keep (do not trim): T7** — `probe.py prove` CLI, `eval_draft.py`, `triage.py`, `contribute.sh` are deliberate calibration keeps.
 
 **Acceptance for Phase 1:** `pytest probe/ -q` green; patterns.md sections live and reaching the prover; drafter carries statement-design + pins; H5/H8/H9 closed with tests; obstruction report generated per tick; feasibility census recording `blocked_on_infra` instead of doomed drafts.
 
@@ -175,9 +185,9 @@ def test_dag_rejects_cycles_and_oversize():
 - [ ] **2.5.1 (RED)** `test_recompose_full_and_partial`: all leaves proved → assembled module (leaves with real proofs + main) passes the full gate (`gate.gate`); partial → proved leaves are BANKED as run artifacts + flagged as standalone-PR candidates if independently valuable, unproved leaves recorded as a declared remainder (`deferred`, `refs` not `closes`) — never a silent gap.
 - [ ] **2.5.2 (GREEN)** Implement. Keep-and-revise: a proved leaf's statement+proof is appended to the target's context pack on the next decomposition attempt. Commit.
 
-### Task 2.6 — A/B telemetry + cron demotion (the decision-gate inputs)
+### Task 2.6 — A/B scoreboard + cron demotion (the decision-gate evidence)
 **Files:** `probe/vibe_prove.py` / `probe/decompose.py` (summary rows gain `arm: cron|decompose-magistral|centaur`, `leaves_total/leaves_closed`, `refinery_minutes` filled at merge time by hand), `docs/research/ab-decomposer.md` (the running scoreboard, updated per centaur session and per tick), README/overview one-paragraph update: the cron's stated job is **calibration + easy-harvest**; hard targets go to the decomposition path or centaur sessions.
-- [ ] **2.6.1** Add the fields + the scoreboard doc with its update protocol (one row per target-attempt per arm). **2.6.2** Docs updated. Commit. *By 2026-09-30 this table is the Mistral-vs-frontier evidence.*
+- [ ] **2.6.1** Add the fields + the scoreboard doc with its update protocol (one row per target-attempt per arm, on real targets). **2.6.2** Docs updated. Commit. *By 2026-09-30 this table is the Mistral-vs-frontier evidence — measured on the real queue.*
 
 ### Task 2.7 — First-pass refinery punch list (the unpriced bottleneck)
 **Files:** `probe/refinery_notes.py` + test; wire into `open-pr.sh` PR body (a "first-pass review" section).
@@ -187,38 +197,27 @@ def test_dag_rejects_cycles_and_oversize():
 
 ---
 
-## Phase 3 — Measurement: two-track bench + substrate (Phase-2-informed)
+## Phase 3 — Throughput substrate + field-evidence tuning (Phase-2-informed)
 
-**Redesigned from v1 after review:** (a) **contamination** — `formal-mathfin` is public and Leanstral 1.5 (released 2026-07-02) plausibly trained on it, so held-out items are restricted to entries merged **after 2026-07-02** (temporal split vs the *model*, recorded in the manifest; ~50 candidates exist); (b) the bench measures **both stages** — Track P (prove) AND Track D (draft), because the funnel dies at the drafter and v1's bench only measured the prover.
+Slim, and deliberately not gated on any held-out measurement (see the do-not-reintroduce marker). These are the two throughput/tuning items that survive on their own merits; both are watched via the real-queue feedback signal.
 
-### Task 3.1 — Track P (prove) manifest + runner + scorer
-**Files:** Create `probe/bench.py`, `probe/test_bench.py`, `bench/mathfin_bench_p.json`, `docs/research/mathfin-bench.md`.
-- [ ] **3.1.1 (RED)** `test_build_manifest_p_temporal_split`: only corpus entries with `merged_after > model_release` (from git log dates or ledger metadata) are eligible; each item = `{id, statement_with_sorry, input_hash, domain, merged_at}`; proof text stripped; deterministic selection (no `random`).
-- [ ] **3.1.2 (GREEN)** Implement (reuse `build_manifest.py`'s decl parsing). **3.1.3** Scorer: pass@k per budget + per-domain + tokens/wall-clock, markdown report. **3.1.4** Runner behind `BENCH_LIVE=1` with injected `harness_fn(**_kw)` for unit tests. Freeze + commit `bench/mathfin_bench_p.json` (regenerate only on an explicit split refresh).
+### Task 3.1 — CI verification substrate (parallel Lean REPLs) · substrate
+**Files:** `probe/verify_pool.py` + `probe/test_verify_pool.py` (injected fake REPLs; N workers, env-cache reuse, recycle-on-OOM), a `workflow_dispatch` batch-verify job in `.github/workflows/` (16 GB runner).
+- [ ] **3.1.1** Design note in the module docstring: the pool runs **only on CI/big boxes** — the local one-Lean-process doctrine is untouched. It exists to (a) run the decomposition loop's leaves in parallel, and (b) speed the `ledger verify --exec` corpus sweep — not to serve any benchmark.
+- [ ] **3.1.2 (RED→GREEN)** Pool scheduling/recycling unit-tested with fakes (no real Lean). **3.1.3** Wire as the parallel backend for (a) Phase 2's leaf-proving and (b) the CI `ledger verify --exec` sweep. Commit. *This uncaps Phase 2's decomposition depth (N leaves at once) and shortens the corpus re-verify after a deep-module change.*
 
-### Task 3.2 — Track D (draft) with gold references
-**Files:** `probe/bench.py` (extend), `bench/mathfin_bench_d.json`.
-- [ ] **3.2.1 (RED)** `test_build_manifest_d_from_closed_issues`: items are CLOSED `type:proof` issues whose merged statement exists in the corpus (the gold reference); item = `{issue_number, issue_prose, gold_statement, pointers}`.
-- [ ] **3.2.2 (GREEN)** Implement; scoring = the existing gate battery (elaborates / depth / triviality / fidelity-judge) **plus** gold-comparison: definitional-equivalence probe against the gold statement (`example : <gold binders> : <gold concl> := by intros; exact <drafted-name> ...` in both directions, kernel-checked — the BEq-style check the field can't usually run because it lacks a gold reference; we have one). Human spot-check column for disagreements.
-- [ ] **3.2.3** Run the drafter (current config) over Track D once; the per-gate loss table becomes the drafter's baseline. Commit.
+### Task 3.2 — Budget-shape retune toward depth (field-evidence-based)
+**Files:** `pipeline.toml` (`fanout`, `repair_rounds`, `tokens_per_attempt`).
+- [ ] **3.2.1** Apply the field-measured default: `fanout=2 × repair_rounds≥6` at equal total token spend (Delta/Numina both measured depth > breadth at fixed budget). One-line `pipeline.toml` change.
+- [ ] **3.2.2** Watch the obstruction report (Task 1.7) and the queue outcomes over the next several ticks. If the `prover-max-rounds` family shrinks and merge-rate holds/rises, keep it; if outcomes worsen, one-line revert. Record the call + its real-queue evidence in `docs/upgrade-backlog.md`.
 
-### Task 3.3 — CI verification substrate (uncaps depth + sweeps)
-**Files:** `probe/verify_pool.py` + `probe/test_verify_pool.py` (injected fake REPLs; N workers, env-cache reuse, recycle-on-OOM), a `workflow_dispatch` bench job in `.github/workflows/` (16 GB runner, `BENCH_LIVE=1`).
-- [ ] **3.3.1** Design note in the module docstring: the pool runs **only on CI/big boxes** — the local one-Lean-process doctrine is untouched.
-- [ ] **3.3.2 (RED→GREEN)** Pool scheduling/recycling unit-tested with fakes. **3.3.3** Wire as the bench runner's backend and the CI `ledger verify --exec` sweep backend. Commit.
-
-### Task 3.4 — Measured tuning (only now)
-- [ ] **3.4.1** Budget shape (survey R1): baseline Track P at current shape; try `fanout=2 × repair_rounds≥6` at equal spend; keep the winner; record the delta in `docs/upgrade-backlog.md`.
-- [ ] **3.4.2** Bench the Phase-2 A/B arms on the stuck-target subset (the decision-gate evidence).
-- [ ] **3.4.3** H7 (conclusion-head template retrieval) as a *bench-gated experiment*: implement only if a pilot shows a Track-P delta; drop otherwise (G-Research prior says likely null for agentic provers).
-
-**Acceptance for Phase 3:** both manifests frozen + committed; one full report per track; the budget-shape decision and the H7 keep/drop decision each cite a bench delta; sweeps run on CI, not the 10 GB box.
+**Acceptance for Phase 3:** the parallel pool runs the ledger sweep on CI (not the 10 GB box) and backs Phase 2's leaves; the budget-shape decision is recorded with its real-queue evidence.
 
 ---
 
 ## Phase 4 — Flywheel remainder + faithfulness + supervised sourcing · **BRAINSTORM-GATED**
 
-Unchanged in gating from v1 (this genuinely hinges on an unmade decision: how far to relax all-human target sourcing, which makes active faithfulness load-bearing). Slimmer than v1 because triage moved to Phase 1 and keep-and-revise moved to Phase 2. Remaining scope for the brainstorm:
+Genuinely hinges on an unmade decision: how far to relax all-human target sourcing, which makes active faithfulness load-bearing. Slimmer than earlier drafts because triage moved to Phase 1 and keep-and-revise moved to Phase 2. Remaining scope for the brainstorm:
 - **Flywheel remainder:** proved-lemma promotion into the premise index beyond the parent target; exemplar accumulation from our own accepted proofs.
 - **Faithfulness load-bearing:** activate disprove-and-retire + hypothesis-rejection beyond the current soft roles (backlog C) the moment any target is not R-authored; vacuous-premise probe (H10) joins here.
 - **Supervised sourcing, theory-weighted:** blueprint-gap oracle (`lean_decl`-less nodes with `\uses` demand) + "prove the axioms we assume" + reduced_core-promotion candidates, ranked by architectural centrality (bridges/towers), surfaced to R for approval — connecting the pipeline to `mathematical-architecture.md`.
@@ -229,19 +228,20 @@ Unchanged in gating from v1 (this genuinely hinges on an unmade decision: how fa
 
 ## The 2026-09-30 decision gate (standing item)
 
-Labs $0 retires. Decide **keep-Magistral / frontier-decomposer / hybrid** on: the A/B scoreboard (Task 2.6), Track-P/D bench numbers per arm (Task 3.4.2), refinery-minutes-per-merged-PR, and the actual price sheet. Put a reminder in `docs/upgrade-backlog.md` now; the evidence collection starts the day Phase 2 lands.
+Labs $0 retires. Decide **keep-Magistral / frontier-decomposer / hybrid** on real-queue evidence: the A/B scoreboard (Task 2.6), refinery-minutes-per-merged-PR, leaves-closed-per-target per arm, and the actual price sheet. Put a reminder in `docs/upgrade-backlog.md` now; the evidence collection starts the day Phase 2 lands.
 
 ---
 
 ## Self-review
 
-- **Review findings addressed:** engine choice surfaced as an explicit, dated decision with an evidence protocol (not inherited); discriminating experiment is Phase 0; bench decontaminated + drafter-track added; cron demoted in writing; refinery bottleneck priced (2.7); feasibility census + failure triage pulled into Phase 1; polish tail explicitly deferred; stale R2 task removed.
-- **Coverage vs sources:** harvest H1–H5, H8, H9, H11, H12 → Phase 1; H6/H7/H10/T3/T5 → deferred tail or Phase 3/4 with reasons; T1/T6 → 1.10; T7 kept. Survey #3/DSP → Phase 2; #5 bench → Phase 3 (redesigned); D substrate → 3.3; R1 → 3.4.1; R5 triage → 1.7; ML4TP experiment → Phase 0. Backlog C/E/F/G/H: C+H10 → Phase 4; E partially superseded by existing embed retrieval + 3.4.3; F → Phase 2 (the point of v2); G/H → Phase 4.
+- **Review findings addressed:** engine choice surfaced as an explicit, dated decision with an evidence protocol (not inherited); discriminating experiment is Phase 0; cron demoted in writing; refinery bottleneck priced (2.7); feasibility census + failure triage pulled into Phase 1; polish tail explicitly deferred; stale R2 task removed.
+- **Bench removal (v3):** the held-out evaluation track is gone per R's directive; the tuning/decision-gate function it served is carried by the real-queue signal (obstruction report 1.7 + A/B scoreboard 2.6); the CI verification substrate is retained on its own merits (3.1). No dangling references remain.
+- **Coverage vs sources:** harvest H1–H5, H8, H9, H11, H12 → Phase 1; H6/H7/H10/T3/T5 → deferred tail or Phase 4 with reasons; T1/T6 → 1.10; T7 kept. Survey #3/DSP → Phase 2; survey #5 (evaluation) → removed per R; D substrate → 3.1; R1 budget → 3.2; R5 triage → 1.7; ML4TP experiment → Phase 0. Backlog C/E/F/G/H: C+H10 → Phase 4; E partially superseded by existing embed retrieval; F → Phase 2 (the point of v2); G/H → Phase 4.
 - **Placeholder scan:** no TBDs; every code step names its test and file; Phase 2.0's doc and Phase 4's brainstorm are the two intentional design pauses, both marked.
 - **Type consistency:** `parse_dag/topo_order/DagError`, `assemble_skeleton/skeleton_gate`, `recompose`, `build_drafter_prompt`, `route_feasibility` used consistently across their producing and consuming tasks; all fakes take `**_kw`.
 
 ## Execution handoff
 
-Order: **Phase 0 now** (days), **Phase 1 in parallel** (independent of 0's verdict), **Phase 2 after 2.0 sign-off**, **Phase 3 after Phase 2 lands**, **Phase 4 after its brainstorm**. Two execution options per task batch:
+Order: **Phase 0 now** (days), **Phase 1 in parallel** (independent of 0's verdict), **Phase 2 after 2.0 sign-off**, **Phase 3 alongside/after Phase 2** (3.1 enables Phase 2's parallel leaves), **Phase 4 after its brainstorm**. Two execution options per task batch:
 1. **Subagent-Driven (recommended)** — fresh subagent per task, task review between, broad review at the end (`superpowers:subagent-driven-development`).
 2. **Inline** — `superpowers:executing-plans` with checkpoints.
