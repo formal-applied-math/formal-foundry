@@ -19,22 +19,26 @@ from probe_lib import axiom_guard_block, lint_violations, slop_report
 
 
 def gate(candidate: str, sorry_name: str, *, check_fn) -> dict:
-    """Return {passed, reason, axioms_clean, slop, errors}. `reason` is one of
-    `forbidden:<list>` / `lint:<list>` / `compile_or_sorry` / `axiom_dirty` / `ok`."""
+    """Return {passed, reason, axioms_clean, slop, errors, warnings}. `reason` is one
+    of `forbidden:<list>` / `lint:<list>` / `compile_or_sorry` / `axiom_dirty` / `ok`.
+    `warnings` are the CANDIDATE check's elaborator warnings (the strengthen pass
+    reads `unused variable` off them); textual screens surface none."""
     slop = slop_report(candidate)
     if slop["forbidden"]:
         return {"passed": False, "reason": f"forbidden:{slop['forbidden']}",
-                "axioms_clean": None, "slop": slop, "errors": []}
+                "axioms_clean": None, "slop": slop, "errors": [], "warnings": []}
     lint = lint_violations(candidate)
     if lint:
         return {"passed": False, "reason": f"lint:{lint}",
-                "axioms_clean": None, "slop": slop, "errors": []}
+                "axioms_clean": None, "slop": slop, "errors": [], "warnings": []}
     result = check_fn(candidate)
+    warnings = result.get("warnings", [])
     if not (result.get("success") and result.get("sorry_count", 0) == 0):
         return {"passed": False, "reason": "compile_or_sorry", "axioms_clean": None,
-                "slop": slop, "errors": result.get("errors", [])}
+                "slop": slop, "errors": result.get("errors", []), "warnings": warnings}
     guard = check_fn(axiom_guard_block(candidate, sorry_name))
     if not guard.get("success"):
         return {"passed": False, "reason": "axiom_dirty", "axioms_clean": False,
-                "slop": slop, "errors": []}
-    return {"passed": True, "reason": "ok", "axioms_clean": True, "slop": slop, "errors": []}
+                "slop": slop, "errors": [], "warnings": warnings}
+    return {"passed": True, "reason": "ok", "axioms_clean": True, "slop": slop,
+            "errors": [], "warnings": warnings}

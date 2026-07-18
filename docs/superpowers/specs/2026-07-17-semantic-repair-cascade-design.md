@@ -138,3 +138,29 @@ where repair is cheapest instead of at human review:
   prover). A lint-dirty candidate records as `fail_gate`, never opens a PR.
 - The formalize contract states the bar up front (docstring + lowerCamelCase),
   so round 1 is usually already clean.
+
+## Addendum 2 (2026-07-17, post PR #124): gate-time strengthen — drop unused hypotheses
+
+2/2 production PRs shipped a hypothesis the finished proof never used (#123
+`hTn`, #124 `hσ_eq`). Unused-ness is a property of the PROOF (Lean suppresses
+the `unusedVariables` linter under `sorry`), so no draft-time gate can catch
+it; instead the vibe gate now runs a strengthen pass on a kernel-passing
+candidate (R chose auto-strip over gate-fail and human-review):
+
+- `gate.gate()` surfaces the candidate check's elaborator `warnings`.
+- `autoformalize.strengthen_candidate` reads `unused variable` warnings,
+  intersects with the theorem's EXPLICIT binders (`_`-prefixed and
+  implicit/instance binders exempt), drops them from the signature, and
+  re-runs the FULL gate on the stripped statement; warnings from the re-gate
+  drive a bounded cascade (a drop can orphan another binder). Dropping an
+  unused hypothesis can only strengthen the theorem — the fidelity direction
+  is safe by construction.
+- Fail-open everywhere: re-gate red, unlocatable decl, or unrebuildable
+  snippet reverts to the proved original. Module and re-export snippet move
+  together or not at all (a signature mismatch would block open-pr regen).
+- The stripped re-export entry is written as a RUN artifact
+  (`runs/$TAG-$ID.entry.json`, provenance notes `stripped_hypotheses`);
+  `open-pr.sh` prefers it over the seed-manifest entry. The queue stays
+  immutable (zombie doctrine).
+- Telemetry: the run summary row carries `stripped_hypotheses` when the pass
+  fired.

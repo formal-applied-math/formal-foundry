@@ -1437,6 +1437,101 @@ def test_assistant_turn_substitutes_placeholder_for_empty():
     assert af._assistant(None)["content"] == "(no output)"
 
 
+# --- strengthen: post-proof unused-hypothesis stripping (option b) -----------
+# 2/2 production PRs shipped an unused hypothesis (#123 hTn, #124 hσ_eq).
+# Dropping one can only STRENGTHEN the theorem, so the transform is
+# faithfulness-safe by construction; the full gate re-runs before acceptance.
+
+_STRONG_MOD = (
+    "module\n\npublic import Mathlib\n\nset_option autoImplicit false\n\n"
+    "@[expose] public section\n\nnamespace MathFin\n\n"
+    "/-- Std-dev premium. -/\ndef stdDevPremium (β μ σ : ℝ) : ℝ := μ + β * σ\n\n"
+    "theorem premium_ge_mean (μ σ : ℝ) (hμ : 0 ≤ μ) (hσ : 0 ≤ σ) "
+    "(hσ_eq : σ = Real.sqrt σ) : stdDevPremium 1 μ σ ≥ μ := by\n"
+    "  dsimp [stdDevPremium]; nlinarith\n\nend MathFin\n"
+)
+_STRONG_SNIP = (
+    "import MathFin.Actuarial.ActuarialInsurance\n\nopen MathFin\n\n"
+    "/-- d. -/\n"
+    "theorem mf_ins (μ σ : ℝ) (hμ : 0 ≤ μ) (hσ : 0 ≤ σ) "
+    "(hσ_eq : σ = Real.sqrt σ) : stdDevPremium 1 μ σ ≥ μ :=\n"
+    "  MathFin.premium_ge_mean μ σ hμ hσ hσ_eq\n"
+)
+_UNUSED_WARN = ["line 12:34: unused variable `hσ_eq` [linter.unusedVariables]"]
+
+
+def test_remove_explicit_binders_drops_single_name_group():
+    out, dropped = af.remove_explicit_binders(
+        "(μ σ : ℝ) (hμ : 0 ≤ μ) (hσ_eq : σ = Real.sqrt σ)", {"hσ_eq"})
+    assert dropped == ["hσ_eq"] and "hσ_eq" not in out and "(hμ : 0 ≤ μ)" in out
+
+
+def test_remove_explicit_binders_multi_name_group_keeps_the_rest():
+    out, dropped = af.remove_explicit_binders("(a b : ℝ) (h : 0 ≤ a)", {"b"})
+    assert dropped == ["b"] and "(a : ℝ)" in out and "b" not in out.split(":")[0]
+
+
+def test_remove_explicit_binders_never_touches_implicit_groups():
+    out, dropped = af.remove_explicit_binders("{ι : Type*} (h : 0 ≤ 1)", {"ι"})
+    assert dropped == [] and "{ι : Type*}" in out
+
+
+def test_unused_theorem_hypotheses_filters_to_explicit_binders():
+    binders = "(μ : ℝ) (hσ_eq : μ = μ)"
+    warns = _UNUSED_WARN + ["unused variable `hlocal`", "unused variable `_hμ`"]
+    assert af.unused_theorem_hypotheses(warns, binders) == ["hσ_eq"]
+
+
+def test_strengthen_candidate_strips_regates_and_rebuilds_snippet():
+    regates = []
+
+    def regate(cand):
+        regates.append(cand)
+        return {"passed": True, "reason": "ok", "warnings": []}
+    s = af.strengthen_candidate(_STRONG_MOD, _STRONG_SNIP, "premium_ge_mean",
+                                _UNUSED_WARN, regate_fn=regate)
+    assert s["stripped"] == ["hσ_eq"]
+    assert "hσ_eq" not in s["candidate"] and "(hσ : 0 ≤ σ)" in s["candidate"]
+    assert len(regates) == 1 and "hσ_eq" not in regates[0]
+    assert s["entry_code"] is not None and "hσ_eq" not in s["entry_code"]
+    assert "MathFin.premium_ge_mean μ σ hμ hσ" in s["entry_code"]
+
+
+def test_strengthen_candidate_fails_open_when_regate_rejects():
+    s = af.strengthen_candidate(_STRONG_MOD, _STRONG_SNIP, "premium_ge_mean",
+                                _UNUSED_WARN,
+                                regate_fn=lambda c: {"passed": False, "reason": "axiom_dirty"})
+    assert s["stripped"] == [] and s["candidate"] == _STRONG_MOD and s["entry_code"] is None
+
+
+def test_strengthen_candidate_reverts_when_snippet_cannot_rebuild():
+    # module and snippet must stay coherent — an unrebuildable snippet reverts
+    # the whole strip (else open-pr regen would block on a mismatched re-export)
+    s = af.strengthen_candidate(_STRONG_MOD, "not a lean snippet", "premium_ge_mean",
+                                _UNUSED_WARN,
+                                regate_fn=lambda c: {"passed": True, "warnings": []})
+    assert s["stripped"] == [] and s["candidate"] == _STRONG_MOD
+
+
+def test_strengthen_candidate_noop_without_relevant_warnings():
+    regates = []
+    s = af.strengthen_candidate(_STRONG_MOD, _STRONG_SNIP, "premium_ge_mean",
+                                ["unused variable `hproof_local`"],
+                                regate_fn=lambda c: regates.append(c))
+    assert s["stripped"] == [] and s["candidate"] == _STRONG_MOD and regates == []
+
+
+def test_strengthen_candidate_cascades_on_fresh_warnings():
+    # dropping hσ_eq may leave another binder newly unused — the re-gate's own
+    # warnings drive the next pass, bounded by max_passes
+    seq = iter([{"passed": True, "warnings": ["unused variable `hσ`"]},
+                {"passed": True, "warnings": []}])
+    s = af.strengthen_candidate(_STRONG_MOD, _STRONG_SNIP, "premium_ge_mean",
+                                _UNUSED_WARN, regate_fn=lambda c: next(seq))
+    assert s["stripped"] == ["hσ_eq", "hσ"]
+    assert "hσ" not in s["candidate"].split(":= by")[0].split("theorem")[1]
+
+
 def test_formalize_with_repair_guards_empty_assistant_content():
     # a free-tier EMPTY reply must not become an empty-content assistant message on the
     # next round (Mistral 400: "Assistant message must have either content or tool_calls").

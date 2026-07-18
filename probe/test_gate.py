@@ -19,6 +19,17 @@ def test_gate_passes_when_clean_and_axiom_clean():
     assert len(calls) == 2  # candidate check + axiom-guard check
 
 
+def test_gate_surfaces_candidate_warnings():
+    # the strengthen pass reads `unused variable` warnings off the gate result —
+    # they come from the CANDIDATE check, not the axiom-guard check
+    seq = iter([{"success": True, "sorry_count": 0, "errors": [],
+                 "warnings": ["unused variable `hσ_eq`"]},
+                {"success": True, "sorry_count": 0, "errors": [], "warnings": ["guard noise"]}])
+    r = gate.gate(CLEAN, "t", check_fn=lambda c: next(seq))
+    assert r["passed"] is True
+    assert r["warnings"] == ["unused variable `hσ_eq`"]
+
+
 def test_gate_rejects_forbidden_before_touching_daemon():
     bad = "import Mathlib\ntheorem t : True := by sorry"
     calls = []

@@ -111,14 +111,20 @@ blocked() {  # file an autoform-blocked issue on the FOUNDRY repo, do NOT open a
 cd "$MAIN"
 BRANCH="autoform/$ID-$TAG"
 git checkout -B "$BRANCH"
-python3 - "$CAND" "$QUEUE" "$ID" "$MAIN" "$FOUNDRY/probe" <<'PY' || exit 1
-import json, sys
-cand_path, queue_path, tid, main, probe_dir = sys.argv[1:6]
+python3 - "$CAND" "$QUEUE" "$ID" "$MAIN" "$FOUNDRY/probe" "$FOUNDRY/runs/$TAG-$ID.entry.json" <<'PY' || exit 1
+import json, os, sys
+cand_path, queue_path, tid, main, probe_dir, entry_override = sys.argv[1:7]
 sys.path.insert(0, probe_dir)
 from assemble import apply_contribution, ensure_umbrella_import
 q = json.load(open(queue_path))
 target = next(t for t in (q.get("targets", q) if isinstance(q, dict) else q) if t["id"] == tid)
-entry = target["benchmark_entry"]  # authored in the seed manifest
+if os.path.exists(entry_override):
+    # the gate's strengthen pass dropped unused hypotheses: the run-tagged entry
+    # matches the stripped module theorem; the seed-manifest entry no longer does.
+    entry = json.load(open(entry_override))
+    print("[open-pr] using strengthened entry (unused hypotheses stripped)", file=sys.stderr)
+else:
+    entry = target["benchmark_entry"]  # authored in the seed manifest
 code = open(cand_path, encoding="utf-8").read()
 written = apply_contribution(code, target, entry, main)
 written += ensure_umbrella_import(main, target["main_module"])

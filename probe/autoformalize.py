@@ -1342,6 +1342,153 @@ def explicit_arg_names(binders: str) -> list[str]:
     return names
 
 
+# --- strengthen: post-proof unused-hypothesis stripping ------------------------
+# 2/2 production PRs shipped a hypothesis the finished proof never used (#123
+# hTn, #124 hσ_eq). Unused-ness is a property of the PROOF, so it is only
+# knowable after the vibe prover closes the goal (Lean suppresses the
+# unusedVariables linter under `sorry`) — hence a gate-time transform, not a
+# draft-time gate. Dropping an unused hypothesis can only STRENGTHEN the
+# theorem, so the fidelity direction is safe by construction; the full kernel
+# gate re-runs on the stripped statement before it is accepted.
+
+
+def _locate_named(text: str, name: str) -> tuple[int, int, int]:
+    """`_locate` spans `(bstart, sep, end)` for the SPECIFIC decl `name` — the
+    proved candidate may hold vibe-added helper lemmas before the main theorem."""
+    m = re.search(rf"^\s*(?:@\[[^\]]*\]\s*)?(?:theorem|lemma)\s+{re.escape(name)}(?![A-Za-z0-9_'.])",
+                  text, re.MULTILINE)
+    if not m:
+        raise ValueError(f"declaration `{name}` not found")
+    off = m.start()
+    _n, bstart, sep, end = _locate(text[off:])
+    return off + bstart, off + sep, off + end
+
+
+def _binder_groups(binders: str) -> list[tuple[int, int, str, list[str] | None]]:
+    """Top-level binder groups: `(start, end, opener, names)`, end exclusive;
+    `names` is None for `{…}`/`[…]` groups (inferred binders — never stripped)."""
+    groups: list[tuple[int, int, str, list[str] | None]] = []
+    depth, start, opener = 0, -1, ""
+    for i, c in enumerate(binders):
+        if c in _OPEN:
+            if depth == 0:
+                start, opener = i, c
+            depth += 1
+        elif c in _CLOSE:
+            depth -= 1
+            if depth == 0 and start != -1:
+                names = None
+                if opener == "(":
+                    group = binders[start + 1:i]
+                    colon = group.find(":")
+                    names = (group[:colon] if colon != -1 else group).split()
+                groups.append((start, i + 1, opener, names))
+                start = -1
+    return groups
+
+
+def remove_explicit_binders(binders: str, drop: set[str]) -> tuple[str, list[str]]:
+    """Drop the named EXPLICIT `(…)` binders from a signature's binder string.
+    A multi-name group `(a b : T)` loses just the named ones; a group emptied of
+    its names is removed whole. Implicit/instance groups are never touched.
+    Returns `(new_binders, dropped_names)`."""
+    parts, dropped, last = [], [], 0
+    for start, end, opener, names in _binder_groups(binders):
+        parts.append(binders[last:start])
+        last = end
+        seg = binders[start:end]
+        if opener == "(" and names:
+            hit = [x for x in names if x in drop]
+            if hit:
+                dropped += hit
+                kept = [x for x in names if x not in drop]
+                if kept:
+                    group = binders[start + 1:end - 1]
+                    seg = "(" + " ".join(kept) + " " + group[group.find(":"):].strip() + ")"
+                else:
+                    seg = ""
+        parts.append(seg)
+    parts.append(binders[last:])
+    return re.sub(r"[ \t]{2,}", " ", "".join(parts)), dropped
+
+
+def unused_theorem_hypotheses(warnings, binders: str) -> list[str]:
+    """Names the elaborator flagged `unused variable` that are EXPLICIT binders of
+    the theorem — the strippable set (proof-internal unused vars are not statement
+    surgery). `_`-prefixed names are deliberate; skipped."""
+    flagged: list[str] = []
+    for w in warnings or []:
+        flagged += re.findall(r"[Uu]nused variable `([^`]+)`", str(w))
+    explicit = set(explicit_arg_names(binders))
+    seen: set[str] = set()
+    out = []
+    for x in flagged:
+        if x in explicit and not x.startswith("_") and x not in seen:
+            seen.add(x)
+            out.append(x)
+    return out
+
+
+def _rebuild_snippet(snippet: str, candidate: str, thm_name: str) -> str | None:
+    """Rebuild the re-export snippet against the stripped module theorem: same
+    binders, application re-derived from them (emit's own formula). None if the
+    snippet's shape is unexpected — the caller must then revert the whole strip,
+    because a module/snippet signature mismatch would block open-pr regen."""
+    try:
+        cb, cs, _ce = _locate_named(candidate, thm_name)
+        new_binders = candidate[cb:cs].strip()
+        _sn, sb, ss, send = _locate(snippet)
+        app = f"MathFin.{thm_name} {' '.join(explicit_arg_names(new_binders))}".rstrip()
+        return (snippet[:sb] + f" {new_binders} " + snippet[ss:send + 2]
+                + f"\n  {app}\n")
+    except ValueError:
+        return None
+
+
+def strengthen_candidate(candidate: str, snippet: str | None, thm_name: str,
+                         warnings, *, regate_fn, max_passes: int = 3,
+                         log=lambda m: None) -> dict:
+    """Drop theorem hypotheses the finished proof never used and re-gate. Keeps
+    the stronger statement only if the FULL gate passes again; any failure —
+    re-gate red, unlocatable decl, unrebuildable snippet — reverts to the
+    original (fail-open: never lose a good proof to the optimizer). Returns
+    `{candidate, entry_code, stripped}`; `entry_code` is the rebuilt re-export
+    (None when nothing was stripped or no snippet was supplied)."""
+    original = candidate
+    stripped: list[str] = []
+    for _ in range(max_passes):
+        try:
+            bstart, sep, _end = _locate_named(candidate, thm_name)
+        except ValueError:
+            break
+        binders = candidate[bstart:sep]
+        drop = unused_theorem_hypotheses(warnings, binders)
+        if not drop:
+            break
+        new_binders, dropped = remove_explicit_binders(binders, set(drop))
+        if not dropped:
+            break
+        cand2 = candidate[:bstart] + new_binders + candidate[sep:]
+        g2 = regate_fn(cand2)
+        if not g2.get("passed"):
+            log(f"strengthen: dropping {dropped} failed the re-gate "
+                f"({g2.get('reason')}); keeping the proved original")
+            break
+        log(f"strengthen: dropped unused hypothesis(es) {dropped}")
+        candidate = cand2
+        warnings = g2.get("warnings") or []
+        stripped += dropped
+    if not stripped:
+        return {"candidate": original, "entry_code": None, "stripped": []}
+    entry_code = None
+    if snippet is not None:
+        entry_code = _rebuild_snippet(snippet, candidate, thm_name)
+        if entry_code is None:
+            log("strengthen: snippet rebuild failed; reverting to the original statement")
+            return {"candidate": original, "entry_code": None, "stripped": []}
+    return {"candidate": candidate, "entry_code": entry_code, "stripped": stripped}
+
+
 # --- placement + mechanical emit ---------------------------------------------
 
 # issue area label -> MathFin subdirectory. Areas without a directory yet (fx)

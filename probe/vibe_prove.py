@@ -21,6 +21,7 @@ This module does the LSP-phase (produce a raw candidate). The daemon-phase gate
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -133,6 +134,7 @@ def _cmd_run(args) -> int:
 def _cmd_gate(args) -> int:
     import time
 
+    from autoformalize import strengthen_candidate
     from gate import gate as run_gate
     from probe import daemon_check
     from probe_lib import append_jsonl
@@ -150,6 +152,29 @@ def _cmd_gate(args) -> int:
         else:
             g = run_gate(candidate, target["sorry_name"], check_fn=daemon_check)
             if g["passed"]:
+                # strengthen: drop hypotheses the proof never used (elaborator
+                # warnings), re-gate; fail-open keeps the proved original. The
+                # stripped re-export entry becomes a RUN artifact open-pr prefers
+                # — the queue stays immutable (zombie doctrine).
+                entry = target.get("benchmark_entry") or {}
+                snippet = (entry.get("code") or {}).get("lean")
+                s = strengthen_candidate(
+                    candidate, snippet, target["sorry_name"], g.get("warnings"),
+                    regate_fn=lambda c: run_gate(c, target["sorry_name"],
+                                                 check_fn=daemon_check),
+                    log=lambda m: print(f"[vibe-gate] {target['id']}: {m}", flush=True))
+                if s["stripped"]:
+                    candidate = s["candidate"]
+                    summary["stripped_hypotheses"] = s["stripped"]
+                    if s["entry_code"]:
+                        e2 = json.loads(json.dumps(entry))
+                        e2["code"]["lean"] = s["entry_code"]
+                        e2.setdefault("metadata", {}).setdefault(
+                            "provenance", {})["stripped_hypotheses"] = s["stripped"]
+                        override = os.path.join(
+                            run_dir, f"{args.run_tag}-{target['id']}.entry.json")
+                        with open(override, "w", encoding="utf-8") as f:
+                            json.dump(e2, f, ensure_ascii=False, indent=2)
                 summary["outcome"] = "pass"
                 summary["axioms_clean"] = True
                 win = os.path.join(run_dir, f"{args.run_tag}-{target['id']}.lean")
