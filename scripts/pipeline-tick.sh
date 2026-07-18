@@ -169,3 +169,21 @@ else
   python3 pipeline.py record --config "$CFG" --state "$STATE" --id "$ID" \
     --outcome "$OUTCOME" ${TOKENS:+--tokens "$TOKENS"} >&2
 fi
+
+# 6. Obstruction-family triage (Task 1.7) — the standing feedback signal. Rewrite
+#    runs/obstructions-report.md from the drafter's refill-history + the prover's
+#    run summaries and print the dominant family, so every tick names the fix the
+#    pipeline needs next. Non-fatal (a bad artifact never fails the tick); the
+#    report rides the runs/ telemetry the persist step pushes.
+python3 - "$FOUNDRY/runs" >&2 <<'PY' || echo "[tick] obstruction triage skipped" >&2
+import sys
+from obstructions import bucket_obstructions, load_rows, render_report
+runs = sys.argv[1]
+buckets = bucket_obstructions(*load_rows(runs))
+with open(runs + "/obstructions-report.md", "w", encoding="utf-8") as f:
+    f.write(render_report(buckets))
+top = max(buckets.items(), key=lambda kv: kv[1]["count"])
+print(f"[tick] obstructions: {top[0]} leads ({top[1]['count']}) — see "
+      "runs/obstructions-report.md" if top[1]["count"] else
+      "[tick] obstructions: none recorded yet")
+PY
