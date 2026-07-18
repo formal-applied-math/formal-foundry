@@ -1,6 +1,6 @@
 # Magistral decomposition loop — mechanics design (Task 2.0)
 
-> **Status: design-of-record for R sign-off before Phase 2.1+.** This is a
+> **Status: SIGNED OFF — R delegated the design decisions (2026-07-18); 2.1+ in progress.** This is a
 > *mechanics* doc — the strategy is fixed by
 > `docs/superpowers/plans/2026-07-18-autoformalization-improvements.md` (centaur
 > architecture; general-reasoner role filled by Magistral for now; decision gate
@@ -37,8 +37,10 @@ target ──▶ draft_decomposition (Magistral, chat_fn)         [2.2]
         open-pr (DAG-shaped module; PR body lists the DAG)
 ```
 
-Interface is **model-agnostic** (`chat_fn` injection, as everywhere in `probe/`):
-Magistral in production; a Claude/manual arm injects transcripts for the A/B.
+Interface is **model-agnostic** (`chat_fn` injection). Magistral is the production
+reasoner — the automated loop is **Mistral-only**. A manual/Claude centaur session
+(the human-oversight layer at the top of the centaur, e.g. Phase 0 Control B) can log
+its outcome as a REFERENCE row: opportunistic, never a scheduled competitor.
 
 ## 2.1 — Lemma-DAG schema + validation (`probe/decompose.py`)
 
@@ -58,8 +60,8 @@ JSON contract (the decomposer's output):
 - `parse_dag(json) -> Dag` — validate: unique names, `depends_on` references exist,
   no cycles, `len(leaves) <= MAX_LEAVES`. Raises `DagError` otherwise.
 - `topo_order(dag) -> [Node]` — leaves before the `main` node, dependencies first.
-- `MAX_LEAVES` from `pipeline.toml [decompose] max_leaves` (default **5** — leaves
-  are individually short by design; a DAG that needs more is a mis-split).
+- `MAX_LEAVES` from `pipeline.toml [decompose] max_leaves` (default **3** — tight
+  splits first; a DAG that wants more is usually mis-shaped. Raise on evidence).
 
 ## 2.2 — Decomposer call (`draft_decomposition(target, context_pack, *, chat_fn)`)
 
@@ -124,13 +126,17 @@ gets proving budget — the mid-tier-reasoner compensation.
 - **keep-and-revise**: a proved leaf's statement+proof is appended to the target's
   context pack on the next decomposition attempt (the loop learns within a target).
 
-## 2.6 — A/B scoreboard (decision-gate evidence)
+## 2.6 — Performance scoreboard (decision-gate evidence)
 
-Summary rows gain `arm ∈ {cron, decompose-magistral, centaur}`,
+The PRIMARY measurement is **Magistral's absolute performance** on the real queue —
+that is what says whether the decomposer works and whether a change helped (its own
+numbers improve). Summary rows gain `arm ∈ {cron, decompose-magistral, centaur}`,
 `leaves_total`/`leaves_closed`, and `refinery_minutes` (filled by hand at merge).
 `docs/research/ab-decomposer.md` is the running scoreboard: one row per
-target-attempt per arm, on REAL targets. By 2026-09-30 this table is the
-Magistral-vs-frontier evidence — measured on the live queue, not a synthetic set.
+target-attempt. `centaur` rows are **opportunistic** — logged when a manual
+hard-target session (the human-oversight layer, e.g. Phase 0 Control B) naturally
+happens. They are a free frontier reference for the 2026-09-30 gate, NOT a scheduled
+Claude arm and NOT the per-tick signal: production stays Magistral-only.
 
 ## 2.7 — First-pass refinery punch list
 
@@ -141,16 +147,19 @@ gates.** The taste half (inspired math, architecture) stays human/Claude.
 
 ## The 2026-09-30 decision-gate inputs
 
-Keep-Magistral / frontier-decomposer / hybrid, decided on: the A/B scoreboard
-(2.6), refinery-minutes-per-merged-PR, leaves-closed-per-target per arm, and the
-actual Labs price sheet. Evidence collection starts the day 2.1–2.6 land.
+Keep-Magistral (now paid) / frontier-decomposer / hybrid, decided on: Magistral's
+accumulated absolute track record (leaves-closed, merge-rate, refinery-minutes), the
+opportunistic centaur reference rows, and the actual Labs price sheet. If the call is
+close, run a ONE-TIME focused frontier bake-off at the gate — we do NOT run a
+continuous Claude arm before then (that would mix vendors for evidence we can
+assemble more cheaply at decision time).
 
-## Open questions for R (sign-off)
+## Decisions (R delegated, 2026-07-18)
 
-1. **MAX_LEAVES default 5** — right ceiling, or start at 3 (tighter splits) and
-   raise on evidence?
-2. **Decompose trigger** — only explicit `decompose` tag, or auto after N (=2?)
-   failed plain attempts? (Auto risks spending decomposer tokens on targets a
-   patterns.md tweak would fix; tag-only is conservative.)
-3. **Centaur arm cadence** — one centaur session per how many decompose-magistral
-   attempts, to keep the A/B honest without heavy manual load?
+1. **MAX_LEAVES = 3** — tight splits first; raise on evidence if real targets need
+   deeper DAGs. A split that wants >3 leaves is usually mis-shaped.
+2. **Decompose trigger = tag-only** (`decompose` label). Conservative: no decomposer
+   tokens on targets a patterns.md tweak or a plain retry would fix. Auto-after-N is a
+   later tuning, gated on the obstruction report showing a decompose-shaped family.
+3. **Centaur = opportunistic, not an arm.** No scheduled cadence; log a centaur row
+   when a manual hard-target session happens. Production is Magistral-only.
