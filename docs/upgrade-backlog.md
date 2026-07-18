@@ -102,6 +102,27 @@ doubles the per-attempt budget while keeping pass@4 diversity. Repair
   the depth retune (`fanout=2 × repair_rounds≥6`) and watches the **live-queue**
   signal (obstruction-family report + queue outcomes); keep or one-line-revert on
   that.
+
+### B′. Phase 3.2 depth retune, reconciled to the vibe era — APPLIED 2026-07-18 (`pipeline.toml`)
+
+Entry B described the **retired text-loop's** `fanout × tokens_per_attempt` knobs.
+Since 2026-07-17 the prove path is the vibe ⇄ lean-lsp harness: **fanout collapsed to
+1**, all budget in one deep agentic session bounded by `max_turns`. That migration *is*
+the maximal depth move of the Delta/Numina `depth > breadth` finding — the retired knobs
+no longer exist (comments only).
+
+- **Applied:** `max_turns 40 → 60` — the live realization of "more depth at equal total
+  spend": more repair turns under the **unchanged** `tokens_per_issue_cap` (500k), which
+  still bounds actual spend (a session that hits the cap stops regardless of turns).
+- **Deferred to CI (Phase 3.1 pool):** the evidence's `fanout=2` refinement (two modest
+  deep sessions beat one at fixed budget) needs **two parallel Lean sessions** — the
+  local memory doctrine forbids that (two Mathlib envs overcommit the 10 GB box), so it
+  is a big-box experiment on the parallel pool, not a config flip. Revisit when the pool
+  runs on a ≥16 GB runner.
+- **Watch (keep or one-line-revert):** the obstruction report's `prover-max-rounds`
+  family and the queue merge-rate over the next several ticks. If `prover-max-rounds`
+  shrinks and merge-rate holds/rises, keep `max_turns=60`; if outcomes worsen, revert to
+  40. Record the call + its real-queue evidence here.
 - Sources: [Leanstral 1.5](https://mistral.ai/news/leanstral-1-5/), survey #2.
 
 ### C. Statement-side faithfulness filters — Leanstral-native; DESIGNED, ready to build

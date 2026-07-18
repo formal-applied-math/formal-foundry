@@ -203,6 +203,12 @@ def test_dag_rejects_cycles_and_oversize():
 
 ## Phase 3 — Throughput substrate + field-evidence tuning (Phase-2-informed)
 
+> **BUILT (2026-07-18):** 3.1 parallel verify pool (`probe/verify_pool.py` + tests +
+> `.github/workflows/batch-verify.yml`, CI/big-box only — local one-Lean-process doctrine
+> untouched); 3.2 depth retune reconciled to the vibe era (`max_turns 40→60` at the
+> unchanged per-issue cap; the `fanout=2` refinement deferred to the CI pool). Decision +
+> watch-and-revert protocol recorded in `docs/upgrade-backlog.md` (entry B′).
+
 Slim — the two throughput/tuning items that survive on their own merits; both are watched via the real-queue feedback signal.
 
 ### Task 3.1 — CI verification substrate (parallel Lean REPLs) · substrate

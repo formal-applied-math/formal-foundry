@@ -22,7 +22,14 @@ reasoning_effort = "high"
 # Leanstral drives lean_goal / lean_multi_attempt / search itself, so more turns
 # = more repair depth. (This lever replaced the retired text-loop's
 # fanout × tokens_per_attempt budget.)
-max_turns = 40
+# Phase 3.2 depth retune (2026-07-18): the vibe path already IS the depth side of the
+# Delta/Numina depth>breadth finding (fanout=1, all budget in one deep session). The
+# live realization of "more depth at equal total spend" is more TURNS under the same
+# per-issue token ceiling (tokens_per_issue_cap, unchanged): 40 -> 60. Watched via the
+# obstruction report's prover-max-rounds family; one-line revert if outcomes worsen.
+# (The evidence's fanout=2 refinement needs two parallel Lean sessions = the Phase 3.1
+# pool on a big box, so it is a CI-only experiment, not a local flip — see upgrade-backlog.)
+max_turns = 60
 
 # Issue -> stub autoformalizer (the self-feeding refill phase). When the queue has
 # no unattempted target, the tick drafts one from the next `status:ready`+`type:proof`
