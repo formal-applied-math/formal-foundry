@@ -116,3 +116,52 @@ def test_skeleton_gate_requires_full_elaboration_with_n_sorries():
     # daemon infra error → indeterminate (Task 1.4 sentinel), never a false pass
     ind = skeleton_gate(lean, n, check_fn=lambda c: {"error": "daemon timeout"})
     assert ind["indeterminate"] and not ind["passed"]
+
+
+# --- Task 2.4: leaf routing through the existing prove+gate path --------------
+
+_DAG_FIXTURE = {
+    "main": {"name": "main_thm", "statement": "theorem main_thm (x : ℝ) : x = x",
+             "proof": "by exact lem_two x"},
+    "leaves": [
+        {"name": "lem_two", "statement": "theorem lem_two (x : ℝ) : x = x",
+         "pointers": ["MathFin/B.lean"], "depends_on": ["lem_one"]},
+        {"name": "lem_one", "statement": "theorem lem_one (y : ℝ) : y = y",
+         "pointers": ["MathFin/A.lean"], "depends_on": []},
+    ],
+}
+
+
+def test_manifest_accepts_dag_leaf_targets(tmp_path):
+    from decompose import build_leaf_manifest
+    dag = parse_dag(_DAG_FIXTURE)
+    man = build_leaf_manifest(dag, {"id": "cal-bk-99", "main_module": "MathFin/M.lean"},
+                              str(tmp_path), toolchain="leanprover/lean4:v4.31.0",
+                              main_commit="deadbeef")
+    # one target per leaf, in topo order (dependency first), each linked to the parent
+    assert [t["sorry_name"] for t in man["targets"]] == ["lem_one", "lem_two"]
+    assert [t["dag_order"] for t in man["targets"]] == [0, 1]
+    for t in man["targets"]:
+        assert t["parent"] == "main_thm" and t["kind"] == "prove"
+        assert t["parent_id"] == "cal-bk-99"
+        # the per-leaf stub is an ordinary single-sorry target vibe_prove reads verbatim
+        stub = (tmp_path / t["file"]).read_text(encoding="utf-8")
+        assert stub.count("sorry") == 1
+        assert f"theorem {t['sorry_name']}" in stub and ":= by sorry" in stub
+        assert t["input_hash"]
+    # the manifest is the shape vibe_prove._iter_targets consumes
+    assert man["toolchain"] == "leanprover/lean4:v4.31.0" and man["main_commit"] == "deadbeef"
+    assert (tmp_path / "manifest.json").exists()
+
+
+def test_leaf_stub_inlines_proved_dependency(tmp_path):
+    # keep-and-revise: a proved dependency is inlined ABOVE a dependent leaf so its
+    # proof can consume it, and the stub stays single-sorry (the dep carries no sorry).
+    from decompose import build_leaf_manifest
+    dag = parse_dag(_DAG_FIXTURE)
+    proved = {"lem_one": "theorem lem_one (y : ℝ) : y = y := rfl"}
+    man = build_leaf_manifest(dag, {"id": "cal-bk-99"}, str(tmp_path), proved=proved)
+    two = next(t for t in man["targets"] if t["sorry_name"] == "lem_two")
+    stub = (tmp_path / two["file"]).read_text(encoding="utf-8")
+    assert "theorem lem_one (y : ℝ) : y = y := rfl" in stub
+    assert stub.count("sorry") == 1     # only lem_two's own sorry

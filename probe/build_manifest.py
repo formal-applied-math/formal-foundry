@@ -16,6 +16,7 @@ import re
 import subprocess
 import sys
 
+from decompose import build_leaf_manifest, parse_dag
 from probe import daemon_check
 from probe_lib import sha256_hex
 
@@ -72,18 +73,49 @@ def parse_meta(code: str) -> dict:
     return out
 
 
+def _toolchain_and_commit(main_repo: str) -> tuple[str, str]:
+    toolchain = open(os.path.join(main_repo, "lean-toolchain")).read().strip()
+    commit = subprocess.run(["git", "-C", main_repo, "rev-parse", "HEAD"],
+                            capture_output=True, text=True).stdout.strip()
+    return toolchain, commit
+
+
+def build_dag_leaves(args) -> int:
+    """--dag mode (Phase 2): write a per-leaf single-sorry manifest for a decomposed
+    hard target, so the tick proves the leaves with the vibe prover VERBATIM. The DAG
+    comes from `draft_decomposition` (already skeleton-gated); this only lays out the
+    leaves + their parent linkage (`parent`, `parent_id`, `dag_order`)."""
+    toolchain, commit = _toolchain_and_commit(args.main_repo)
+    dag = parse_dag(json.load(open(args.dag)))
+    meta = json.loads(args.meta) if args.meta else {}
+    proved = json.loads(open(args.proved).read()) if args.proved else None
+    man = build_leaf_manifest(dag, meta, args.out, toolchain=toolchain,
+                              main_commit=commit, proved=proved)
+    print(f"wrote {os.path.join(args.out, 'manifest.json')}: "
+          f"{len(man['targets'])} leaf target(s)")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--main-repo", required=True)
+    # --dag mode: build a leaf manifest for a decomposed target instead of scanning stubs.
+    ap.add_argument("--dag", help="path to a skeleton-gated lemma-DAG json (Phase 2 leaf routing)")
+    ap.add_argument("--out", help="output dir for the leaf manifest + stubs (--dag mode)")
+    ap.add_argument("--meta", help="json placement metadata for the parent target (--dag mode)")
+    ap.add_argument("--proved", help="json map leaf-name -> proved decl block, inlined (--dag mode)")
     args = ap.parse_args()
+    if args.dag:
+        if not args.out:
+            print("--dag requires --out", file=sys.stderr)
+            return 2
+        return build_dag_leaves(args)
 
     # the live queue the scheduler reads (targets/queue/manifest.json); stubs +
     # their <id>.entry.json sidecars live alongside it.
     tdir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                         "targets", "queue")
-    toolchain = open(os.path.join(args.main_repo, "lean-toolchain")).read().strip()
-    commit = subprocess.run(["git", "-C", args.main_repo, "rev-parse", "HEAD"],
-                            capture_output=True, text=True).stdout.strip()
+    toolchain, commit = _toolchain_and_commit(args.main_repo)
 
     targets, bad = [], []
     for path in sorted(glob.glob(os.path.join(tdir, "cal-*.lean"))):
@@ -113,6 +145,11 @@ def main() -> int:
             "input_hash": sha256_hex(code + toolchain),
             **parse_meta(code),
         }
+        # tag-only decompose trigger (R decision 2026-07-18): a `-- decompose` header
+        # routes this hard target through the Phase 2 lemma-DAG path instead of a plain
+        # prove attempt. The tick honors it only when [decompose].enabled is true.
+        if re.search(r"--\s*decompose\b", code):
+            target["decompose"] = True
         entry = load_entry(path)
         if entry is not None:
             target["benchmark_entry"] = entry

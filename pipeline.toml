@@ -67,3 +67,17 @@ semantic_rounds = 2
 triviality_gate = true     # splice `first | rfl | simp` over the sorry at draft time: a clean
                            # close means a definitional restatement with no content (the
                            # cal-bk-67 class, caught before prove-compute instead of at open-pr)
+
+# Lemma-DAG decomposition (Phase 2 — docs/superpowers/specs/2026-07-18-decomposer-design.md).
+# The general reasoner (Magistral) SPLITS a hard target into a few named leaf lemmas + a
+# main theorem applying them; a Lean-side skeleton gate rejects a bad split for one
+# elaboration's cost BEFORE any leaf gets proving budget; leaves reuse the vibe prover
+# verbatim as ordinary single-sorry targets; a recomposition gate assembles the whole.
+# OFF BY DEFAULT and TAG-ONLY (R decision 2026-07-18): only a target tagged `decompose`
+# (a `-- decompose` stub header) takes this path — never a plain cron target. `enabled`
+# gates the whole path, so the running cron is byte-identical until it is flipped on.
+[decompose]
+enabled = false
+max_leaves = 3             # tight splits first; a DAG wanting more is usually mis-shaped (raise on evidence)
+leaf_max_turns = 40        # vibe turns per leaf (leaves are individually short by design)
+max_reask = 1              # bounded re-decompose rounds on a malformed DAG or a failed skeleton gate

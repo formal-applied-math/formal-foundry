@@ -12,7 +12,10 @@ Stdlib only; no Lean, no API, no network.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
+import re
 from dataclasses import dataclass, field
 
 # Default leaf ceiling (R decision 2026-07-18: tight splits first). The pipeline.toml
@@ -235,30 +238,81 @@ _LICENSE = ("/-\nCopyright (c) 2026 Raphael Coelho. All rights reserved.\n"
             "Authors: Raphael Coelho\n-/")
 
 
-def assemble_skeleton(dag: Dag, meta: dict | None = None) -> str:
-    """The skeleton module: every leaf `<statement> := by sorry`, the main theorem
-    `<statement> := <main.proof>` (its proof applying the leaves, NOT sorry). If a
-    good decomposition, this elaborates with exactly `len(leaves)` sorries — that is
-    what `skeleton_gate` checks, before any leaf gets proving budget."""
-    meta = meta or {}
-    pointers = sorted({p for leaf in dag.leaves for p in leaf.pointers if p.endswith(".lean")})
+def _module_text(pointers, body: str) -> str:
+    """Wrap a declaration `body` in the MathFin module boilerplate: license, `module`
+    header, Mathlib + `.lean`-pointer imports, autoImplicit off, the `@[expose] public
+    section` (without which the decls are module-private), and the `MathFin` namespace."""
+    mods = sorted({p for p in pointers if p.endswith(".lean")})
     imports = "\n".join(["public import Mathlib"]
-                        + [f"public import {p[:-5].replace('/', '.')}" for p in pointers])
-    blocks: list[str] = []
-    for node in topo_order(dag):   # leaves first, main last
-        if node.is_main:
-            blocks.append(f"{node.statement} := {node.proof or 'by sorry'}")
-        else:
-            blocks.append(f"{node.statement} := by sorry")
+                        + [f"public import {p[:-5].replace('/', '.')}" for p in mods])
     return (
         f"{_LICENSE}\nmodule\n\n"
         f"{imports}\n\n"
         "set_option autoImplicit false\n\n"
         "@[expose] public section\n\n"
         "namespace MathFin\n\n"
-        + "\n\n".join(blocks)
+        + body
         + "\n\nend MathFin\n"
     )
+
+
+def assemble_skeleton(dag: Dag, meta: dict | None = None) -> str:
+    """The skeleton module: every leaf `<statement> := by sorry`, the main theorem
+    `<statement> := <main.proof>` (its proof applying the leaves, NOT sorry). If a
+    good decomposition, this elaborates with exactly `len(leaves)` sorries — that is
+    what `skeleton_gate` checks, before any leaf gets proving budget."""
+    blocks = [f"{n.statement} := {n.proof or 'by sorry'}" if n.is_main
+              else f"{n.statement} := by sorry"
+              for n in topo_order(dag)]   # leaves first, main last
+    pointers = [p for leaf in dag.leaves for p in leaf.pointers]
+    return _module_text(pointers, "\n\n".join(blocks))
+
+
+# --- leaf routing: DAG leaves as ordinary single-sorry prove targets (2.4) ----
+
+def _leaf_filename(parent_id: str, name: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]", "_", f"leaf-{parent_id}-{name}") + ".lean"
+
+
+def _leaf_stub(leaf: Node, proved: dict) -> str:
+    """A single-sorry stub module for one leaf: any already-proved dependency decls
+    (no sorry) inlined ABOVE `<leaf.statement> := by sorry`, so a dependent leaf's
+    proof can consume them while the stub stays a single-sorry target."""
+    deps = [proved[d] for d in leaf.depends_on if proved.get(d)]
+    pointers = list(leaf.pointers)
+    return _module_text(pointers, "\n\n".join([*deps, f"{leaf.statement} := by sorry"]))
+
+
+def build_leaf_manifest(dag: Dag, meta: dict, out_dir: str, *, toolchain: str = "",
+                        main_commit: str = "", proved: dict | None = None) -> dict:
+    """Write per-leaf single-sorry stubs + a `manifest.json` for the DAG's leaves, in
+    the shape `vibe_prove.py run/gate` consumes VERBATIM (they are ordinary single-sorry
+    targets). Each leaf target carries `parent` (the main theorem name), `parent_id` (the
+    decompose target id), and `dag_order` (its index in topo order among the leaves — the
+    order they must be proved in). `proved` optionally maps an already-proved leaf name ->
+    its gated declaration block, inlined into a dependent leaf's stub (keep-and-revise).
+    Returns the manifest dict; writes the stubs + `manifest.json` into `out_dir`."""
+    proved = proved or {}
+    os.makedirs(out_dir, exist_ok=True)
+    parent_id = meta.get("id", "dag")
+    leaves = [n for n in topo_order(dag) if not n.is_main]   # dependencies first
+    targets = []
+    for i, leaf in enumerate(leaves):
+        stub = _leaf_stub(leaf, proved)
+        fname = _leaf_filename(parent_id, leaf.name)
+        with open(os.path.join(out_dir, fname), "w", encoding="utf-8") as f:
+            f.write(stub)
+        targets.append({
+            "id": f"{parent_id}__{leaf.name}", "kind": "prove", "file": fname,
+            "sorry_name": leaf.name, "pointers": list(leaf.pointers),
+            "parent": dag.main.name, "parent_id": parent_id, "dag_order": i,
+            "input_hash": hashlib.sha256((stub + toolchain).encode("utf-8")).hexdigest(),
+        })
+    manifest = {"toolchain": toolchain, "main_commit": main_commit,
+                "decompose_parent": parent_id, "targets": targets}
+    with open(os.path.join(out_dir, "manifest.json"), "w", encoding="utf-8") as f:
+        json.dump(manifest, f, indent=2)
+    return manifest
 
 
 def skeleton_gate(lean_text: str, n_leaves: int, *, check_fn) -> dict:
