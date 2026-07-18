@@ -2000,7 +2000,9 @@ def emit_target_files(issue: dict, stub: str, meta: dict) -> tuple[str, dict, di
     headers = "\n".join(header_lines)
     # coherence-first: import the pointer modules so the drafted statement can
     # consume existing MathFin defs (a path 'MathFin/FixedIncome/ZCB.lean' becomes
-    # 'public import MathFin.FixedIncome.ZCB'); an unused import is harmless.
+    # 'public import MathFin.FixedIncome.ZCB'). An unused pointer import is NOT
+    # harmless (it adds a spurious cross-module edge) — trim_unused_imports drops any
+    # the proved candidate does not need, post-proof.
     imports = "\n".join(
         ["public import Mathlib"]
         + [f"public import {p[:-5].replace('/', '.')}"

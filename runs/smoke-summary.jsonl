@@ -1,1 +1,0 @@
-{"target": "smoke-1", "stream": "smoke", "outcome": "pass", "rounds": 2, "tokens": 398, "budget": 20000, "wall_s": 162.3, "axioms_clean": true, "slop": {"forbidden": [], "line_count": 4, "max_bracket_args": 0}, "model": "labs-leanstral-1-5", "ts": "2026-07-08T11:55:22"}

@@ -1,2 +1,0 @@
-{"targets": [{"id": "smoke-1", "stream": "smoke", "kind": "prove",
-  "sorry_name": "probe_smoke", "file": "smoke.lean"}]}
