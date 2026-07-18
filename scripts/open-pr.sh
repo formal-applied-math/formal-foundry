@@ -250,9 +250,11 @@ provenance: $PROVENANCE_DESC, run tag \`$TAG\`, ~$TOKENS tokens.
 
 review checklist (8-lens, before merge):
 - [ ] the statement faithfully formalizes (its stated subset of) issue #$ISSUE — no vacuity, no weaker restatement of what it states; a declared subset is fine (see follow-ups).
+- [ ] no DERIVABLE hypothesis survives (the #123 \`hP\` class: a positivity/side condition provable from the concrete defs — the strengthen pass only removes proof-UNUSED ones; this one needs an eye).
 - [ ] the proof is idiomatic and consumes existing lemmas, not a wrapper.
 - [ ] ledger row present (run \`ledger verify\` if ci is red on it).
-- [ ] axioms clean; no slop.$FOLLOWUPS
+- [ ] axioms clean; no slop.
+- [ ] coverage.md journal block authored at merge (reviewer-written — the narrative voice stays human).$FOLLOWUPS
 
 <details><summary>statement-fidelity notes</summary>
 
