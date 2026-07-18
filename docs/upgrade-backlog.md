@@ -5,6 +5,37 @@ Derived from the 2026-07-11 research survey
 architecture + technical-blog reading catalogued in `docs/overview.md`, and a
 pass over the current pipeline code (`probe/`, `pipeline.toml`, `scripts/`).
 
+**Second research input (2026-07-18):** a harvest of the main repo's own
+formalization grind history —
+`docs/research/2026-07-18-mainrepo-grind-lessons-harvest.md`. Where the
+2026-07-11 survey read the external field, this reads *our* thousands of hours of
+hand-driven proving. Its headline finding is that the funnel dies at the
+**drafter/intent** stages (every prove that reaches the vibe harness passes),
+which get none of the shared `patterns.md` authority the prover does. Its ranked
+hardening backlog (H1–H12) and trim candidates (T1–T7) live in that doc; the
+highest-leverage items are **H1** (equip the drafter with a statement-design
+subset of `patterns.md` + pins), **H2/H3** (add "Statement design" and "Repair
+table" sections to `patterns.md` — draft content included, ready to paste), **H5**
+(a wedged daemon silently passes the fail-open structural gates), and **H8**
+(refine the strengthen pass with a sole-implicit-pin guard before it fires in
+anger). See the doc for the full ranking and the convergence matrix behind it.
+
+**Execution order of record (2026-07-18):**
+`docs/superpowers/plans/2026-07-18-autoformalization-improvements.md` (v2, post
+critical review) sequences all of this: Phase 0 discriminating experiment →
+Phase 1 trust-hardening + diagnosis → **Phase 2 decomposition loop on Magistral**
+(the general-reasoner role filled in-family for now, model-agnostic interface,
+A/B'd against Claude centaur sessions — this reopens and resolves-for-now the
+"one strategic fork" below) → Phase 3 two-track contamination-aware bench →
+Phase 4 (brainstorm-gated). The v1 ordering in this file's §items stands as
+reference; where they disagree, the plan wins.
+
+**⏰ STANDING DECISION GATE — 2026-09-30 (Labs $0 retires):** decide
+keep-Magistral / frontier-decomposer / hybrid on the A/B scoreboard
+(`docs/research/ab-decomposer.md`), the Track-P/D bench numbers per arm,
+refinery-minutes-per-merged-PR, and the actual price sheet. Evidence collection
+starts the day the plan's Phase 2 lands.
+
 Every item is tagged **[no reasoner]** (Leanstral-native or infra-only) or
 **[needs general reasoner]** (requires a *second* engine — a general reasoning
 model — because Leanstral is a leaf-prover: it does not architect proofs or judge
