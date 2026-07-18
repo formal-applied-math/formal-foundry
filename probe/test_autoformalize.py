@@ -148,6 +148,29 @@ def test_route_feasibility_ok_when_present_or_mathlib():
     assert feas["feasible"] is True and feas["missing"] == []
 
 
+# --- Task 1.9: telemetry for silent channels (H11) ---------------------------
+
+def test_retrieval_backend_is_labeled():
+    r, _p = af.build_retrieve_fns(backend="loogle", main_repo="/x", index_dir="/no/index",
+                                  k=4, embed_model="m", api_key=None)
+    assert getattr(r, "backend", None) == "loogle"
+
+
+def test_formalize_result_records_retrieval_backend_and_counters():
+    intent = {"statement": "s", "objects": [], "module_name": "M", "benchmark_id": "b"}
+    retrieve = lambda nm: "cand: MathFin.bar"   # noqa: E731
+    retrieve.backend = "loogle"
+    fr = af.formalize_with_repair(
+        intent, "", issue=_ISSUE,
+        chat_fn=lambda msgs: ("```lean\ntheorem t : MathFin.foo = 0 := by sorry\n```", 5),
+        check_fn=lambda c: {"success": False, "sorry_count": 1,
+                            "errors": ["Unknown identifier `MathFin.foo`"]},
+        emit_fn=af.emit_target_files, rounds=1, retrieve_fn=retrieve)
+    assert fr["ok"] is False
+    assert fr["retrieval_backend"] == "loogle"        # which backend surfaced candidates
+    assert fr["lint_repaired"] == 0 and fr["advised_bundle"] is False
+
+
 def test_autoformalize_config_depth_gate_default_on():
     assert pl.AutoformalizeConfig.load(None).depth_gate is True
 

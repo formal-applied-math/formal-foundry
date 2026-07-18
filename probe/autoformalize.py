@@ -461,6 +461,8 @@ def formalize_with_repair(intent: dict, grounding: str, *, issue: dict, chat_fn,
     messages = formalize_messages(intent, grounding, revision_note)
     tokens = 0
     advised_bundle = False   # the ∧-advisory is ONE soft round, never a hard gate
+    lint_repaired = 0        # H11 telemetry: lint-dirty repair rounds spent
+    retrieval_backend = None  # H11 telemetry: which backend surfaced a candidate
     unknowns: list[str] = []   # every `Unknown identifier X` guessed across rounds —
     #                            the defs the model thinks SHOULD exist (routing evidence)
     for i in range(max(1, rounds)):
@@ -523,7 +525,9 @@ def formalize_with_repair(intent: dict, grounding: str, *, issue: dict, chat_fn,
                     continue
                 log(f"round {i + 1}: elaborates ✓ ({tokens} tok total)")
                 return {"ok": True, "stub": stub, "meta": round_meta, "lean_text": lean_text,
-                        "entry": entry, "tokens": tokens, "unknowns": unknowns}
+                        "entry": entry, "tokens": tokens, "unknowns": unknowns,
+                        "advised_bundle": advised_bundle, "lint_repaired": lint_repaired,
+                        "retrieval_backend": retrieval_backend}
             # elaborates but the main repo's `lake lint` would reject it (the class
             # that opened PR #123 red) — textual, so repair it here, not in review.
             log(f"round {i + 1}: elaborates but lint-dirty ({len(lint)}); first: {lint[0][:140]}")
@@ -536,6 +540,7 @@ def formalize_with_repair(intent: dict, grounding: str, *, issue: dict, chat_fn,
                  "snake_case); a `/-- … -/` docstring immediately above every "
                  "def/abbrev/structure. Keep the mathematics identical, still ending "
                  "`:= by sorry`."}]
+            lint_repaired += 1
             continue
         errs = elab.get("errors", [])
         log(f"round {i + 1}: {len(errs)} elab error(s); first: {str(errs[0])[:180] if errs else '?'}")
@@ -551,11 +556,14 @@ def formalize_with_repair(intent: dict, grounding: str, *, issue: dict, chat_fn,
             if retrieve_fn:
                 cand = retrieve_fn(nm)
                 if cand:
+                    retrieval_backend = getattr(retrieve_fn, "backend", "?")  # H11
                     feedback += f"\n\nCandidates for `{nm}` (verify they elaborate under our pin):\n{cand}"
         messages += [_assistant(content),
                      {"role": "user", "content": feedback}]
     return {"ok": False, "stub": None, "meta": None,
-            "lean_text": None, "entry": None, "tokens": tokens, "unknowns": unknowns}
+            "lean_text": None, "entry": None, "tokens": tokens, "unknowns": unknowns,
+            "advised_bundle": advised_bundle, "lint_repaired": lint_repaired,
+            "retrieval_backend": retrieval_backend}
 
 
 def fidelity_messages(intent: dict, stub: str) -> list[dict]:
@@ -1178,6 +1186,7 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn,
         n = issue.get("number")
         route = issue.get("route", "theorem")
         history, feedback, staged = [], None, False
+        tele = {"advised_bundle": False, "lint_repaired": 0, "retrieval_backend": None}  # H11
         # A transient error on ONE issue (e.g. an HTTP 429 that exhausts retries,
         # a daemon hiccup, a malformed draft) must not kill the tick — log it and
         # move to the next candidate.
@@ -1231,6 +1240,11 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn,
                                            log=lambda m: log(f"#{n} formalize {m}"))
                 spent += fr["tokens"]
                 unknowns = fr.get("unknowns") or []
+                if fr.get("advised_bundle"):
+                    tele["advised_bundle"] = True
+                tele["lint_repaired"] += fr.get("lint_repaired", 0)
+                if fr.get("retrieval_backend"):
+                    tele["retrieval_backend"] = fr["retrieval_backend"]
                 if not fr["ok"]:
                     fail = {"gate": "formalize",
                             "detail": f"no elaborating Lean after {formalize_rounds} rounds"}
@@ -1281,7 +1295,7 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn,
             else:
                 outcome = "error"
             rec = {"issue": n, "attempts": attempt, "outcome": outcome, "history": history,
-                   "arch": ROUTING_ARCH}
+                   "arch": ROUTING_ARCH, "telemetry": tele}
             rec["family"] = classify_refill(rec)
             attempted.append(rec)
         except Exception as e:  # noqa: BLE001 — resilience: skip the issue, not the tick
@@ -1325,6 +1339,7 @@ def build_retrieve_fns(*, backend, main_repo, index_dir, k, embed_model, api_key
     MathFin corpus; proactive_fn retrieves on the intent STATEMENT. Falls open to
     loogle (reactive only) when the embedding cache is absent."""
     loogle_fn = lambda nm: loogle_candidates(nm, main_repo=main_repo)  # noqa: E731
+    loogle_fn.backend = "loogle"   # H11 telemetry label
     if backend != "embedding":
         return loogle_fn, None
     premises = _embed.load_premises(index_dir)
@@ -1334,6 +1349,10 @@ def build_retrieve_fns(*, backend, main_repo, index_dir, k, embed_model, api_key
         return loogle_fn, None   # fails-open — no index/cache ⇒ loogle
     embed_fn = lambda texts: _embed.mistral_embed(texts, api_key=api_key, model=embed_model)  # noqa: E731
     reactive = _embed.make_embedding_retrieve_fn(idx, k, embed_fn)
+    try:
+        reactive.backend = "embedding"   # H11 telemetry label (skip if not settable)
+    except (AttributeError, TypeError):
+        pass
     proactive = lambda stmt: idx.retrieve(stmt, k, embed_fn)  # noqa: E731
     return reactive, proactive
 
