@@ -84,6 +84,29 @@ def test_emit_prelint_rejects_sigma_identifier():
         assert "Σ" in str(e) or "sigma" in str(e).lower()
 
 
+# --- Task 1.4: gates go INDETERMINATE (not pass) on a wedged daemon ----------
+
+def test_structural_gates_indeterminate_on_daemon_error():
+    err = lambda *_a, **_kw: {"error": "daemon check did not complete: TimeoutError"}
+    stub = "theorem foo (hB : True) : 1 = 1 := by sorry"
+    lean = af.emit_target_files(_ISSUE, stub, _META)[0]
+    d = af.depth_rejection(lean, "foo", _ISSUE["pointers"], check_fn=err)
+    assert d.get("indeterminate") is True and not d.get("shallow")
+    t = af.triviality_rejection(lean, check_fn=err)
+    assert t.get("indeterminate") is True and not t.get("trivial")
+    fr = af.defs_rejection(lean, "foo", ["fooDef"], check_fn=err)
+    assert fr.get("indeterminate") is True and not fr.get("failed")
+    # the derivable probe fails open to [] on a daemon error — never all-names
+    assert af.derivable_hypotheses(lean, check_fn=err) == []
+
+
+def test_daemon_check_infra_error_sets_sentinel():
+    import probe as pr
+    r = pr.daemon_check("theorem x : True := trivial", port=1)  # nothing listening
+    assert r.get("error")             # singular infra sentinel present
+    assert r.get("success") is False
+
+
 def test_autoformalize_config_depth_gate_default_on():
     assert pl.AutoformalizeConfig.load(None).depth_gate is True
 

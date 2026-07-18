@@ -142,11 +142,13 @@ def daemon_check(code: str, *, host="127.0.0.1", port=7878, timeout=300) -> dict
     except (socket.timeout, TimeoutError, OSError) as e:
         # A wedged daemon (a spinning elaboration killed server-side) or one busy
         # respawning a fresh REPL can blow the socket deadline or refuse the
-        # connection. Surface it as a FAILED check — exactly like a malformed
-        # payload — so the gate/draft treats it as a failed candidate and moves on,
-        # never an uncaught TimeoutError that skips the whole issue mid-tick.
-        return {"success": False, "sorry_count": 0,
-                "errors": [f"daemon check did not complete: {type(e).__name__}: {e}"]}
+        # connection. `error` (singular) is the INFRA sentinel the structural gates
+        # key on to return an INDETERMINATE (retryable) verdict instead of failing
+        # open and seeding a bad draft (H5); `errors` (plural) is kept so the draft
+        # repair loop still treats it as a failed candidate and never sees an
+        # uncaught TimeoutError that would skip the whole issue mid-tick.
+        msg = f"daemon check did not complete: {type(e).__name__}: {e}"
+        return {"success": False, "sorry_count": 0, "error": msg, "errors": [msg]}
     return _parse_daemon_response(b"".join(chunks))
 
 

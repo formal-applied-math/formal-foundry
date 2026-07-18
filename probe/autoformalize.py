@@ -683,6 +683,9 @@ def depth_rejection(lean_text: str, name: str, pointers: list[str], *, check_fn)
     if not mods:
         return {"shallow": False, "tokens": 0, "verdict": "no pointers — depth gate skipped"}
     res = check_fn(depth_probe(lean_text, name, mods))
+    if res.get("error"):   # H5: wedged daemon is NOT a depth verdict — retryable, never a pass
+        return {"shallow": False, "indeterminate": True, "tokens": 0,
+                "verdict": "indeterminate: " + str(res["error"])[:120]}
     depth_errs = [str(e) for e in (res.get("errors") or []) if _DEPTH_MARKER in str(e)]
     return {"shallow": bool(depth_errs), "tokens": 0, "verdict": "; ".join(depth_errs[:2])}
 
@@ -720,6 +723,9 @@ def triviality_rejection(lean_text: str, *, check_fn) -> dict:
     if goal is None:
         return {"trivial": False, "tokens": 0, "verdict": "no sorry to splice — skipped"}
     res = check_fn(goal)
+    if res.get("error"):   # H5: wedged daemon is NOT a triviality verdict — retryable
+        return {"trivial": False, "indeterminate": True, "tokens": 0,
+                "verdict": "indeterminate: " + str(res["error"])[:120]}
     trivial = not res.get("errors") and res.get("sorry_count", 0) == 0
     verdict = ("closed by `first | rfl | simp` — definitionally/simp-trivial, no content"
                if trivial else "")
@@ -785,6 +791,8 @@ def classify_refill(rec: dict) -> str:
         return "statement_wrong"
     if out == "budget":
         return "budget"
+    if out == "indeterminate" or "indeterminate" in gates:
+        return "infra_indeterminate"   # H5: wedged daemon, retryable — not a real verdict
     return "infra"
 
 
@@ -940,6 +948,9 @@ def defs_rejection(lean_text: str, thm_name: str, def_names: list[str], *, check
         return {"failed": True, "gate": "newdef_depth", "tokens": 0,
                 "verdict": "no definitions drafted — the defs route requires 1-3 new defs"}
     res = check_fn(defs_probe(lean_text, thm_name, def_names))
+    if res.get("error"):   # H5: wedged daemon is NOT a defs verdict — retryable
+        return {"failed": False, "gate": None, "indeterminate": True, "tokens": 0,
+                "verdict": "indeterminate: " + str(res["error"])[:120]}
     errs = [str(e) for e in (res.get("errors") or []) if _DEFS_MARKER in str(e)]
     if not errs:
         return {"failed": False, "gate": None, "verdict": "", "tokens": 0}
@@ -1057,16 +1068,22 @@ def semantic_verdict(*, lean_text: str, stub: str, name: str, intent: dict, issu
     if route == "defs":
         dr = defs_rejection(lean_text, name, def_names or [], check_fn=check_fn)
         tokens += dr["tokens"]
+        if dr.get("indeterminate"):   # H5: infra, not a verdict — retryable
+            return {"gate": "indeterminate", "detail": dr.get("verdict", "")}, tokens
         if dr["failed"]:
             return {"gate": dr["gate"], "detail": dr.get("verdict", "")}, tokens
     elif depth_gate:
         dep = depth_rejection(lean_text, name, issue.get("pointers", []), check_fn=check_fn)
         tokens += dep["tokens"]
+        if dep.get("indeterminate"):
+            return {"gate": "indeterminate", "detail": dep.get("verdict", "")}, tokens
         if dep["shallow"]:
             return {"gate": "depth", "detail": dep.get("verdict", "")}, tokens
     if triviality_gate:
         triv = triviality_rejection(lean_text, check_fn=check_fn)
         tokens += triv["tokens"]
+        if triv.get("indeterminate"):
+            return {"gate": "indeterminate", "detail": triv.get("verdict", "")}, tokens
         if triv["trivial"]:
             return {"gate": "trivial", "detail": triv.get("verdict", "")}, tokens
     vac = hypothesis_rejection(lean_text, name, chat_fn=prove_fn, check_fn=check_fn,
@@ -1214,8 +1231,21 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn,
                 history.append(row)
                 log(f"#{n}: {fail['gate']} — {fail['detail']} (attempt {attempt})\n"
                     f"  statement: {stub}")
+                if fail["gate"] == "indeterminate":
+                    # H5: a wedged daemon is not a verdict — stop re-drafting (futile
+                    # against the same wedged daemon) and leave the issue UNSEEDED and
+                    # retryable for the next tick, never a false seed or rejection.
+                    log(f"#{n}: indeterminate (daemon infra) — deferring to next tick")
+                    break
                 feedback = render_gate_feedback(fail["gate"], fail["detail"], stub)
-            outcome = "seeded" if staged else (history[-1]["gate"] if history else "error")
+            if staged:
+                outcome = "seeded"
+            elif history and history[-1]["gate"] == "indeterminate":
+                outcome = "indeterminate"   # retryable infra hiccup, not a real rejection
+            elif history:
+                outcome = history[-1]["gate"]
+            else:
+                outcome = "error"
             rec = {"issue": n, "attempts": attempt, "outcome": outcome, "history": history,
                    "arch": ROUTING_ARCH}
             rec["family"] = classify_refill(rec)
@@ -1618,6 +1648,8 @@ def derivable_hypotheses(lean_text: str, *, check_fn) -> list[str]:
     except Exception:  # noqa: BLE001 — probe is advisory-shaped; never crash the draw
         return []
     if not isinstance(r, dict):
+        return []
+    if r.get("error"):   # H5: daemon error — fail open to [] (never flag all-names)
         return []
     example_lines = {base + j for j in range(len(names))}
     hit = set()

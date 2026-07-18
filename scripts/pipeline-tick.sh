@@ -62,6 +62,10 @@ if [ "$ACTION" = "skip" ] && [ "$REASON" = "no_unattempted_targets" ]; then
       2>>/dev/stderr || echo '{"seeded":[]}')"
     SEEDED="$(printf '%s' "$REFILL" | python3 -c 'import sys,json;print(len(json.load(sys.stdin).get("seeded",[])))' 2>/dev/null || echo 0)"
     echo "[tick] refill seeded=$SEEDED" >&2
+    # H5: attempts whose gates went indeterminate (wedged daemon) are retryable, not
+    # rejections — log them distinctly so a daemon-infra tick is not read as "no targets".
+    INDET="$(printf '%s' "$REFILL" | python3 -c 'import sys,json;print(sum(1 for r in json.load(sys.stdin).get("attempted",[]) if r.get("outcome")=="indeterminate"))' 2>/dev/null || echo 0)"
+    [ "$INDET" != "0" ] && echo "[tick] refill indeterminate=$INDET (daemon infra — retryable next tick)" >&2
     if [ "$SEEDED" != "0" ]; then
       python3 build_manifest.py --main-repo "$MAIN" >&2 || echo "[tick] build_manifest failed post-refill" >&2
       DEC="$(plan)"; ACTION="$(jget "$DEC" action)"; REASON="$(jget "$DEC" reason)"
