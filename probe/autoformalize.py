@@ -239,7 +239,14 @@ FORMALIZE_SYSTEM = (
     "drop a hypothesis, or flip an inequality.\n"
     "- Lint-clean for the library's CI: every `def`/`abbrev`/`structure` carries a `/-- … -/` "
     "docstring immediately above it, and definition names are lowerCamelCase (theorem names "
-    "stay snake_case)."
+    "stay snake_case).\n"
+    "- State at the NATURAL level of generality: when the fact is algebra over given quantities, "
+    "do not hard-wire a concrete model or curve the claim does not require. Prefer the structural "
+    "hypothesis that says exactly what is needed — `s.Nonempty` rather than a member-witness "
+    "`x ∈ s`, `A ≠ 0` rather than assuming positivity of a quantity that is already provably "
+    "positive from its definition.\n"
+    "- Definitions bind their arguments in the signature (`def f (x : ℝ) : ℝ := …`), never a "
+    "lambda against a `∀` ascription; write anonymous functions with `↦`."
 )
 
 FIDELITY_SYSTEM = (
@@ -1443,6 +1450,27 @@ def _rebuild_snippet(snippet: str, candidate: str, thm_name: str) -> str | None:
                 + f"\n  {app}\n")
     except ValueError:
         return None
+
+
+_MATHFIN_IMPORT_RE = re.compile(r"^public import (MathFin\.\S+)[ \t]*\n", re.MULTILINE)
+
+
+def trim_unused_imports(candidate: str, *, check_fn) -> dict:
+    """Drop `public import MathFin.X` lines the proved candidate does not need.
+    Emit imports EVERY issue pointer, and 'an unused import is harmless' is false
+    by the coherence lens: both production PRs carried unused pointer imports,
+    one adding a spurious FixedIncome→Futures edge. Subtractive and fail-open:
+    each removal is kept only if the file still elaborates clean without it.
+    `public import Mathlib` is never touched. Returns `{candidate, removed}`."""
+    removed: list[str] = []
+    for m in list(_MATHFIN_IMPORT_RE.finditer(candidate)):
+        line, mod = m.group(0), m.group(1)
+        trial = candidate.replace(line, "", 1)
+        r = check_fn(trial)
+        if r and r.get("success") and not r.get("errors") and r.get("sorry_count", 0) == 0:
+            candidate = trial
+            removed.append(mod)
+    return {"candidate": candidate, "removed": removed}
 
 
 def strengthen_candidate(candidate: str, snippet: str | None, thm_name: str,

@@ -1521,6 +1521,35 @@ def test_strengthen_candidate_noop_without_relevant_warnings():
     assert s["stripped"] == [] and s["candidate"] == _STRONG_MOD and regates == []
 
 
+def test_trim_unused_imports_drops_only_unneeded_mathfin_imports():
+    cand = ("module\n\npublic import Mathlib\npublic import MathFin.FixedIncome.ZCB\n"
+            "public import MathFin.Futures.Black76\n\ntheorem t : True := trivial\n")
+
+    def check(code):
+        # ZCB is load-bearing: without it elaboration breaks; Black76 is decorative
+        if "MathFin.FixedIncome.ZCB" not in code:
+            return {"success": False, "errors": ["unknown constant 'MathFin.zcb'"],
+                    "sorry_count": 0}
+        return {"success": True, "errors": [], "sorry_count": 0}
+    r = af.trim_unused_imports(cand, check_fn=check)
+    assert r["removed"] == ["MathFin.Futures.Black76"]
+    assert "Black76" not in r["candidate"]
+    assert "public import MathFin.FixedIncome.ZCB" in r["candidate"]
+    assert "public import Mathlib" in r["candidate"]
+
+
+def test_trim_unused_imports_noop_without_mathfin_imports():
+    cand = "public import Mathlib\n\ntheorem t : True := trivial\n"
+    calls = []
+    r = af.trim_unused_imports(cand, check_fn=lambda c: calls.append(c))
+    assert r["candidate"] == cand and r["removed"] == [] and calls == []
+
+
+def test_formalize_contract_demands_natural_generality():
+    s = af.FORMALIZE_SYSTEM
+    assert "generality" in s and "Nonempty" in s and "↦" in s
+
+
 def test_strengthen_candidate_cascades_on_fresh_warnings():
     # dropping hσ_eq may leave another binder newly unused — the re-gate's own
     # warnings drive the next pass, bounded by max_passes

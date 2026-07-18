@@ -164,3 +164,40 @@ candidate (R chose auto-strip over gate-fail and human-review):
   immutable (zombie doctrine).
 - Telemetry: the run summary row carries `stripped_hypotheses` when the pass
   fired.
+
+## Addendum 3 (2026-07-18): full CI parity + failure classes + import trim
+
+R's directive: the priority is a pipeline ROBUST to the review-found classes,
+not hand-shepherding PRs. Landed:
+
+- **Full main-CI parity pre-PR.** open-pr's in-image block now runs `lake lint`
+  after `lake build` (all 16 linters — the textual gate covers only the 2
+  observed classes), and after placement it runs the main repo's python gates
+  (`pytest tests/`) exactly as build.yml does. A PR can no longer open red on
+  anything main CI checks.
+- **Repo-gates preflight.** The tick stands down (skip, loud reason) when the
+  MAIN repo's python gates are already red BEFORE spending a prove — a tripped
+  values-review cadence or stale ledger is a human's red light on the repo, not
+  a per-target failure.
+- **Failure classes.** open-pr exit 3 = content-deterministic block (lint/
+  regen/python gates rejected the candidate) → the tick RECORDS
+  `fail_assembly` and moves on (kills the #53 infinite-retry class); exit 4 =
+  transient (gh/network) → target stays retryable. `gh pr create` failures are
+  transient, `blocked()` is content.
+- **Unused-import trim** (2/2 production PRs): `trim_unused_imports` drops
+  `public import MathFin.X` lines the proved candidate elaborates without
+  (subtractive, per-removal elab check, `Mathlib` never touched), then one full
+  re-gate guards against instance-resolution drift — revert wholesale if it
+  fails. Telemetry: `trimmed_imports` on the summary row.
+- **Contract: natural generality.** The formalize contract now demands the
+  natural level of generality (no hard-wired curve the claim does not need,
+  `s.Nonempty` over member-witnesses, `A ≠ 0` over derivable positivity) and
+  signature-bound definition arguments with `↦`.
+
+Designed, deferred (next observed instance builds it): a draft-time
+DERIVABLE-HYPOTHESIS probe — for each explicit hypothesis `(h : P)`, elaborate
+`example <earlier binders> : P := by first | positivity | norm_num | simp`
+in one daemon call (marker/line mapping as in `defs_probe`); closures mean the
+hypothesis is provable and should be dropped from the statement (the #123 `hP`
+class — strengthen cannot see it because the proof USES the hypothesis). The
+contract + fidelity judge cover this class at instruction level today.

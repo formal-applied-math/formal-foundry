@@ -134,7 +134,7 @@ def _cmd_run(args) -> int:
 def _cmd_gate(args) -> int:
     import time
 
-    from autoformalize import strengthen_candidate
+    from autoformalize import strengthen_candidate, trim_unused_imports
     from gate import gate as run_gate
     from probe import daemon_check
     from probe_lib import append_jsonl
@@ -175,6 +175,18 @@ def _cmd_gate(args) -> int:
                             run_dir, f"{args.run_tag}-{target['id']}.entry.json")
                         with open(override, "w", encoding="utf-8") as f:
                             json.dump(e2, f, ensure_ascii=False, indent=2)
+                # drop pointer imports the module never needed (elab-verified per
+                # removal); one full re-gate guards against instance-resolution
+                # drift, reverting the trim wholesale if anything changed.
+                t = trim_unused_imports(candidate, check_fn=daemon_check)
+                if t["removed"]:
+                    g3 = run_gate(t["candidate"], target["sorry_name"],
+                                  check_fn=daemon_check)
+                    if g3["passed"]:
+                        candidate = t["candidate"]
+                        summary["trimmed_imports"] = t["removed"]
+                        print(f"[vibe-gate] {target['id']}: trimmed unused "
+                              f"import(s) {t['removed']}", flush=True)
                 summary["outcome"] = "pass"
                 summary["axioms_clean"] = True
                 win = os.path.join(run_dir, f"{args.run_tag}-{target['id']}.lean")

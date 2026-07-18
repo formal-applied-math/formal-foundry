@@ -104,7 +104,13 @@ blocked() {  # file an autoform-blocked issue on the FOUNDRY repo, do NOT open a
       --body "candidate for $ID ($TAG) did not assemble green: $1. proof is at runs/$TAG-$ID.lean; needs manual placement." \
       2>/dev/null || true
   fi
-  exit 3   # non-zero so the tick knows the PR did NOT open (target stays retryable)
+  exit 3   # CONTENT-deterministic block: the tick RECORDS the target (fail_assembly)
+  #        # — retrying the same candidate would block identically every tick.
+}
+
+transient() {  # infra/transient failure (network, gh, docker pull): no issue, no PR;
+  echo "[open-pr] TRANSIENT: $1" >&2   # exit 4 so the tick keeps the target retryable.
+  exit 4
 }
 
 # --- 2. branch + place -------------------------------------------------------
@@ -155,9 +161,13 @@ docker stop lean-repl docker-lean-repl-1 mathfin-lean-lsp >/dev/null 2>&1 || tru
 # Default `verify` scope is stale+missing; the corpus has 0 bare-`import MathFin`
 # entries, so the umbrella change restales nothing and this checks only the 1 new
 # entry (~60s). A fresh ledger + status=0 is the last green gate.
+# CI-parity: this block must run EVERYTHING the main repo's build.yml gates on —
+# lake build AND lake lint (PRs #123/#124 opened red because lint never ran here:
+# defsWithUnderscore + docBlame are lint-only classes the build accepts).
 REGEN='set -e
        lake exe cache get >/dev/null 2>&1 || true
        lake build MathFin
+       lake lint
        python3 -m tools.verify.axiom_audit_gen --write
        python3 -m tools.formalization_yaml --write
        LEDGER_EXEC_LOCAL=1 python3 -m tools.verify.ledger verify --exec --timeout 600
@@ -175,7 +185,14 @@ if command -v docker >/dev/null 2>&1; then
     -v "$MAIN":/app \
     -v "${COMPOSE_PROJECT_NAME:-docker}_lake_build_cache":/app/.lake \
     -w /app "$IMAGE" -lc "$REGEN" \
-    || blocked "in-image build/regen failed (lake build MathFin / axiom_audit_gen)"
+    || blocked "in-image build/regen failed (lake build / lake lint / regen / ledger)"
+  # The OTHER half of main-CI parity: the python gates (values/router/ledger/audit
+  # byte-freshness pytest) run on the placed tree exactly as build.yml runs them
+  # BEFORE the Lean build. The tick's preflight proved these gates green pre-
+  # placement, so red here is THIS candidate's doing — a deterministic block.
+  python3 -m pip show pytest >/dev/null 2>&1 || python3 -m pip install -q pytest
+  ( cd "$MAIN" && python3 -m pytest tests/ -q ) \
+    || blocked "python gates red after placement (pytest tests/)"
 else
   # no docker (local dry-run): regen only the host-side artifact, flag the rest.
   python3 -m tools.formalization_yaml --write || blocked "formalization_yaml regen failed"
@@ -255,5 +272,5 @@ if grep -q '^-- new-defs:' "$MODULE" 2>/dev/null; then
 fi
 gh pr create --repo "$SLUG" --head "$BRANCH" --label autoform "${PR_FLAGS[@]}" \
   --title "autoform: $(basename "$MODULE" .lean) $TITLE_SUFFIX" \
-  --body "$BODY" || blocked "gh pr create failed"
+  --body "$BODY" || transient "gh pr create failed (candidate is green — retry next tick)"
 echo "[open-pr] PR opened for $ID ($CLOSE_KW #$ISSUE)" >&2

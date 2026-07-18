@@ -29,6 +29,18 @@ cd "$FOUNDRY/probe"
 if [ -f "$MAIN/.env" ]; then set -a; . "$MAIN/.env"; set +a; fi
 [ -n "${MISTRAL_API_KEY:-}" ] || { echo "[tick] MISTRAL_API_KEY not set" >&2; exit 2; }
 
+# 0. Preflight: the main repo's python gates (values/router/ledger/audit pytest)
+# must be green BEFORE we spend a prove. A repo-WIDE red gate (values-review
+# cadence tripped, stale ledger) would deterministically fail every candidate at
+# open-pr — that is a human's red light on the repo, not a per-target failure,
+# so the tick stands down instead of burning prove runs into blocked PRs.
+python3 -m pip show pytest >/dev/null 2>&1 || python3 -m pip install -q pytest
+if ! ( cd "$MAIN" && python3 -m pytest tests/ -q ) >"$FOUNDRY/runs/preflight-pytest.log" 2>&1; then
+  echo "[tick] skip: main repo python gates are RED (see runs/preflight-pytest.log):" >&2
+  tail -3 "$FOUNDRY/runs/preflight-pytest.log" >&2
+  exit 0
+fi
+
 # 1. Plan (a helper, so we can re-plan after a refill).
 plan() { python3 pipeline.py plan --config "$CFG" --state "$STATE" --queue "$QUEUE" ${FORCE:+--force}; }
 jget() { printf '%s' "$1" | python3 -c "import sys,json;print(json.load(sys.stdin).get('$2',''))" 2>/dev/null || true; }
@@ -111,13 +123,22 @@ echo "[tick] outcome=$OUTCOME tokens=$TOKENS" >&2
 #    (any local run) we fall back to candidate-notify and never try to PR.
 CAND="$FOUNDRY/runs/$TAG-$ID.lean"
 PR_OPENED=0
+ASSEMBLY_BLOCKED=0
 if [ "$OUTCOME" = "pass" ] && [ -f "$CAND" ]; then
   if [ -n "${MAIN_PR_TOKEN:-}" ]; then
     echo "[tick] $OUTCOME → opening PR on formal-mathfin…" >&2
     if GH_TOKEN="$MAIN_PR_TOKEN" "$FOUNDRY/scripts/open-pr.sh" --id "$ID" --tag "$TAG"; then
       PR_OPENED=1
     else
-      echo "[tick] (open-pr.sh did not open a PR; candidate still at $CAND)" >&2
+      OPENPR_RC=$?
+      if [ "$OPENPR_RC" = 3 ]; then
+        # content-deterministic block (regen/lint/python gates rejected the
+        # candidate): retrying the SAME stub re-blocks every tick — record it.
+        ASSEMBLY_BLOCKED=1
+        echo "[tick] open-pr content-BLOCKED (rc=3) → will record fail_assembly" >&2
+      else
+        echo "[tick] (open-pr.sh transient failure rc=$OPENPR_RC; candidate still at $CAND — retryable)" >&2
+      fi
     fi
   else
     echo "[tick] CANDIDATE READY (no MAIN_PR_TOKEN → no PR) → $CAND · tokens: $TOKENS" >&2
@@ -132,8 +153,14 @@ fi
 #    record, so the pipeline moves on instead of re-spending on a hard target.
 if [ "$OUTCOME" = "error" ]; then
   echo "[tick] outcome=error → NOT recording (retryable next tick)" >&2
+elif [ "$OUTCOME" = "pass" ] && [ "$PR_OPENED" = 0 ] && [ "$ASSEMBLY_BLOCKED" = 1 ]; then
+  # the proof passed but assembly rejected the CONTENT (lint/regen/python gates):
+  # record so the pipeline moves on; the issue re-draws later under current gates.
+  echo "[tick] pass but content-blocked at assembly → recording fail_assembly" >&2
+  python3 pipeline.py record --config "$CFG" --state "$STATE" --id "$ID" \
+    --outcome fail_assembly ${TOKENS:+--tokens "$TOKENS"} >&2
 elif [ "$OUTCOME" = "pass" ] && [ "$PR_OPENED" = 0 ] && [ -n "${MAIN_PR_TOKEN:-}" ]; then
-  echo "[tick] pass but PR not opened → NOT recording (retryable next tick)" >&2
+  echo "[tick] pass but PR not opened (transient) → NOT recording (retryable next tick)" >&2
 else
   python3 pipeline.py record --config "$CFG" --state "$STATE" --id "$ID" \
     --outcome "$OUTCOME" ${TOKENS:+--tokens "$TOKENS"} >&2
