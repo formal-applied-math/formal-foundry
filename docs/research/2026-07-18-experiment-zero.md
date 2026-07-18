@@ -13,10 +13,10 @@ Two controls, from the plan:
   *full* pipeline (refill → draft + gates → vibe prove → gate → open-pr). If it
   produces a ready-for-review PR, the machinery is sound; if it dies, the failure
   is a located machinery bug.
-- **Control B** — a strong general agent (a Claude Code centaur session in the
-  main repo, one Lean process, on a branch) on a target the pipeline has
+- **Control B** — a strong general agent (a Claude Code session, one Lean process,
+  in the main repo on a branch) on a target the pipeline has
   *repeatedly failed*. The reading: **B succeeds ⇒ bottleneck is the
-  model/loop (drafting/reasoning) layer ⇒ Phase 2 (decomposition + centaur) is
+  model/loop (drafting/reasoning) layer ⇒ Phase 2 (decomposition) is
   the priority; B also fails ⇒ bottleneck is target feasibility ⇒ Phase 1's
   feasibility census + issue curation is the priority.**
 
@@ -95,8 +95,8 @@ tokens + wall-clock. It is not load-bearing for the verdict below.
 
 **Control B succeeds where the pipeline repeatedly failed. The bottleneck is the
 model/loop — specifically the drafter/intent layer — not target feasibility and
-not the prover.** Phase 0's reading rule resolves to: **Phase 2 (decomposition +
-centaur) is confirmed as the structural priority.**
+not the prover.** Phase 0's reading rule resolves to: **Phase 2 (decomposition) is
+confirmed as the structural priority.**
 
 The failure mode sharpens *which* Phase 1 item matters most. The pipeline is not
 dying for want of proving power or of primitives; it is dying because it cannot
@@ -132,8 +132,8 @@ highest-leverage cheap win, ahead of the rest of Phase 1.
   Task 1.8 (feasibility census) and Task 1.3-A2 (unknown-id repair) follow, as they
   convert the remaining drafter-failure families into honest recorded outcomes.
 - **Phase 2:** confirmed as the structural priority (the bottleneck is the
-  reasoning/drafting layer, which is precisely what the Magistral decomposer +
-  centaur A/B address). No reordering.
+  reasoning/drafting layer, which is precisely what the Magistral decomposer
+  addresses). No reordering.
 - **Phase 3/4:** unchanged.
 
 **Acceptance (Phase 0): met.** The report exists with an explicit verdict; Phase 1

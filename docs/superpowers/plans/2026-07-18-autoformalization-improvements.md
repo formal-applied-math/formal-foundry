@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Phases 0–2 are execution-ready (Phase 2 opens with a short mechanics design doc, not a strategic brainstorm). Phase 3 is Phase-2-informed; Phase 4 remains **brainstorm-gated**.
 
-**Revision note.** v1 → v2: (1) the discriminating experiment became **Phase 0** (was a buried acceptance test); (2) the decomposition loop moved to **Phase 2, on Magistral** — the general-reasoner *role* filled in-family (no new vendor/cost/traffic), model-agnostic interface, A/B'd against Claude centaur sessions, hard decision gate **2026-09-30** (Labs $0 retirement); (3) Phase 1 cut to trust-hardening + diagnosis, polish tail deferred; (4) the cron re-labeled **calibration + easy-harvest**, not the product, with a first-pass refinery-automation task; stale "run the cron on the vibe harness" task removed (already wired).
+**Revision note.** v1 → v2: (1) the discriminating experiment became **Phase 0** (was a buried acceptance test); (2) the decomposition loop moved to **Phase 2, on Magistral** — the general-reasoner *role* filled in-family (no new vendor/cost/traffic), model-agnostic interface, A/B'd as plain `cron` vs `decompose` (both Mistral), hard decision gate **2026-09-30** (Labs $0 retirement); (3) Phase 1 cut to trust-hardening + diagnosis, polish tail deferred; (4) the cron re-labeled **calibration + easy-harvest**, not the product, with a first-pass refinery-automation task; stale "run the cron on the vibe harness" task removed (already wired).
 
-**Goal:** Make the mathfin-foundry pipeline the best version of what the evidence supports — a centaur architecture (general reasoner decomposes, leaf-prover discharges, human refines) with trust-hardened gates and tuning driven by the live queue — starting from the grind-history harvest (`docs/research/2026-07-18-mainrepo-grind-lessons-harvest.md`) and the ML4TP/survey research.
+**Goal:** Make the mathfin-foundry pipeline the best version of what the evidence supports — an autonomous Mistral pipeline on GitHub CI (general reasoner decomposes, leaf-prover discharges) that opens ready-for-review PRs on `formal-mathfin`, with trust-hardened gates and tuning driven by the live queue — starting from the grind-history harvest (`docs/research/2026-07-18-mainrepo-grind-lessons-harvest.md`) and the ML4TP/survey research. R's only touchpoint is reviewing/editing those PRs.
 
-**Architecture:** Two-engine Mistral stack today (Magistral specifies/judges → Leanstral proves via vibe⇄lean-lsp-mcp → kernel gate + polish → auto-PR). This plan adds: a discriminating experiment (locate the bottleneck), trust hardening at the gates, a **Magistral-driven decomposition loop** wrapped in Lean-side verification gates (skeleton-elaboration, leaf gates, recomposition), lightweight A/B telemetry against the Claude centaur arm, and a CI throughput substrate — all measured on the live issue queue.
+**Architecture:** Two-engine Mistral stack today (Magistral specifies/judges → Leanstral proves via vibe⇄lean-lsp-mcp → kernel gate + polish → auto-PR). This plan adds: a discriminating experiment (locate the bottleneck), trust hardening at the gates, a **Magistral-driven decomposition loop** wrapped in Lean-side verification gates (skeleton-elaboration, leaf gates, recomposition), lightweight A/B telemetry (plain `cron` vs `decompose`, both Mistral), and a CI throughput substrate — all measured on the live issue queue.
 
 **Tech stack:** Python 3.11+ stdlib (host orchestration), `pytest` (`probe/test_*.py`), Lean 4 v4.31.0 + Mathlib + BrownianMotion (pinned), Docker (verify image + lean-repl/lean-lsp), Mistral API (Magistral/Leanstral), `gh` CLI.
 
@@ -29,8 +29,8 @@ Every task's requirements implicitly include this section (from `CLAUDE.md`, the
 
 ## The strategic posture this plan implements
 
-1. **Centaur, not autonomous.** The most productive formalization ops (Gauss) and this repo's own history run the same shape: a general reasoner + human at the top, a prover fleet below. The cron's honest job is **calibration + easy-target harvesting**; hard targets go through the decomposition loop or centaur sessions.
-2. **The general-reasoner role is filled by Magistral for now.** No new vendor, auth, or traffic surface; $0 until 2026-09-30; precedent is DeepSeek-Prover-V2 (decomposer = their own house general model). Expect a smaller lift than the frontier headline numbers — compensate with **hard Lean-side verification gates around every reasoner step** (a mid-tier reasoner inside a verified protocol ≈ a frontier one free-styling). The interface is model-agnostic; the frontier arm (Claude centaur sessions) runs the same targets for comparison.
+1. **Autonomous pipeline; the human reviews the PRs.** The pipeline runs unattended on GitHub CI (`pipeline.yml`, cron every 3 days): Magistral decomposes, Leanstral proves, and it opens ready-for-review PRs on `formal-mathfin`. R's only touchpoint is reviewing/editing those PRs. The cron's honest job is **calibration + easy-target harvesting**; hard targets go through the decomposition loop. (R also authors hard proofs independently — that is separate author work, not a pipeline component.)
+2. **The general-reasoner role is filled by Magistral for now.** No new vendor, auth, or traffic surface; $0 until 2026-09-30; precedent is DeepSeek-Prover-V2 (decomposer = their own house general model). Expect a smaller lift than the frontier headline numbers — compensate with **hard Lean-side verification gates around every reasoner step** (a mid-tier reasoner inside a verified protocol ≈ a frontier one free-styling). The interface is model-agnostic, so a frontier eval at the 2026-09-30 gate is a config swap — not a standing second arm running now.
 3. **Decision gate 2026-09-30** (Labs $0 retires): choose keep-Magistral / switch-decomposer-to-frontier / hybrid, on real-queue evidence — leaves-closed-per-target, refinery-effort-per-PR, per-arm outcomes (Phase 2's A/B scoreboard) — and the actual price sheet.
 4. **Depth-coherence, not theorem count.** Target selection continues to serve the theory (bridges, towers, promotions); Phase 4's supervised sourcing makes that machine-assisted, later.
 
@@ -38,7 +38,7 @@ Every task's requirements implicitly include this section (from `CLAUDE.md`, the
 
 Tuning and the decision gate read the **live queue**:
 - **The obstruction-family report (Task 1.7)** — every tick, which failure class dominates (unknown-id-despite-retrieval / depth-gate / no-elaborating-draft / prover-max-rounds / gate-fail / infra-indeterminate) and its trend. A change "helped" if its target family shrinks.
-- **The A/B scoreboard (Task 2.6)** — per real target, per arm (cron / Magistral-decompose / Claude-centaur): leaves-closed, outcome, and refinery-minutes-at-merge. This is also the decision-gate evidence.
+- **The A/B scoreboard (Task 2.6)** — per real target, per arm (`cron` / `decompose`, both Mistral): leaves-closed, outcome, and refinery-minutes-at-merge. It answers whether decomposition earns its tokens, and feeds the decision-gate.
 - **Plain queue outcomes** — pass/fail and PR-merge rate on the actual `formal-mathfin` issue backlog.
 Where the field has *already measured* a lever (e.g. depth > breadth at fixed budget — Delta, Numina), apply it as a field-validated default and watch the obstruction report for regression, with a one-line revert.
 
@@ -52,8 +52,8 @@ Where the field has *already measured* a lever (e.g. depth > breadth at fixed bu
 
 - [ ] **Step 0.1 — Control A (easy target through the full pipeline).** Pick or author one `status:ready` issue that is *guaranteed provable and non-trivial*: a two-step corollary combining two existing corpus lemmas (must NOT be `rfl`/`simp`-closable, or the triviality gate rightly kills it; must consume a pointer-module def, or the depth gate rightly kills it). Run a forced tick end-to-end (refill → draft+gates → vibe prove → gate → open-pr). Record: outcome, which gate (if any) killed it, tokens, wall-clock.
   - Expected if machinery is sound: a ready-for-review PR. If it dies: the failure is a located machinery bug — fix it before any other phase (use the failure log + `refill-history.jsonl`).
-- [ ] **Step 0.2 — Control B (strong general agent on a stuck real target).** Take one target the pipeline has repeatedly failed (from `runs/refill-history.jsonl` families `needs_primitives`/`undraftable` — e.g. #53 or #73). One timeboxed Claude Code centaur session in the main repo (daemon workflow, one Lean process, work on a branch): draft the statement + prove it, using the harvest's B-class playbook. Keep or discard the branch on merit.
-  - Reading: **B succeeds where the pipeline failed** ⇒ bottleneck is the model/loop layer ⇒ Phase 2 (decomposition/centaur) is the priority, confirmed. **B also fails** (genuinely needs missing primitives) ⇒ bottleneck is target feasibility ⇒ Phase 1's feasibility census + issue curation is the priority.
+- [ ] **Step 0.2 — Control B (strong general agent on a stuck real target).** Take one target the pipeline has repeatedly failed (from `runs/refill-history.jsonl` families `needs_primitives`/`undraftable` — e.g. #53 or #73). One timeboxed Claude Code session (a strong-agent diagnostic) in the main repo (daemon workflow, one Lean process, work on a branch): draft the statement + prove it, using the harvest's B-class playbook. Keep or discard the branch on merit.
+  - Reading: **B succeeds where the pipeline failed** ⇒ bottleneck is the model/loop layer ⇒ Phase 2 (decomposition) is the priority, confirmed. **B also fails** (genuinely needs missing primitives) ⇒ bottleneck is target feasibility ⇒ Phase 1's feasibility census + issue curation is the priority.
 - [ ] **Step 0.3 — Report + branch decision.** Write `docs/research/2026-07-XX-experiment-zero.md`: both outcomes, the branch table verdict, and any located bugs (each becomes a Phase 1 task). Update this plan's phase priorities if the verdict says so.
 
 **Acceptance:** the report exists with an explicit verdict line; Phase 1/2 priorities confirmed or reordered on evidence.
@@ -142,7 +142,7 @@ def test_repair_hint_nnreal_misparse():
 
 ---
 
-## Phase 2 — The decomposition loop on Magistral + centaur A/B (the fork, taken now)
+## Phase 2 — The decomposition loop on Magistral (the fork, taken now)
 
 **Posture:** general-reasoner role = Magistral for now (see strategic posture). Interface model-agnostic (`chat_fn` injection, same as everywhere else in `probe/`). Every reasoner output passes a Lean-side gate before any budget is spent downstream. Cron demoted to calibration + easy-harvest; decomposition runs on stuck/hard targets.
 
@@ -184,7 +184,7 @@ def test_dag_rejects_cycles_and_oversize():
 - [ ] **2.5.2 (GREEN)** Implement. Keep-and-revise: a proved leaf's statement+proof is appended to the target's context pack on the next decomposition attempt. Commit.
 
 ### Task 2.6 — A/B scoreboard + cron demotion (the decision-gate evidence)
-**Files:** `probe/vibe_prove.py` / `probe/decompose.py` (summary rows gain `arm: cron|decompose-magistral|centaur`, `leaves_total/leaves_closed`, `refinery_minutes` filled at merge time by hand), `docs/research/ab-decomposer.md` (the running scoreboard, updated per centaur session and per tick), README/overview one-paragraph update: the cron's stated job is **calibration + easy-harvest**; hard targets go to the decomposition path or centaur sessions.
+**Files:** `probe/vibe_prove.py` / `probe/decompose.py` (summary rows gain `arm: cron|decompose`, `leaves_total/leaves_closed`, `refinery_minutes` filled at merge time by hand), `docs/research/ab-decomposer.md` (the running scoreboard, updated per tick), README/overview one-paragraph update: the cron's stated job is **calibration + easy-harvest**; hard targets go to the decomposition path.
 - [ ] **2.6.1** Add the fields + the scoreboard doc with its update protocol (one row per target-attempt per arm, on real targets). **2.6.2** Docs updated. Commit. *By 2026-09-30 this table is the Mistral-vs-frontier evidence — measured on the real queue.*
 
 ### Task 2.7 — First-pass refinery punch list (the unpriced bottleneck)

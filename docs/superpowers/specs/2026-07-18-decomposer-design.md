@@ -2,8 +2,8 @@
 
 > **Status: SIGNED OFF — R delegated the design decisions (2026-07-18); 2.1+ in progress.** This is a
 > *mechanics* doc — the strategy is fixed by
-> `docs/superpowers/plans/2026-07-18-autoformalization-improvements.md` (centaur
-> architecture; general-reasoner role filled by Magistral for now; decision gate
+> `docs/superpowers/plans/2026-07-18-autoformalization-improvements.md` (an autonomous
+> Mistral pipeline on CI; general-reasoner role filled by Magistral; decision gate
 > 2026-09-30). It specifies the schema, prompts, gates, budgets, recomposition,
 > keep-and-revise, and A/B telemetry the Phase-2 tasks build. Phase 0 confirmed the
 > bottleneck is the reasoning/drafting layer, so this loop is the structural fix.
@@ -37,10 +37,10 @@ target ──▶ draft_decomposition (Magistral, chat_fn)         [2.2]
         open-pr (DAG-shaped module; PR body lists the DAG)
 ```
 
-Interface is **model-agnostic** (`chat_fn` injection). Magistral is the production
-reasoner — the automated loop is **Mistral-only**. A manual/Claude centaur session
-(the human-oversight layer at the top of the centaur, e.g. Phase 0 Control B) can log
-its outcome as a REFERENCE row: opportunistic, never a scheduled competitor.
+Interface is **model-agnostic** (`chat_fn` injection), but the automated loop is
+**Mistral-only**: Magistral is the production reasoner. The interface stays swappable
+so a frontier eval at the 2026-09-30 gate is a config change, not a rewrite — it is
+NOT a standing second arm.
 
 ## 2.1 — Lemma-DAG schema + validation (`probe/decompose.py`)
 
@@ -128,15 +128,15 @@ gets proving budget — the mid-tier-reasoner compensation.
 
 ## 2.6 — Performance scoreboard (decision-gate evidence)
 
-The PRIMARY measurement is **Magistral's absolute performance** on the real queue —
-that is what says whether the decomposer works and whether a change helped (its own
-numbers improve). Summary rows gain `arm ∈ {cron, decompose-magistral, centaur}`,
-`leaves_total`/`leaves_closed`, and `refinery_minutes` (filled by hand at merge).
-`docs/research/ab-decomposer.md` is the running scoreboard: one row per
-target-attempt. `centaur` rows are **opportunistic** — logged when a manual
-hard-target session (the human-oversight layer, e.g. Phase 0 Control B) naturally
-happens. They are a free frontier reference for the 2026-09-30 gate, NOT a scheduled
-Claude arm and NOT the per-tick signal: production stays Magistral-only.
+The measurement is **Magistral's absolute performance** on the real queue — what says
+whether the decomposer works and whether a change helped (its own numbers improve).
+Summary rows gain `arm ∈ {cron, decompose}` (both Mistral), `leaves_total`/
+`leaves_closed`, and `refinery_minutes` (filled by hand at merge).
+`docs/research/ab-decomposer.md` is the running scoreboard: one row per target-attempt.
+The single question it answers: **does the decomposition loop close hard targets the
+plain `cron` path cannot, for the tokens it costs?** No Claude/centaur arm — production
+is Mistral-only, and R is the PR reviewer plus an independent author, not a tracked
+pipeline component.
 
 ## 2.7 — First-pass refinery punch list
 
@@ -148,11 +148,10 @@ gates.** The taste half (inspired math, architecture) stays human/Claude.
 ## The 2026-09-30 decision-gate inputs
 
 Keep-Magistral (now paid) / frontier-decomposer / hybrid, decided on: Magistral's
-accumulated absolute track record (leaves-closed, merge-rate, refinery-minutes), the
-opportunistic centaur reference rows, and the actual Labs price sheet. If the call is
-close, run a ONE-TIME focused frontier bake-off at the gate — we do NOT run a
-continuous Claude arm before then (that would mix vendors for evidence we can
-assemble more cheaply at decision time).
+accumulated absolute track record (leaves-closed, merge-rate, refinery-minutes) and the
+actual Labs price sheet. Good enough → keep it. If it is not and the call is close, run
+a ONE-TIME focused frontier eval at the gate (the `chat_fn` interface makes that a config
+swap). No continuous second arm before then.
 
 ## Decisions (R delegated, 2026-07-18)
 
@@ -161,5 +160,5 @@ assemble more cheaply at decision time).
 2. **Decompose trigger = tag-only** (`decompose` label). Conservative: no decomposer
    tokens on targets a patterns.md tweak or a plain retry would fix. Auto-after-N is a
    later tuning, gated on the obstruction report showing a decompose-shaped family.
-3. **Centaur = opportunistic, not an arm.** No scheduled cadence; log a centaur row
-   when a manual hard-target session happens. Production is Magistral-only.
+3. **No centaur/Claude arm.** Production is Mistral-only; the scoreboard is `cron` vs
+   `decompose`. R's own manual proofs are independent author work, not a tracked arm.
