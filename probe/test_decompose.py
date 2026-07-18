@@ -165,3 +165,44 @@ def test_leaf_stub_inlines_proved_dependency(tmp_path):
     stub = (tmp_path / two["file"]).read_text(encoding="utf-8")
     assert "theorem lem_one (y : ℝ) : y = y := rfl" in stub
     assert stub.count("sorry") == 1     # only lem_two's own sorry
+
+
+# --- Task 2.5: recompose + keep-and-revise -----------------------------------
+
+_PROVED_LEM = (
+    "/-\nCopyright\n-/\nmodule\n\npublic import Mathlib\n\n"
+    "@[expose] public section\n\nnamespace MathFin\n\n"
+    "theorem lem_refl (x : ℝ) : x = x := rfl\n\nend MathFin\n"
+)
+
+
+def test_extract_leaf_decl():
+    from decompose import extract_leaf_decl
+    assert extract_leaf_decl(_PROVED_LEM, "lem_refl") == "theorem lem_refl (x : ℝ) : x = x := rfl"
+    assert extract_leaf_decl(_PROVED_LEM, "nope") is None
+
+
+def test_recompose_full_and_partial():
+    from decompose import recompose
+    dag = parse_dag(_SKEL_FIXTURE)
+
+    # all leaves proved + the assembled module passes the full gate → ok
+    full = recompose(dag, {"lem_refl": _PROVED_LEM}, check_fn=lambda m: {"passed": True})
+    assert full["ok"] and not full["partial"] and full["banked"] == ["lem_refl"]
+    assert "theorem lem_refl (x : ℝ) : x = x := rfl" in full["module"]
+    assert "theorem main_thm (x : ℝ) : x = x := by exact lem_refl x" in full["module"]
+    assert "sorry" not in full["module"]
+
+    # all proved but the RECOMPOSITION fails the full gate → not ok, not partial
+    rej = recompose(dag, {"lem_refl": _PROVED_LEM},
+                    check_fn=lambda m: {"passed": False, "reason": "recompose mismatch"})
+    assert not rej["ok"] and not rej["partial"] and rej["reason"] == "recompose mismatch"
+    assert "module" in rej
+
+    # partial: a leaf unproved → banked + declared remainder (deferred, refs not closes),
+    # never a silent gap; no module assembled and the gate is not even called.
+    called = {"n": 0}
+    part = recompose(dag, {}, check_fn=lambda m: called.__setitem__("n", called["n"] + 1) or {"passed": True})
+    assert not part["ok"] and part["partial"] and part["deferred"]
+    assert part["banked"] == [] and part["remainder"] == ["lem_refl"]
+    assert called["n"] == 0

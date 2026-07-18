@@ -315,6 +315,57 @@ def build_leaf_manifest(dag: Dag, meta: dict, out_dir: str, *, toolchain: str = 
     return manifest
 
 
+# --- recompose + keep-and-revise (2.5) ----------------------------------------
+
+def extract_leaf_decl(module_text: str, name: str) -> str | None:
+    """The `theorem/lemma <name> ... := <proof>` block from a proved leaf module (from
+    its keyword to just before `end MathFin` / end of file). None if absent. The generated
+    leaf modules hold exactly one declaration, so the slice is unambiguous."""
+    m = re.search(
+        rf"(?m)^\s*(?:@\[[^\]]*\]\s*)?(?:private\s+|protected\s+)?(?:theorem|lemma)\s+{re.escape(name)}\b",
+        module_text)
+    if not m:
+        return None
+    start = m.start()
+    tail = re.search(r"(?m)^end MathFin\b", module_text[start:])
+    end = start + tail.start() if tail else len(module_text)
+    return module_text[start:end].strip()
+
+
+def recompose(dag: Dag, proved_leaves: dict, *, check_fn, meta: dict | None = None) -> dict:
+    """Assemble proved leaves + the main theorem into ONE module and run the FULL gate.
+    `proved_leaves` maps a leaf name -> its proved module text (what `vibe_prove` writes).
+
+    - ALL leaves proved AND the assembled module passes `check_fn` -> `{ok:True, module,
+      banked}`.
+    - all proved but the recomposition FAILS the full gate -> `{ok:False, module, reason}`
+      (a real failure mode: leaves that pass in isolation but not composed).
+    - PARTIAL (a leaf missing or unextractable) -> `{ok:False, partial:True, banked,
+      remainder, deferred:True}`: proved leaves are banked (standalone-PR candidates), the
+      rest a declared remainder (`refs`, not `closes`) — never a silent gap; the gate is
+      not called. `check_fn(module_text) -> {passed, reason}` binds the daemon + main name."""
+    decls: dict[str, str] = {}
+    for leaf in dag.leaves:
+        mod = proved_leaves.get(leaf.name)
+        d = extract_leaf_decl(mod, leaf.name) if mod else None
+        if d:
+            decls[leaf.name] = d
+    banked = [leaf.name for leaf in dag.leaves if leaf.name in decls]
+    remainder = [leaf.name for leaf in dag.leaves if leaf.name not in decls]
+    if remainder:
+        return {"ok": False, "partial": True, "banked": banked, "remainder": remainder,
+                "deferred": True, "reason": f"leaves not proved: {', '.join(remainder)}"}
+    body = [decls[leaf.name] for leaf in topo_order(dag) if not leaf.is_main]
+    body.append(f"{dag.main.statement} := {dag.main.proof}")
+    module = _module_text([p for leaf in dag.leaves for p in leaf.pointers], "\n\n".join(body))
+    g = check_fn(module)
+    if g.get("passed"):
+        return {"ok": True, "partial": False, "module": module, "banked": banked,
+                "remainder": [], "reason": ""}
+    return {"ok": False, "partial": False, "module": module, "banked": banked,
+            "remainder": [], "reason": g.get("reason", "recomposition failed the full gate")}
+
+
 def skeleton_gate(lean_text: str, n_leaves: int, *, check_fn) -> dict:
     """Elaborate the assembled skeleton. PASSES iff elaboration is clean AND
     `sorry_count == n_leaves` — the leaves are the only sorries and the main genuinely
