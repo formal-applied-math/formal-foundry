@@ -1,6 +1,7 @@
 # Magistral decomposition loop — mechanics design (Task 2.0)
 
-> **Status: SIGNED OFF — R delegated the design decisions (2026-07-18); 2.1+ in progress.** This is a
+> **Status: BUILT — tasks 2.1–2.8 landed on `phase2/decomposition` (2026-07-18), off by
+> default (`[decompose] enabled=false`, tag-only).** R delegated the design decisions. This is a
 > *mechanics* doc — the strategy is fixed by
 > `docs/superpowers/plans/2026-07-18-autoformalization-improvements.md` (an autonomous
 > Mistral pipeline on CI; general-reasoner role filled by Magistral; decision gate
@@ -152,6 +153,27 @@ accumulated absolute track record (leaves-closed, merge-rate, refinery-minutes) 
 actual Labs price sheet. Good enough → keep it. If it is not and the call is close, run
 a ONE-TIME focused frontier eval at the gate (the `chat_fn` interface makes that a config
 swap). No continuous second arm before then.
+
+## As built (2.1–2.8)
+
+- `probe/decompose.py` — schema/validation (`parse_dag`/`topo_order`/`MAX_LEAVES=3`),
+  the decomposer call (`draft_decomposition` + `DECOMPOSE_SYSTEM`, brace-aware JSON
+  extractor, a `feedback` seed for the skeleton re-decompose), `assemble_skeleton` +
+  `skeleton_gate`, `build_leaf_manifest` (per-leaf single-sorry stubs), `recompose` +
+  `extract_leaf_decl`, `dag_to_dict`.
+- `probe/decompose_tick.py` — `do_draft`/`do_recompose` (injected chat/check fns,
+  unit-tested with no API/daemon), plus the CLI wiring real Magistral + the daemon.
+- `scripts/decompose-tick.sh` — the leaf-prove orchestration: one daemon↔lsp flip pair
+  for all leaves, records a vibe-shaped summary row + the A/B scoreboard row.
+- `scripts/pipeline-tick.sh` — takes the path ONLY when `[decompose].enabled` AND the
+  target is tagged `decompose`; otherwise the plain path is byte-identical.
+- `scripts/open-pr.sh` — lists the DAG (sidecar-guarded) + embeds the first-pass refinery
+  punch list; `probe/scoreboard.py` + `docs/research/ab-decomposer.md` are the A/B evidence.
+- **Deferred refinement:** deep `depends_on` chains prove independently in v1 (the flat
+  split is the MAX_LEAVES=3 common case); keep-and-revise inlining of a proved dependency
+  into a dependent leaf's stub is supported by `build_leaf_manifest(proved=…)` but not yet
+  driven by the loop. **Live end-to-end run is an operator action** (paid Magistral + the
+  single local Lean slot), like Phase 0's Control A.
 
 ## Decisions (R delegated, 2026-07-18)
 

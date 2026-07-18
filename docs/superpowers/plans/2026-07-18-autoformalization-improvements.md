@@ -144,6 +144,12 @@ def test_repair_hint_nnreal_misparse():
 
 ## Phase 2 — The decomposition loop on Magistral (the fork, taken now)
 
+> **BUILT (2026-07-18):** tasks 2.0–2.8 landed on `phase2/decomposition`, off by default
+> (`[decompose] enabled=false`, tag-only). As-built map + deferred refinements:
+> `docs/superpowers/specs/2026-07-18-decomposer-design.md`. Acceptance met at the code
+> level (loop composed end-to-end, A/B scoreboard live, cron demotion documented); the
+> live run on a real stuck target is an operator action (paid Magistral + the single Lean slot).
+
 **Posture:** general-reasoner role = Magistral for now (see strategic posture). Interface model-agnostic (`chat_fn` injection, same as everywhere else in `probe/`). Every reasoner output passes a Lean-side gate before any budget is spent downstream. Cron demoted to calibration + easy-harvest; decomposition runs on stuck/hard targets.
 
 ### Task 2.0 — Mechanics design doc (short; R reviews before 2.1+)
