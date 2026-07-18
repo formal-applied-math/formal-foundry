@@ -40,8 +40,8 @@ def _refill_family(row: dict) -> str | None:
     has_unknowns = any(h.get("unknown_identifiers") for h in row.get("history") or [])
     if out == "indeterminate" or "indeterminate" in gates:
         return "infra-indeterminate"
-    if out == "depth" or "depth" in gates:
-        return "depth-gate"
+    if out in ("depth", "blocked_on_infra") or gates & {"depth", "blocked_on_infra"}:
+        return "depth-gate"   # missing-primitives signal (feasibility census + depth gate)
     if has_unknowns:                     # a guessed constant survived retrieval
         return "unknown-id-despite-retrieval"
     if out in ("intent", "formalize") or gates & {"intent", "formalize"}:

@@ -129,6 +129,25 @@ def test_strengthen_whitelists_nonzero_binder_under_grind():
     assert "hA" in res["candidate"]
 
 
+# --- Task 1.8: feasibility census at intent time (H12) -----------------------
+
+def test_route_feasibility_blocks_on_missing_primitives():
+    # names MathFin.omegaRatio (absent) + MathFin.zcb (present) + Real.exp (Mathlib,
+    # not our concern) → blocked_on_infra with the missing list, no draft attempted.
+    intent = {"objects": ["MathFin.zcb", "MathFin.omegaRatio", "Real.exp"], "statement": "x"}
+    feas = af.route_feasibility(intent, ["MathFin/FixedIncome/ZCB.lean"],
+                                lookup_fn=lambda name: name == "MathFin.zcb")
+    assert feas["feasible"] is False
+    assert feas["missing"] == ["MathFin.omegaRatio"]
+    assert "MathFin.omegaRatio" in feas["note"]
+
+
+def test_route_feasibility_ok_when_present_or_mathlib():
+    intent = {"objects": ["MathFin.zcb", "Real.exp", "integral_add_compl"]}
+    feas = af.route_feasibility(intent, [], lookup_fn=lambda n: n == "MathFin.zcb")
+    assert feas["feasible"] is True and feas["missing"] == []
+
+
 def test_autoformalize_config_depth_gate_default_on():
     assert pl.AutoformalizeConfig.load(None).depth_gate is True
 

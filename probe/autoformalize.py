@@ -777,7 +777,7 @@ def classify_refill(rec: dict) -> str:
     if out == "seeded":
         return "seeded"
     gates = {h.get("gate") for h in rec.get("history", []) or []}
-    if out == "depth" or "depth" in gates:
+    if out in ("depth", "blocked_on_infra") or gates & {"depth", "blocked_on_infra"}:
         return "needs_primitives"
     if out in ("newdef_depth", "ungrounded") or gates & {"newdef_depth", "ungrounded"}:
         return "defs_rejected"
@@ -1126,13 +1126,33 @@ def _write_target(queue_dir: str, n: int, lean_text: str, entry: dict) -> list[s
     return [stub_path, entry_path]
 
 
+def route_feasibility(intent: dict, pointers: list[str], *, lookup_fn) -> dict:
+    """Feasibility census at intent time (H12): the `MathFin.*` primitives the intent
+    NAMES but that exist neither in the pointer modules nor in the pin index.
+    `lookup_fn(name) -> bool` reports existence (scout index, fallback grep). ≥1
+    missing ⇒ `feasible=False` — drafting is doomed (the #1 recorded death family,
+    `needs_primitives`), so record `blocked_on_infra` with the missing list and a
+    suggested-defs note rather than burning a formalize budget on a hallucinated
+    constant. Mathlib names are not checked (out of our authority; the elaborator
+    gates those). Returns `{feasible, missing, note}`."""
+    named = [o for o in (intent.get("objects") or [])
+             if isinstance(o, str) and o.startswith("MathFin.")]
+    missing = [o for o in named if not lookup_fn(o)]
+    if not missing:
+        return {"feasible": True, "missing": [], "note": ""}
+    note = ("intent names MathFin primitives that do not exist yet: "
+            + ", ".join(missing) + " — route to the defs stage (introduce them) or "
+            "leave a human issue comment; do not draft against invented constants.")
+    return {"feasible": False, "missing": missing, "note": note}
+
+
 def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn,
            queue_dir: str, budget: int, max_issues: int = 1,
            max_attempt_issues: int = 3, gate_budget: int = 20_000, formalize_rounds: int = 3,
            formalize_token_budget: int = 40_000, formalize_fn=None, retrieve_fn=None,
            proactive_fn=None, depth_gate: bool = True, triviality_gate: bool = True,
            semantic_rounds: int = 2, derivable_fn=None, system_prompt=None,
-           log=lambda m: None) -> dict:
+           feasibility_fn=None, log=lambda m: None) -> dict:
     """Draft + gate + stage up to `max_issues` targets from `issues`.
 
     For each candidate (up to `max_attempt_issues`): intent (magistral `reason_fn`
@@ -1185,6 +1205,20 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn,
                     log(f"#{n}: intent named no definitions (attempt {attempt})")
                     feedback = render_gate_feedback(fail["gate"], fail["detail"], None)
                     continue
+                # H12: feasibility census — if the intent names MathFin primitives that
+                # don't exist yet (the #1 death family), record blocked_on_infra + the
+                # missing list and STOP, never burning a formalize budget on a doomed
+                # draft. The defs route is exempt (it is allowed to introduce new defs).
+                if feasibility_fn is not None and route != "defs":
+                    feas = route_feasibility(intent, issue.get("pointers", []),
+                                             lookup_fn=feasibility_fn)
+                    if not feas["feasible"]:
+                        row = {"attempt": attempt, "gate": "blocked_on_infra",
+                               "detail": feas["note"], "missing": feas["missing"]}
+                        history.append(row)
+                        log(f"#{n}: blocked_on_infra — missing {feas['missing']} "
+                            f"(attempt {attempt})")
+                        break   # doomed target — surface for the defs route / a human
 
                 proactive = proactive_fn(intent["statement"]) if proactive_fn else ""
                 fr = formalize_with_repair(intent, ctx, issue=issue, chat_fn=formalize_fn,
@@ -1410,6 +1444,26 @@ def main() -> int:
     else:
         retrieve_fn, proactive_fn = None, None
 
+    # H12 feasibility census: does a named MathFin.* primitive exist? scout index
+    # first (authoritative), then a grep of the main-repo MathFin/ sources. Fail-open
+    # (return True) whenever neither can confidently decide, so the census only ever
+    # blocks a target it is SURE names a missing primitive — never a good one.
+    from scout_index import ScoutIndex
+    _feas_idx = ScoutIndex(index_dir)
+
+    def feasibility_fn(name: str) -> bool:
+        if _feas_idx.available and _feas_idx.signature_of(name) is not None:
+            return True
+        short = re.escape(name.rsplit(".", 1)[-1])
+        try:
+            out = subprocess.run(
+                ["grep", "-rlE", rf"(def|theorem|lemma|abbrev|structure)[[:space:]]+{short}\b",
+                 os.path.join(args.main_repo, "MathFin")],
+                capture_output=True, text=True, timeout=15)
+            return bool(out.stdout.strip())
+        except (OSError, subprocess.SubprocessError):
+            return True   # can't check ⇒ fail-open (never block a good target)
+
     res = refill(issues, reason_fn=reason_fn, prove_fn=prove_fn, check_fn=daemon_check,
                  context_fn=context_fn, queue_dir=queue_dir, budget=budget,
                  max_issues=max_issues, max_attempt_issues=max_attempt, gate_budget=gate_budget,
@@ -1418,6 +1472,7 @@ def main() -> int:
                  depth_gate=depth_gate, triviality_gate=triviality_gate,
                  semantic_rounds=semantic_rounds, system_prompt=prove_system,
                  derivable_fn=lambda lt: derivable_hypotheses(lt, check_fn=daemon_check),
+                 feasibility_fn=feasibility_fn,
                  log=lambda m: print(f"[refill] {m}", file=sys.stderr))
 
     # obstruction telemetry: one row per issue tried, so a zero-seed tick says which
