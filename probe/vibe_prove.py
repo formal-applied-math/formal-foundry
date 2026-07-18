@@ -144,7 +144,8 @@ def _cmd_gate(args) -> int:
         cand_path = os.path.join(run_dir, f"{args.run_tag}-{target['id']}.candidate")
         candidate = read_back(cand_path)
         summary = {"target": target["id"], "stream": target.get("stream", ""),
-                   "ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "harness": "vibe", "tokens": 0}
+                   "ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "harness": "vibe",
+                   "arm": getattr(args, "arm", "cron"), "tokens": 0}
         if not candidate:
             summary["outcome"] = "error"          # infra miss (no capture) → retryable
         elif "sorry" in candidate:
@@ -226,6 +227,9 @@ def main() -> int:
     common.add_argument("--only", default=None)
     common.add_argument("--run-tag", required=True)
     common.add_argument("--main-repo", default="/home/rapha/code/automated_proofs_quantfin")
+    # A/B scoreboard arm (Task 2.6): the plain cron path is "cron"; the decompose driver
+    # passes "decompose" for its leaf runs. Both Mistral — there is no centaur/claude arm.
+    common.add_argument("--arm", default="cron", choices=["cron", "decompose"])
     pr = sub.add_parser("run", parents=[common], help="LSP phase: headless vibe → .candidate")
     pr.add_argument("--max-turns", type=int, default=40)
     sub.add_parser("gate", parents=[common], help="daemon phase: verify .candidate → .lean + summary")

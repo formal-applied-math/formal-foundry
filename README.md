@@ -56,10 +56,22 @@ A candidate passes the gate only with no errors, no `sorry`, axioms ⊆
 *candidate*, not a contribution — the refinery rewrites it to the
 conceptually-right proof under the 8-lens bar before a human merges it.
 
+**Two proving paths (Phase 2).** The scheduled cron's stated job is now **calibration +
+easy-harvest** — it proves targets a single vibe session can close and keeps the pipeline
+honest against the live queue. A **hard** target (tagged `decompose`) instead takes the
+**lemma-DAG path**: Magistral splits it into a few leaf lemmas + a main theorem, a
+skeleton gate rejects a bad split for one elaboration's cost, the same vibe prover proves
+the leaves, and a recomposition gate assembles the whole. Both paths are Mistral; whether
+decomposition earns its tokens is measured on the real queue in
+[`docs/research/ab-decomposer.md`](docs/research/ab-decomposer.md) for the 2026-09-30
+engine decision. The path is **off by default** (`pipeline.toml [decompose] enabled`), so
+the running cron is unchanged until it is flipped on.
+
 Full diagram: [`docs/leanstral-architecture.md`](docs/leanstral-architecture.md).
 How the prover agents are equipped (context pack, loop, lean-lsp-mcp harness, PR
 activation): [`docs/PROVER_SETUP.md`](docs/PROVER_SETUP.md). Why this shape is the
 validated one: [`docs/research/2026-07-11-world-class-autoformalization-survey.md`](docs/research/2026-07-11-world-class-autoformalization-survey.md).
+Decomposition mechanics: [`docs/superpowers/specs/2026-07-18-decomposer-design.md`](docs/superpowers/specs/2026-07-18-decomposer-design.md).
 
 ## Hard rules
 
