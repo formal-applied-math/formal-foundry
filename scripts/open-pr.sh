@@ -239,6 +239,13 @@ FIDELITY_NOTES="$(python3 "$FOUNDRY/probe/fidelity_notes.py" \
   --pointers "$POINTERS_JSON" --provenance "$PROV_JSON" 2>/dev/null \
   || echo "(fidelity notes unavailable)")"
 
+# first-pass refinery punch list (Task 2.7): a soft Magistral review over the proven
+# candidate — the MECHANICAL half of the 8-lens pass (unused constructs, wrapper smell,
+# register, obvious golf) as a checklist the human refiner starts from. NEVER gates:
+# refinery_notes.py falls back to a skip line without a key or on any API error.
+REFINERY_NOTES="$(python3 "$FOUNDRY/probe/refinery_notes.py" --lean-file "$CAND" 2>/dev/null \
+  || echo "_(first-pass refinery notes unavailable)_")"
+
 BODY="$(cat <<EOF
 $BODY_INTRO $CLOSE_LINE.
 
@@ -260,6 +267,12 @@ review checklist (8-lens, before merge):
 <details><summary>statement-fidelity notes</summary>
 
 $FIDELITY_NOTES
+
+</details>
+
+<details><summary>first-pass refinery punch list (mechanical lenses — soft; the human owns the rewrite)</summary>
+
+$REFINERY_NOTES
 
 </details>
 EOF
