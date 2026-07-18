@@ -986,8 +986,9 @@ def _good_intent(i, ctx, *, chat_fn, feedback=None, **_kw):
 
 def _good_formalize(intent, grounding, *, issue, chat_fn, check_fn, emit_fn, rounds,
                     retrieve_fn=None, token_budget=None, proactive_premises=None,
-                    revision_note="", log=None):
-    """Stand-in for formalize_with_repair — emits a real lean_text/entry from the intent meta."""
+                    revision_note="", log=None, **_kw):
+    """Stand-in for formalize_with_repair — emits a real lean_text/entry from the intent
+    meta. `**_kw` absorbs future kwargs (the derivable_fn lesson, twice now)."""
     n = issue["number"]
     stub = f"theorem t{n} (h : p) : q := by sorry"
     meta = {"module_name": intent["module_name"], "benchmark_id": intent["benchmark_id"],
@@ -1148,7 +1149,7 @@ def test_refill_wires_intent_formalize_prove_fns(monkeypatch, tmp_path):
     monkeypatch.setattr(
         af, "formalize_with_repair",
         lambda intent, g, *, issue, chat_fn, check_fn, emit_fn, rounds, retrieve_fn=None,
-        token_budget=None, proactive_premises=None, revision_note="", log=None:
+        token_budget=None, proactive_premises=None, revision_note="", log=None, **_kw:
         seen.update(formalize=chat_fn) or _good_formalize(intent, g, issue=issue, chat_fn=chat_fn,
                                                           check_fn=check_fn, emit_fn=emit_fn, rounds=rounds))
     monkeypatch.setattr(af, "depth_rejection", lambda lt, nm, ptr, **k: {"shallow": False, "tokens": 0})
@@ -1202,7 +1203,7 @@ def test_refill_repairs_shallow_draft_with_feedback(monkeypatch, tmp_path):
 
     def formalize(intent_, g, *, issue, chat_fn, check_fn, emit_fn, rounds,
                   retrieve_fn=None, token_budget=None, proactive_premises=None,
-                  revision_note="", log=None):
+                  revision_note="", log=None, **_kw):
         seen["revision_notes"].append(revision_note)
         return _good_formalize(intent_, g, issue=issue, chat_fn=chat_fn,
                                check_fn=check_fn, emit_fn=emit_fn, rounds=rounds)
@@ -1559,6 +1560,164 @@ def test_strengthen_candidate_cascades_on_fresh_warnings():
                                 _UNUSED_WARN, regate_fn=lambda c: next(seq))
     assert s["stripped"] == ["hσ_eq", "hσ"]
     assert "hσ" not in s["candidate"].split(":= by")[0].split("theorem")[1]
+
+
+# --- derivable-hypothesis probe (the #123 hP class) ---------------------------
+
+_DER_MOD = ("module\n\npublic import Mathlib\n\nnamespace MathFin\n\n"
+            "/-- d. -/\ndef zcbX (r : ℝ) : ℝ := Real.exp r\n\n"
+            "theorem t (r δ : ℝ) (hδ : 0 < δ) (hP : 0 < Real.exp r) :"
+            " δ * Real.exp r > 0 := by sorry\n\n"
+            "end MathFin\n")
+
+
+def test_derivable_probe_builds_prop_guarded_examples():
+    probe, names, base = af.derivable_probe(_DER_MOD)
+    assert names == ["hδ", "hP"]
+    assert "theorem t" not in probe and "def zcbX" in probe
+    assert probe.rstrip().endswith("end MathFin")
+    # hP's example binds only the EARLIER groups and Prop-guards the goal, so a
+    # data binder's example is a type error (never a false hit)
+    assert "example (r δ : ℝ) (hδ : 0 < δ) : ((0 < Real.exp r) : Prop) := by" in probe
+    assert "maxHeartbeats" in probe
+
+
+def test_derivable_probe_skips_multi_name_groups_and_no_theorem():
+    lean = ("namespace MathFin\ntheorem t (a b : ℝ) (h : 0 ≤ 1) : a + b = b + a "
+            ":= by sorry\nend MathFin\n")
+    probe, names, _base = af.derivable_probe(lean)
+    assert names == ["h"]
+    assert af.derivable_probe("def x : Nat := 3") is None
+
+
+def test_derivable_hypotheses_maps_error_lines():
+    probe, names, base = af.derivable_probe(_DER_MOD)
+    # error ON the first example line (hδ genuinely needed) → only hP derivable
+    def check(code):
+        assert code == probe
+        return {"success": False, "sorry_count": 0,
+                "errors": [f"line {base}:60: tactic 'first' failed"]}
+    assert af.derivable_hypotheses(_DER_MOD, check_fn=check) == ["hP"]
+
+
+def test_derivable_hypotheses_fails_open_on_foreign_or_unlocatable_errors():
+    def foreign(code):
+        return {"success": False, "sorry_count": 0, "errors": ["line 2:0: bad import"]}
+    assert af.derivable_hypotheses(_DER_MOD, check_fn=foreign) == []
+    def unlocatable(code):
+        return {"success": False, "sorry_count": 0, "errors": ["daemon exploded"]}
+    assert af.derivable_hypotheses(_DER_MOD, check_fn=unlocatable) == []
+
+
+def test_formalize_with_repair_feeds_back_derivable_hypotheses():
+    calls = {"n": 0}
+
+    def fake_der(lean_text):
+        calls["n"] += 1
+        return ["hP"] if calls["n"] == 1 else []
+    seen = []
+
+    def chat(msgs):
+        seen.append(msgs)
+        return (_formalize_reply(), 10)
+    r = af.formalize_with_repair(_INTENT, "", issue=_issue(5), chat_fn=chat,
+                                 check_fn=_ELAB_OK, emit_fn=af.emit_target_files,
+                                 rounds=3, derivable_fn=fake_der)
+    assert r["ok"] is True and len(seen) == 2
+    fb = " ".join(m["content"] for m in seen[1])
+    assert "hP" in fb and "provable" in fb
+
+
+# --- ∧-bundle advisory + core/corollary stub shape -----------------------------
+
+
+def test_bundle_conclusion_detects_top_level_and_only():
+    assert af.bundle_conclusion(" x = y ∧ y = x ") is True
+    assert af.bundle_conclusion(" (A ∧ B) → C ") is False
+    assert af.bundle_conclusion(" x = y ") is False
+
+
+def test_formalize_with_repair_advises_once_on_bundle_then_accepts():
+    bundle = "```lean\ntheorem foo (x : ℝ) : x = x ∧ 0 ≤ x * x := by sorry\n```"
+    seen = []
+
+    def chat(msgs):
+        seen.append(msgs)
+        return (bundle, 10)
+    r = af.formalize_with_repair(_INTENT, "", issue=_issue(5), chat_fn=chat,
+                                 check_fn=_ELAB_OK, emit_fn=af.emit_target_files, rounds=3)
+    assert r["ok"] is True and len(seen) == 2   # one advisory round, then accepted as-is
+    fb = " ".join(m["content"] for m in seen[1])
+    assert "∧" in fb and "corollar" in fb.lower()
+
+
+def test_formalize_accepts_core_plus_sorry_free_corollary():
+    two = ("```lean\n/-- core. -/\ntheorem coreThm (x : ℝ) (hx : x ≠ 0) : x / x = 1 "
+           ":= by sorry\n\n/-- issue-shaped. -/\ntheorem corThm (x : ℝ) (hx : x ≠ 0) :"
+           " x / x = 1 := coreThm x hx\n```")
+    r = af.formalize_with_repair(_INTENT, "", issue=_issue(5), chat_fn=_script_chat([two]),
+                                 check_fn=_ELAB_OK, emit_fn=af.emit_target_files, rounds=3)
+    assert r["ok"] is True and "corThm" in r["lean_text"]
+
+
+def test_rebuild_snippet_refuses_foreign_application():
+    # the snippet re-exports a DIFFERENT theorem than the stripped core (the
+    # corollary shape) — rebuilding it against the core would corrupt it
+    snip = ("import M\n\ntheorem mf_x (a : ℝ) (h : 0 ≤ a) : a ≥ 0 :=\n"
+            "  MathFin.otherThm a h\n")
+    assert af._rebuild_snippet(snip, _STRONG_MOD, "premium_ge_mean") is None
+
+
+def test_contracts_carry_corollary_shape():
+    assert "corollar" in af.FORMALIZE_SYSTEM.lower()
+    assert "corollary" in af.INTENT_DEFS_ADDENDUM.lower()
+    intent = {**_INTENT, "corollary": {"name": "mf_shape", "statement": "the zcb case"}}
+    joined = " ".join(m["content"] for m in af.formalize_messages(intent, ""))
+    assert "mf_shape" in joined and "the zcb case" in joined
+
+
+# --- post-gate proof golf -------------------------------------------------------
+
+_GOLFABLE = ("module\n\nnamespace MathFin\n\n/-- d. -/\ndef fooX (x : ℝ) : ℝ := x\n\n"
+             "theorem foo_ge (x : ℝ) (hx : 0 ≤ x) : fooX x ≥ 0 := by\n"
+             "  dsimp [fooX]; nlinarith\n\nend MathFin\n")
+_GOLFED = _GOLFABLE.replace("by\n  dsimp [fooX]; nlinarith", "hx")
+
+
+def test_decl_signatures_extract_up_to_proof_separator():
+    sigs = af._decl_signatures(_GOLFABLE)
+    assert len(sigs) == 2
+    assert sigs[1].startswith("theorem foo_ge") and "nlinarith" not in sigs[1]
+    assert af._decl_signatures(_GOLFABLE) == af._decl_signatures(_GOLFED)
+
+
+def test_golf_candidate_accepts_signature_preserving_green_golf():
+    r = af.golf_candidate(_GOLFABLE, chat_fn=lambda m: (f"```lean\n{_GOLFED}\n```", 10),
+                          regate_fn=lambda c: {"passed": True})
+    assert r["golfed"] is True and r["candidate"].strip() == _GOLFED.strip()
+
+
+def test_golf_candidate_rejects_statement_drift_before_regating():
+    drifted = _GOLFED.replace("(hx : 0 ≤ x) ", "")
+
+    def no_regate(c):
+        raise AssertionError("statement drift must be rejected before the daemon is hit")
+    r = af.golf_candidate(_GOLFABLE, chat_fn=lambda m: (f"```lean\n{drifted}\n```", 10),
+                          regate_fn=no_regate)
+    assert r["golfed"] is False and r["candidate"] == _GOLFABLE
+
+
+def test_golf_candidate_fails_open_on_regate_failure_or_no_lean():
+    r = af.golf_candidate(_GOLFABLE, chat_fn=lambda m: (f"```lean\n{_GOLFED}\n```", 10),
+                          regate_fn=lambda c: {"passed": False, "reason": "axiom_dirty"})
+    assert r["golfed"] is False and r["candidate"] == _GOLFABLE
+    r2 = af.golf_candidate(_GOLFABLE, chat_fn=lambda m: ("no lean block", 10),
+                           regate_fn=lambda c: {"passed": True})
+    assert r2["golfed"] is False
+    r3 = af.golf_candidate(_GOLFABLE,
+                           chat_fn=lambda m: (f"```lean\n{_GOLFED.replace('hx', 'sorry')}\n```", 10),
+                           regate_fn=lambda c: {"passed": True})
+    assert r3["golfed"] is False   # a golf that reintroduces sorry is never accepted
 
 
 def test_formalize_with_repair_guards_empty_assistant_content():

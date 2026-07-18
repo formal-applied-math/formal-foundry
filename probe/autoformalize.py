@@ -246,7 +246,10 @@ FORMALIZE_SYSTEM = (
     "`x ∈ s`, `A ≠ 0` rather than assuming positivity of a quantity that is already provably "
     "positive from its definition.\n"
     "- Definitions bind their arguments in the signature (`def f (x : ℝ) : ℝ := …`), never a "
-    "lambda against a `∀` ascription; write anonymous functions with `↦`."
+    "lambda against a `∀` ascription; write anonymous functions with `↦`.\n"
+    "- Exactly ONE `sorry` — the CORE theorem, first. You MAY add corollaries AFTER it "
+    "(the issue-shaped instantiation of a general core, or per-fact projections of an "
+    "`∧`-bundle) as additional theorems proved by sorry-free TERMS applying the core."
 )
 
 FIDELITY_SYSTEM = (
@@ -273,7 +276,9 @@ INTENT_DEFS_ADDENDUM = (
     '"meaning": "<one line>", "built_from": ["<existing Mathlib/MathFin constants>"]}, ...] '
     "— 1 to 3 definitions, each buildable from EXISTING constants (never a free-floating "
     "wrapper), and specify the statement so the theorem is EXPRESSED THROUGH these new "
-    "definitions."
+    "definitions. When the natural shape is a GENERAL core plus the issue-shaped "
+    'instantiation, also emit "corollary": {"name": "<snake_case>", "statement": '
+    '"<one line>"} — the core carries the proof, the corollary applies it.'
 )
 
 
@@ -337,6 +342,10 @@ def formalize_messages(intent: dict, grounding: str, revision_note: str = "") ->
                  "sorry; each built from existing constants; lowerCamelCase names, each with "
                  "a `/-- … -/` docstring above it) followed by the single theorem "
                  "stated THROUGH them, ending `:= by sorry`.\n")
+    cor = intent.get("corollary")
+    if isinstance(cor, dict) and cor.get("statement"):
+        user += ("\nCOROLLARY TO ADD AFTER THE CORE (a sorry-free theorem proved by a term "
+                 f"applying the core): {cor.get('name', 'corollary')} — {cor['statement']}\n")
     if grounding:
         user += "\nAVAILABLE SIGNATURES:\n" + grounding
     if revision_note:
@@ -398,7 +407,8 @@ def _repair_hint(errors) -> str:
 def formalize_with_repair(intent: dict, grounding: str, *, issue: dict, chat_fn, check_fn,
                           emit_fn, rounds: int = 3, retrieve_fn=None,
                           token_budget: int = 40_000, proactive_premises: str = "",
-                          revision_note: str = "", log=lambda m: None) -> dict:
+                          revision_note: str = "", derivable_fn=None,
+                          log=lambda m: None) -> dict:
     """Stage 2: Leanstral FORMALIZES `intent` into an elaborating stub, repairing against the
     elaborator. On an error the compiler message is fed back to Leanstral; for `unknown identifier
     X`, `retrieve_fn(X)` (loogle) candidates are appended. The naming meta rides from `intent`.
@@ -415,6 +425,7 @@ def formalize_with_repair(intent: dict, grounding: str, *, issue: dict, chat_fn,
             "docstring": intent.get("docstring", ""), "deferred": intent.get("deferred", [])}
     messages = formalize_messages(intent, grounding, revision_note)
     tokens = 0
+    advised_bundle = False   # the ∧-advisory is ONE soft round, never a hard gate
     unknowns: list[str] = []   # every `Unknown identifier X` guessed across rounds —
     #                            the defs the model thinks SHOULD exist (routing evidence)
     for i in range(max(1, rounds)):
@@ -449,6 +460,32 @@ def formalize_with_repair(intent: dict, grounding: str, *, issue: dict, chat_fn,
         if not elab.get("errors") and elab.get("sorry_count", 0) == 1:
             lint = lint_violations(stub)
             if not lint:
+                try:
+                    concl = split_statement(stub)[2]
+                except ValueError:
+                    concl = ""
+                if not advised_bundle and bundle_conclusion(concl):
+                    # soft: exactly one nudge round; whatever comes back is accepted
+                    advised_bundle = True
+                    log(f"round {i + 1}: ∧-bundle conclusion — one advisory round")
+                    messages += [_assistant(content),
+                                 {"role": "user", "content": _BUNDLE_ADVISORY}]
+                    continue
+                derivable = derivable_fn(lean_text) if derivable_fn else []
+                if derivable:
+                    # hard like lint (a provable hypothesis is slop by the values
+                    # gate), bounded by the same rounds; the probe itself fails open
+                    log(f"round {i + 1}: derivable hypothesis(es) {derivable}")
+                    messages += [
+                        _assistant(content),
+                        {"role": "user", "content":
+                         "These hypotheses are PROVABLE from the earlier binders or the "
+                         "library (a bounded positivity/norm_num/simp/exact? probe closed "
+                         "them): " + ", ".join(f"`{d}`" for d in derivable)
+                         + ". REMOVE them — omitting a provable hypothesis is a correct "
+                         "refinement, not a weakening. Keep everything else identical, "
+                         "still ending `:= by sorry`."}]
+                    continue
                 log(f"round {i + 1}: elaborates ✓ ({tokens} tok total)")
                 return {"ok": True, "stub": stub, "meta": round_meta, "lean_text": lean_text,
                         "entry": entry, "tokens": tokens, "unknowns": unknowns}
@@ -1042,7 +1079,8 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn,
            max_attempt_issues: int = 3, gate_budget: int = 20_000, formalize_rounds: int = 3,
            formalize_token_budget: int = 40_000, formalize_fn=None, retrieve_fn=None,
            proactive_fn=None, depth_gate: bool = True, triviality_gate: bool = True,
-           semantic_rounds: int = 2, system_prompt=None, log=lambda m: None) -> dict:
+           semantic_rounds: int = 2, derivable_fn=None, system_prompt=None,
+           log=lambda m: None) -> dict:
     """Draft + gate + stage up to `max_issues` targets from `issues`.
 
     For each candidate (up to `max_attempt_issues`): intent (magistral `reason_fn`
@@ -1103,6 +1141,7 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn,
                                            token_budget=formalize_token_budget,
                                            proactive_premises=proactive,
                                            revision_note=feedback or "",
+                                           derivable_fn=derivable_fn,
                                            log=lambda m: log(f"#{n} formalize {m}"))
                 spent += fr["tokens"]
                 unknowns = fr.get("unknowns") or []
@@ -1312,6 +1351,7 @@ def main() -> int:
                  formalize_fn=formalize_fn, retrieve_fn=retrieve_fn, proactive_fn=proactive_fn,
                  depth_gate=depth_gate, triviality_gate=triviality_gate,
                  semantic_rounds=semantic_rounds, system_prompt=prove_system,
+                 derivable_fn=lambda lt: derivable_hypotheses(lt, check_fn=daemon_check),
                  log=lambda m: print(f"[refill] {m}", file=sys.stderr))
 
     # obstruction telemetry: one row per issue tried, so a zero-seed tick says which
@@ -1440,7 +1480,11 @@ def _rebuild_snippet(snippet: str, candidate: str, thm_name: str) -> str | None:
     """Rebuild the re-export snippet against the stripped module theorem: same
     binders, application re-derived from them (emit's own formula). None if the
     snippet's shape is unexpected — the caller must then revert the whole strip,
-    because a module/snippet signature mismatch would block open-pr regen."""
+    because a module/snippet signature mismatch would block open-pr regen. A
+    snippet that applies a DIFFERENT theorem (the corollary shape re-exports the
+    corollary while `thm_name` is the sorry-carrying core) is refused outright."""
+    if f"MathFin.{thm_name}" not in snippet:
+        return None
     try:
         cb, cs, _ce = _locate_named(candidate, thm_name)
         new_binders = candidate[cb:cs].strip()
@@ -1450,6 +1494,106 @@ def _rebuild_snippet(snippet: str, candidate: str, thm_name: str) -> str | None:
                 + f"\n  {app}\n")
     except ValueError:
         return None
+
+
+def bundle_conclusion(concl: str) -> bool:
+    """True when the conclusion is an `∧`-bundle at the TOP level (paren-nested
+    conjunctions are someone else's shape). Triggers the one-round advisory:
+    prefer named per-fact lemmas/corollaries around a single proved core."""
+    depth = 0
+    for c in concl:
+        if c in _OPEN:
+            depth += 1
+        elif c in _CLOSE:
+            depth -= 1
+        elif c == "∧" and depth == 0:
+            return True
+    return False
+
+
+_BUNDLE_ADVISORY = (
+    "The conclusion is an `∧`-bundle. If ONE core fact yields the parts, restate as the "
+    "core theorem (`:= by sorry`) plus the issue-shaped corollary proved by applying it; "
+    "if the parts are independent leaf facts, keep the bundle as the single `sorry` "
+    "theorem and ADD named per-fact corollaries as projections (`(thm …).1`, "
+    "`(thm …).2.1`, …) after it. Extra theorems must be sorry-free terms — exactly ONE "
+    "`sorry` total, on the FIRST theorem. If the bundle truly is the honest final shape, "
+    "resend it unchanged."
+)
+
+
+# the bounded battery: intros peels ∀/→, then certificates before search. `exact?`
+# makes the probe catch lemma-shaped derivability (the zcb_pos class); the `Prop`
+# ascription in the probe goal makes data binders a type error, never a false hit.
+_DERIVABLE_TAC = "by intros; first | positivity | norm_num | simp | exact?"
+
+
+def derivable_probe(lean_text: str) -> tuple[str, list[str], int] | None:
+    """Build the one-file probe for the stub's theorem: everything before the
+    theorem (imports + drafted defs, kept so hypothesis types elaborate), then one
+    single-line `example` per single-name explicit binder proving its type from the
+    EARLIER binders only, then `end MathFin`. Returns `(probe_text, names,
+    first_example_line)`; None when there is nothing to probe."""
+    m = _DECL_RE.search(lean_text)
+    if not m:
+        return None
+    off = m.start()
+    try:
+        _n, bstart, sep, _end = _locate(lean_text[off:])
+    except ValueError:
+        return None
+    binders = lean_text[off + bstart:off + sep]
+    groups = _binder_groups(binders)
+    lines, names = [], []
+    for i, (start, end, opener, gnames) in enumerate(groups):
+        if opener != "(" or not gnames or len(gnames) != 1:
+            continue
+        group = binders[start + 1:end - 1]
+        colon = group.find(":")
+        if colon == -1:
+            continue
+        typ = re.sub(r"\s+", " ", group[colon + 1:].strip())
+        earlier = " ".join(re.sub(r"\s+", " ", binders[s:e]) for s, e, _o, _gn in groups[:i])
+        head = f"example {earlier} " if earlier else "example "
+        lines.append(f"set_option maxHeartbeats 50000 in {head}: (({typ}) : Prop) := {_DERIVABLE_TAC}")
+        names.append(gnames[0])
+    if not lines:
+        return None
+    prefix = lean_text[:off]
+    if not prefix.endswith("\n"):
+        prefix += "\n"
+    base = prefix.count("\n") + 1
+    return prefix + "\n".join(lines) + "\n\nend MathFin\n", names, base
+
+
+def derivable_hypotheses(lean_text: str, *, check_fn) -> list[str]:
+    """Single-name explicit hypotheses of the stub's theorem that the bounded
+    battery PROVES from the earlier binders + the library — the #123 `hP` class
+    (zcb positivity assumed although `zcb_pos` exists; the gate-time strengthen
+    pass cannot see it because the finished proof USES the hypothesis). One daemon
+    call. Fail-open: a daemon error, an unlocatable error, or any error OUTSIDE
+    the example lines (broken context) returns [] — never blocks a good draft."""
+    built = derivable_probe(lean_text)
+    if built is None:
+        return []
+    probe, names, base = built
+    try:
+        r = check_fn(probe)
+    except Exception:  # noqa: BLE001 — probe is advisory-shaped; never crash the draw
+        return []
+    if not isinstance(r, dict):
+        return []
+    example_lines = {base + j for j in range(len(names))}
+    hit = set()
+    for e in r.get("errors") or []:
+        lns = [int(x) for x in re.findall(r"line (\d+):", str(e))]
+        if not lns:
+            return []
+        for ln in lns:
+            if ln not in example_lines:
+                return []
+            hit.add(ln)
+    return [nm for j, nm in enumerate(names) if base + j not in hit]
 
 
 _MATHFIN_IMPORT_RE = re.compile(r"^public import (MathFin\.\S+)[ \t]*\n", re.MULTILINE)
@@ -1471,6 +1615,69 @@ def trim_unused_imports(candidate: str, *, check_fn) -> dict:
             candidate = trial
             removed.append(mod)
     return {"candidate": candidate, "removed": removed}
+
+
+GOLF_SYSTEM = (
+    "You are polishing an ACCEPTED, kernel-checked Lean 4 proof to the library's house "
+    "register. Rewrite ONLY proof bodies (what follows each `:=`): every statement, "
+    "name, docstring, import and definition stays byte-identical. House idioms: the "
+    "certificate over search (`mul_nonneg h₁ h₂` over `nlinarith`, `hA.ne'` over "
+    "`linarith`); bare proof TERM over `by exact`; no `set … with h` whose equation is "
+    "never used; fold `have h := e; simp at h; exact h` into `simpa using e`; fewer "
+    "`have`s — surface the shape with `suffices`/`show`; `↦` over `=>`; never introduce "
+    "`sorry` or `?`-suggestion tactics. If the proof is already minimal, return it "
+    "unchanged. Output exactly one ```lean block containing the FULL file."
+)
+
+_GOLF_DECL_RE = re.compile(
+    r"^\s*(?:@\[[^\]]*\]\s*)?(?:noncomputable\s+)?(?:theorem|lemma|def|abbrev)\s",
+    re.MULTILINE,
+)
+
+
+def _decl_signatures(text: str) -> list[str]:
+    """Whitespace-normalized decl signatures (decl keyword up to the depth-0 `:=`),
+    in order — the golf invariant: a polish may touch only what follows `:=`."""
+    sigs = []
+    n = len(text)
+    for m in _GOLF_DECL_RE.finditer(text):
+        depth, k = 0, m.end()
+        while k < n - 1:
+            c = text[k]
+            if c in _OPEN:
+                depth += 1
+            elif c in _CLOSE:
+                depth -= 1
+            elif c == ":" and depth == 0 and text[k + 1] == "=":
+                sigs.append(re.sub(r"\s+", " ", text[m.start():k]).strip())
+                break
+            k += 1
+    return sigs
+
+
+def golf_candidate(candidate: str, *, chat_fn, regate_fn, log=lambda m: None) -> dict:
+    """One post-gate polish round: the prover golfs its own accepted proof toward
+    the house register (the repo contract: a machine-found proof is refactored to
+    the certificate that shows why before it merges). Accepted only if every decl
+    signature is byte-equivalent (proof-only edits) AND the full gate passes again;
+    any miss keeps the proved original (fail-open). Returns {candidate, golfed}."""
+    try:
+        content, _tk = chat_fn([{"role": "system", "content": GOLF_SYSTEM},
+                                {"role": "user", "content": f"```lean\n{candidate}\n```"}])
+    except Exception:  # noqa: BLE001 — polish is optional; never lose the proof
+        return {"candidate": candidate, "golfed": False}
+    golfed = extract_lean_code(content or "")
+    if not golfed or golfed.strip() == candidate.strip() or "sorry" in golfed:
+        return {"candidate": candidate, "golfed": False}
+    if _decl_signatures(golfed) != _decl_signatures(candidate):
+        log("golf: statement drift — rejected before re-gating")
+        return {"candidate": candidate, "golfed": False}
+    g = regate_fn(golfed)
+    if not (isinstance(g, dict) and g.get("passed")):
+        log(f"golf: re-gate failed ({(g or {}).get('reason')}); keeping the original")
+        return {"candidate": candidate, "golfed": False}
+    log("golf: accepted (proof-only edit, full gate green)")
+    return {"candidate": golfed, "golfed": True}
 
 
 def strengthen_candidate(candidate: str, snippet: str | None, thm_name: str,

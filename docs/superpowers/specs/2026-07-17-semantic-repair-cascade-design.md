@@ -201,3 +201,33 @@ in one daemon call (marker/line mapping as in `defs_probe`); closures mean the
 hypothesis is provable and should be dropped from the statement (the #123 `hP`
 class — strengthen cannot see it because the proof USES the hypothesis). The
 contract + fidelity judge cover this class at instruction level today.
+
+## Addendum 4 (2026-07-18): the four refinery-approved upgrades
+
+R approved all four wiring candidates from the #123/#124 refinery. Landed:
+
+- **Derivable-hypothesis probe** (draft-time, the #123 `hP` class): after a draft
+  passes elab+lint, `derivable_hypotheses` builds ONE probe file — the stub's
+  prefix (imports + drafted defs) plus one single-line `example` per single-name
+  explicit binder, proving its type from the EARLIER binders only via
+  `by intros; first | positivity | norm_num | simp | exact?` under a 50k
+  heartbeat cap, `(… : Prop)`-ascribed so data binders are a type error, never a
+  false hit. Error lines map to examples; error-free examples = derivable →
+  fed back HARD (like lint), bounded by the same rounds. Fail-open on foreign/
+  unlocatable errors. Wired via injectable `derivable_fn` (production `main()`
+  passes the daemon-backed one; fakes in tests can't leak into the probe).
+- **∧-bundle advisory** (draft-time, soft): a top-level `∧` conclusion triggers
+  exactly ONE nudge round (core+corollary, or bundle-as-core with projection
+  corollaries); whatever comes back is accepted — never a hard gate.
+- **Core + corollary stub shape**: the formalize contract now allows extra
+  SORRY-FREE theorems after the single-`sorry` core (issue-shaped instantiation
+  or per-fact projections, proved by terms applying the core); the intent
+  defs-addendum may specify `"corollary": {name, statement}`. `sorry_count == 1`
+  and all first-decl-targeting gates hold unchanged; `_rebuild_snippet` now
+  refuses a snippet that applies a different theorem than the stripped core
+  (the corollary shape) rather than corrupting it.
+- **Post-gate proof golf** (experiment, `GOLF=0` disables): after strengthen +
+  trim, the prover golfs its own accepted proof to the house register
+  (certificate over search, no dead `set … with`, `simpa`-folds). Accepted only
+  if every decl signature is byte-equivalent (proof-only edits, no `sorry`) AND
+  the full gate passes again; otherwise the proved original stands.

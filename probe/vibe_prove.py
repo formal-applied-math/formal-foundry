@@ -134,9 +134,9 @@ def _cmd_run(args) -> int:
 def _cmd_gate(args) -> int:
     import time
 
-    from autoformalize import strengthen_candidate, trim_unused_imports
+    from autoformalize import golf_candidate, strengthen_candidate, trim_unused_imports
     from gate import gate as run_gate
-    from probe import daemon_check
+    from probe import daemon_check, mistral_chat
     from probe_lib import append_jsonl
     _, run_dir = _run_dir()
     summary_log = os.path.join(run_dir, f"{args.run_tag}-summary.jsonl")
@@ -187,6 +187,21 @@ def _cmd_gate(args) -> int:
                         summary["trimmed_imports"] = t["removed"]
                         print(f"[vibe-gate] {target['id']}: trimmed unused "
                               f"import(s) {t['removed']}", flush=True)
+                # golf: the prover polishes its own accepted proof to the house
+                # register (proof-only edits enforced by signature equality + a
+                # full re-gate; fail-open). GOLF=0 disables the experiment.
+                if os.environ.get("GOLF", "1") != "0" and os.environ.get("MISTRAL_API_KEY"):
+                    gf = golf_candidate(
+                        candidate,
+                        chat_fn=lambda msgs: mistral_chat(
+                            msgs, api_key=os.environ["MISTRAL_API_KEY"]),
+                        regate_fn=lambda c: run_gate(c, target["sorry_name"],
+                                                     check_fn=daemon_check),
+                        log=lambda m: print(f"[vibe-gate] {target['id']}: {m}",
+                                            flush=True))
+                    if gf["golfed"]:
+                        candidate = gf["candidate"]
+                        summary["golfed"] = True
                 summary["outcome"] = "pass"
                 summary["axioms_clean"] = True
                 win = os.path.join(run_dir, f"{args.run_tag}-{target['id']}.lean")
