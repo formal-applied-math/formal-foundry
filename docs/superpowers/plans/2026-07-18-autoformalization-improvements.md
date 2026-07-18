@@ -2,9 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Phases 0–2 are execution-ready (Phase 2 opens with a short mechanics design doc, not a strategic brainstorm). Phase 3 is Phase-2-informed; Phase 4 remains **brainstorm-gated**.
 
-> **⛔ Do-not-reintroduce (R, 2026-07-18):** a held-out **evaluation/benchmark track** (a "MathFin-Bench": frozen corpus theorems, pass@k, temporal splits, a drafting bench) is **dropped and must not be re-added to this plan** — or proposed, designed, or "thought of" — until R explicitly reopens it. It has recurred across plans (BIG-LEAP Phase 1, the 2026-07-11 survey item 5, this plan's earlier Phase 3); this marker exists to stop that. The tuning/feedback such a bench was meant to provide is instead taken from the **live queue** (see "How we know a change helped" below). Do not interpret its absence as an oversight.
-
-**Revision note.** v1 → v2: (1) the discriminating experiment became **Phase 0** (was a buried acceptance test); (2) the decomposition loop moved to **Phase 2, on Magistral** — the general-reasoner *role* filled in-family (no new vendor/cost/traffic), model-agnostic interface, A/B'd against Claude centaur sessions, hard decision gate **2026-09-30** (Labs $0 retirement); (3) Phase 1 cut to trust-hardening + diagnosis, polish tail deferred; (4) the cron re-labeled **calibration + easy-harvest**, not the product, with a first-pass refinery-automation task; stale "run the cron on the vibe harness" task removed (already wired). **v2 → v3 (2026-07-18):** removed the held-out evaluation track entirely per R's directive (above); the tuning it was meant to gate now runs on real-queue signal (the obstruction-family report, Task 1.7, and the A/B scoreboard on real targets, Task 2.6); the CI verification substrate that had lived with it is retained on its own merits (parallel leaf-proving + faster ledger sweeps) as the slim Phase 3.
+**Revision note.** v1 → v2: (1) the discriminating experiment became **Phase 0** (was a buried acceptance test); (2) the decomposition loop moved to **Phase 2, on Magistral** — the general-reasoner *role* filled in-family (no new vendor/cost/traffic), model-agnostic interface, A/B'd against Claude centaur sessions, hard decision gate **2026-09-30** (Labs $0 retirement); (3) Phase 1 cut to trust-hardening + diagnosis, polish tail deferred; (4) the cron re-labeled **calibration + easy-harvest**, not the product, with a first-pass refinery-automation task; stale "run the cron on the vibe harness" task removed (already wired).
 
 **Goal:** Make the mathfin-foundry pipeline the best version of what the evidence supports — a centaur architecture (general reasoner decomposes, leaf-prover discharges, human refines) with trust-hardened gates and tuning driven by the live queue — starting from the grind-history harvest (`docs/research/2026-07-18-mainrepo-grind-lessons-harvest.md`) and the ML4TP/survey research.
 
@@ -36,9 +34,9 @@ Every task's requirements implicitly include this section (from `CLAUDE.md`, the
 3. **Decision gate 2026-09-30** (Labs $0 retires): choose keep-Magistral / switch-decomposer-to-frontier / hybrid, on real-queue evidence — leaves-closed-per-target, refinery-effort-per-PR, per-arm outcomes (Phase 2's A/B scoreboard) — and the actual price sheet.
 4. **Depth-coherence, not theorem count.** Target selection continues to serve the theory (bridges, towers, promotions); Phase 4's supervised sourcing makes that machine-assisted, later.
 
-### How we know a change helped (the feedback signal, in place of a held-out bench)
+### How we know a change helped (the feedback signal)
 
-Tuning and the decision gate read the **live queue**, not a synthetic set:
+Tuning and the decision gate read the **live queue**:
 - **The obstruction-family report (Task 1.7)** — every tick, which failure class dominates (unknown-id-despite-retrieval / depth-gate / no-elaborating-draft / prover-max-rounds / gate-fail / infra-indeterminate) and its trend. A change "helped" if its target family shrinks.
 - **The A/B scoreboard (Task 2.6)** — per real target, per arm (cron / Magistral-decompose / Claude-centaur): leaves-closed, outcome, and refinery-minutes-at-merge. This is also the decision-gate evidence.
 - **Plain queue outcomes** — pass/fail and PR-merge rate on the actual `formal-mathfin` issue backlog.
@@ -199,11 +197,11 @@ def test_dag_rejects_cycles_and_oversize():
 
 ## Phase 3 — Throughput substrate + field-evidence tuning (Phase-2-informed)
 
-Slim, and deliberately not gated on any held-out measurement (see the do-not-reintroduce marker). These are the two throughput/tuning items that survive on their own merits; both are watched via the real-queue feedback signal.
+Slim — the two throughput/tuning items that survive on their own merits; both are watched via the real-queue feedback signal.
 
 ### Task 3.1 — CI verification substrate (parallel Lean REPLs) · substrate
 **Files:** `probe/verify_pool.py` + `probe/test_verify_pool.py` (injected fake REPLs; N workers, env-cache reuse, recycle-on-OOM), a `workflow_dispatch` batch-verify job in `.github/workflows/` (16 GB runner).
-- [ ] **3.1.1** Design note in the module docstring: the pool runs **only on CI/big boxes** — the local one-Lean-process doctrine is untouched. It exists to (a) run the decomposition loop's leaves in parallel, and (b) speed the `ledger verify --exec` corpus sweep — not to serve any benchmark.
+- [ ] **3.1.1** Design note in the module docstring: the pool runs **only on CI/big boxes** — the local one-Lean-process doctrine is untouched. It exists to (a) run the decomposition loop's leaves in parallel, and (b) speed the `ledger verify --exec` corpus sweep.
 - [ ] **3.1.2 (RED→GREEN)** Pool scheduling/recycling unit-tested with fakes (no real Lean). **3.1.3** Wire as the parallel backend for (a) Phase 2's leaf-proving and (b) the CI `ledger verify --exec` sweep. Commit. *This uncaps Phase 2's decomposition depth (N leaves at once) and shortens the corpus re-verify after a deep-module change.*
 
 ### Task 3.2 — Budget-shape retune toward depth (field-evidence-based)
@@ -235,8 +233,7 @@ Labs $0 retires. Decide **keep-Magistral / frontier-decomposer / hybrid** on rea
 ## Self-review
 
 - **Review findings addressed:** engine choice surfaced as an explicit, dated decision with an evidence protocol (not inherited); discriminating experiment is Phase 0; cron demoted in writing; refinery bottleneck priced (2.7); feasibility census + failure triage pulled into Phase 1; polish tail explicitly deferred; stale R2 task removed.
-- **Bench removal (v3):** the held-out evaluation track is gone per R's directive; the tuning/decision-gate function it served is carried by the real-queue signal (obstruction report 1.7 + A/B scoreboard 2.6); the CI verification substrate is retained on its own merits (3.1). No dangling references remain.
-- **Coverage vs sources:** harvest H1–H5, H8, H9, H11, H12 → Phase 1; H6/H7/H10/T3/T5 → deferred tail or Phase 4 with reasons; T1/T6 → 1.10; T7 kept. Survey #3/DSP → Phase 2; survey #5 (evaluation) → removed per R; D substrate → 3.1; R1 budget → 3.2; R5 triage → 1.7; ML4TP experiment → Phase 0. Backlog C/E/F/G/H: C+H10 → Phase 4; E partially superseded by existing embed retrieval; F → Phase 2 (the point of v2); G/H → Phase 4.
+- **Coverage vs sources:** harvest H1–H5, H8, H9, H11, H12 → Phase 1; H6/H7/H10/T3/T5 → deferred tail or Phase 4 with reasons; T1/T6 → 1.10; T7 kept. Survey #3/DSP → Phase 2; survey #5 (live-queue telemetry) → 1.7; D substrate → 3.1; R1 budget → 3.2; R5 triage → 1.7; ML4TP experiment → Phase 0. Backlog C/E/F/G/H: C+H10 → Phase 4; E partially superseded by existing embed retrieval; F → Phase 2 (the point of v2); G/H → Phase 4.
 - **Placeholder scan:** no TBDs; every code step names its test and file; Phase 2.0's doc and Phase 4's brainstorm are the two intentional design pauses, both marked.
 - **Type consistency:** `parse_dag/topo_order/DagError`, `assemble_skeleton/skeleton_gate`, `recompose`, `build_drafter_prompt`, `route_feasibility` used consistently across their producing and consuming tasks; all fakes take `**_kw`.
 

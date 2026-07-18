@@ -157,7 +157,7 @@ fits it.
    Leanstral's own PutnamBench curve 44→587 solves is driven by
    tokens-per-attempt, not attempt count). Our 500k/issue cap likely serves
    better as 2–4 attempts × high reasoning budget than many small rounds.
-   Measure on MathFin-Bench (item 5) before hard-coding.
+   Watch the live-queue telemetry (item 5) rather than hard-coding blind.
 3. **SCHEDULER — subgoal decomposition for stuck targets** (DeepSeek-V2 +
    Aristotle lemma pipeline; the single biggest capability jump). After a
    target exhausts its budget: general LLM writes an informal proof →
@@ -172,15 +172,12 @@ fits it.
    statement's cited constants through const_dep and inject the *exact*
    signatures of its dependency closure, plus the target file's preceding
    source, not just per-module signature lists.
-5. **EVALUATION — MathFin-Bench + Leanstral's pass@k curve on OUR
-   distribution** — **⛔ DROPPED as a recommendation (R, 2026-07-18): do not
-   propose or plan a held-out eval/benchmark until R reopens it**
-   ([[feedback_bench_dropped]]; `docs/upgrade-backlog.md` top). The field-finding
-   below stays as record; it is no longer a backlog item. Tuning now reads the
-   live queue (obstruction-family report + A/B scoreboard on real targets), not a
-   synthetic set. *(Historical description:* nobody had measured the knee on OOD
-   measure-theory finance; the proposal was to freeze ~30 proved theorems, strip
-   proofs, run pass@1/4/8 at 2–3 budgets — the former BIG-LEAP Phase-1 idea.*)*
+5. **EVALUATION — failure-family telemetry over the live issue queue.** Bucket
+   every tick's outcomes into obstruction families (unknown-id-despite-retrieval /
+   depth-gate / no-elaborating-draft / prover-max-rounds / gate-fail), track the
+   trend, and tune against it: a change helped iff its target family shrinks and
+   the merge-rate holds. The A/B scoreboard on real targets is the same instrument
+   for the decomposer decision.
 6. **STATEMENT SIDE — faithfulness gates in the autoformalize stream**
    (AlphaProof disprove-and-retire; DeepSeek hypothesis rejection; Harmonic
    judge). Before spending proof budget on an autoformalized statement:
@@ -210,8 +207,6 @@ fits it.
 
 - Closed-startup loops (Harmonic ops details beyond the paper, Math Inc/Gauss
   internals, Axiom, Morph Trinity) — no claims survived verification.
-- Leanstral's sample-efficiency knee on MathFin-like OOD content (item 5
-  measures this ourselves).
 - Whether LeanHammer's premise selection + reconstruction holds up on
   measure-theory/stochastic-calculus code (dependent types, no induction).
 - How Blueprint-driven crowdsourced ops (PFR/FLT/equational theories) route

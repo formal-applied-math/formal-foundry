@@ -30,13 +30,6 @@ A/B'd against Claude centaur sessions — this reopens and resolves-for-now the
 tuning → Phase 4 (brainstorm-gated). The v1 ordering in this file's §items stands
 as reference; where they disagree, the plan wins.
 
-**⛔ Dropped (R, 2026-07-18): the held-out evaluation/benchmark track ("MathFin-Bench").**
-Do not plan, design, or propose it — here or in the plan — until R reopens it. It
-had recurred across plans (this backlog's §B/§D caveats, the 2026-07-11 survey
-item 5, BIG-LEAP Phase 1); those references below are neutralized in place. Tuning
-and the decision gate now read the **live queue** (the obstruction-family report +
-the A/B scoreboard on real targets), not a synthetic set.
-
 **⏰ STANDING DECISION GATE — 2026-09-30 (Labs $0 retires):** decide
 keep-Magistral / frontier-decomposer / hybrid on the A/B scoreboard
 (`docs/research/ab-decomposer.md`, real targets), refinery-minutes-per-merged-PR,
@@ -108,7 +101,7 @@ doubles the per-attempt budget while keeping pass@4 diversity. Repair
   depth>breadth finding), not tuned on our own data. The plan's Phase 3.2 applies
   the depth retune (`fanout=2 × repair_rounds≥6`) and watches the **live-queue**
   signal (obstruction-family report + queue outcomes); keep or one-line-revert on
-  that. (No held-out bench — dropped per R, see top.)
+  that.
 - Sources: [Leanstral 1.5](https://mistral.ai/news/leanstral-1-5/), survey #2.
 
 ### C. Statement-side faithfulness filters — Leanstral-native; DESIGNED, ready to build
