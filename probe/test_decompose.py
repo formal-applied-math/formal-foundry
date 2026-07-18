@@ -52,3 +52,34 @@ def test_dag_accepts_json_string():
     import json
     dag = parse_dag(json.dumps(_FIXTURE))
     assert dag.main.name == "main"
+
+
+# --- Task 2.2: the decomposer call -------------------------------------------
+
+def test_draft_decomposition_returns_valid_dag_or_error():
+    import json
+    from decompose import draft_decomposition
+
+    good = lambda msgs, **_kw: (json.dumps(_FIXTURE), 5)   # noqa: E731
+    r = draft_decomposition("prove P", "", chat_fn=good)
+    assert r["ok"] and r["dag"].main.name == "main" and r["tokens"] == 5
+
+    calls = {"n": 0}
+
+    def bad(msgs, **_kw):
+        calls["n"] += 1
+        return ("here is my answer: not a dag", 3)
+    r2 = draft_decomposition("prove P", "", chat_fn=bad, max_reask=1)
+    assert not r2["ok"] and r2["error"]
+    assert calls["n"] == 2   # initial + exactly one re-ask, then stop (no infinite loop)
+
+
+def test_draft_decomposition_extracts_json_with_lean_braces():
+    # a Lean `{x : ℝ}` implicit binder inside a leaf statement must not break brace
+    # matching in the JSON extractor.
+    reply = ('```json\n{"main": {"name": "m", "statement": "∀ x, P x"}, '
+             '"leaves": [{"name": "a", "statement": "theorem a {x : ℝ} : P x := by sorry", '
+             '"pointers": [], "depends_on": []}]}\n```')
+    from decompose import draft_decomposition
+    r = draft_decomposition("t", "", chat_fn=lambda msgs, **_kw: (reply, 1))
+    assert r["ok"] and r["dag"].leaves[0].name == "a"

@@ -120,3 +120,108 @@ def topo_order(dag: Dag) -> list[Node]:
     for n in dag.nodes:
         visit(n)
     return order
+
+
+# --- the decomposer call (2.2) ------------------------------------------------
+# DECOMPOSE_SYSTEM is the B-class playbook (from the grind-history harvest) as the
+# reasoner's operating instructions. The caller prepends the drafter authority (pins
+# + statement-design, from house_context.build_drafter_prompt via `system_preamble`)
+# so the leaves are STATED to the same house standard — no import of autoformalize.
+
+DECOMPOSE_SYSTEM = (
+    "You are a Lean 4 proof ARCHITECT for MathFin (on Mathlib + BrownianMotion). Given a "
+    "hard target theorem, SPLIT it into a lemma-DAG: a few named leaf lemmas plus a MAIN "
+    "theorem whose proof applies them. Do NOT prove anything — you STATE the leaves and "
+    "sketch the main proof as leaf applications.\n"
+    "Playbook, in order:\n"
+    "- Spike the RISKIEST kernel first: leaf #1 is the single step most likely to be "
+    "impossible (a missing primitive, the hard analytic core). If it cannot be stated "
+    "cleanly, the whole split is wrong — say so instead of inventing a constant.\n"
+    "- Recon by conclusion-head: name each leaf after the Mathlib/MathFin result family "
+    "its conclusion belongs to, so the prover consumes the right lemma.\n"
+    "- Definition-shaping: shape a leaf so its hard side-conditions are INHERITED from a "
+    "closed structure, not asserted as fresh hypotheses.\n"
+    "- Skeleton-with-sorries: the main theorem's proof must ELABORATE as leaf applications "
+    "with the leaves left `:= by sorry`.\n"
+    "- Scope-fork with declared deferral: a leaf out of reach is split off and marked "
+    "deferred, never silently dropped.\n"
+    "- Keep leaves FEW and short (a handful at most); a split that needs many leaves is "
+    "mis-shaped.\n"
+    "Respond with ONLY a JSON object:\n"
+    '{"main": {"name": "<snake_case>", "statement": "<Lean binders + conclusion>", '
+    '"proof_sketch": "<how the leaves combine>"}, '
+    '"leaves": [{"name": "<snake_case>", "statement": "<Lean theorem signature, no proof>", '
+    '"pointers": ["MathFin/.../X.lean"], "depends_on": ["<sibling leaf name>", ...]}]}. '
+    "Each leaf statement is a Lean 4 theorem signature; pointers name the modules whose "
+    "defs it consumes; depends_on lists sibling leaves it uses."
+)
+
+
+def decompose_messages(target: str, context_pack: str, *, feedback: str | None = None,
+                       system_preamble: str = "") -> list[dict]:
+    system = (system_preamble + "\n" + DECOMPOSE_SYSTEM) if system_preamble else DECOMPOSE_SYSTEM
+    user = f"HARD TARGET:\n{target}\n"
+    if context_pack:
+        user += "\nAvailable declarations to consume:\n" + context_pack
+    if feedback:
+        user += ("\n\n" + feedback
+                 + "\nRe-emit a corrected lemma-DAG in the SAME JSON shape.")
+    return [{"role": "system", "content": system}, {"role": "user", "content": user}]
+
+
+def _extract_json_object(text: str | None):
+    """The first balanced `{...}` JSON object in `text` (tolerates ```json fences and
+    prose around it), string-aware so a Lean `{x : ℝ}` binder inside a value does not
+    miscount braces. None if none parses."""
+    if not text:
+        return None
+    start = text.find("{")
+    if start < 0:
+        return None
+    depth = 0
+    in_str = esc = False
+    for i in range(start, len(text)):
+        c = text[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif c == "\\":
+                esc = True
+            elif c == '"':
+                in_str = False
+        elif c == '"':
+            in_str = True
+        elif c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    return json.loads(text[start:i + 1])
+                except json.JSONDecodeError:
+                    return None
+    return None
+
+
+def draft_decomposition(target: str, context_pack: str, *, chat_fn,
+                        system_preamble: str = "", max_reask: int = 1,
+                        max_leaves: int | None = None) -> dict:
+    """Stage: the general reasoner (Magistral) SPLITS a hard target into a validated
+    lemma-DAG. A malformed/invalid reply ⇒ up to `max_reask` re-ask rounds (feedback =
+    the `DagError`), then a structured failure — never an infinite loop. Engine is the
+    injected `chat_fn`. Returns `{ok, dag, tokens, error}`."""
+    feedback = None
+    tokens = 0
+    last_err = "no reply"
+    for _ in range(max(1, max_reask + 1)):
+        content, tk = chat_fn(decompose_messages(target, context_pack, feedback=feedback,
+                                                 system_preamble=system_preamble))
+        tokens += tk
+        raw = _extract_json_object(content)
+        try:
+            dag = parse_dag(raw if raw is not None else (content or ""), max_leaves=max_leaves)
+            return {"ok": True, "dag": dag, "tokens": tokens, "error": ""}
+        except DagError as e:
+            last_err = str(e)
+            feedback = f"That lemma-DAG was invalid: {e}"
+    return {"ok": False, "dag": None, "tokens": tokens, "error": last_err}
