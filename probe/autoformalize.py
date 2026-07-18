@@ -425,6 +425,17 @@ def _repair_hint(errors) -> str:
     if "invalid 'import' command" in blob:
         hints.append("Do NOT write any `import` inside the theorem — the module already imports "
                      "Mathlib and the pointer modules.")
+    if re.search(r"typeclass instance problem is stuck.*\?m", blob, re.DOTALL):  # A3
+        hints.append("A typeclass instance metavariable is stuck (`?m…`): name the ambiguous "
+                     "implicit explicitly at the call site (e.g. `(μ := μ)`) or `@`-apply the "
+                     "lemma, so instance search is not left guessing.")
+    if re.search(r"failed to synthesize.*\b(?:LE|LT|OfNat|Zero|One)\s+Type\b", blob, re.DOTALL):  # A11
+        hints.append("`ℝ≥0` was misparsed as `ℝ ≥ 0` (a Prop), so an order/numeral class on "
+                     "`Type` cannot be synthesized: add `open scoped NNReal` and write `ℝ≥0`.")
+    if _unknown_identifiers(errors):  # A2
+        hints.append("For an unknown identifier: grep the PINNED `.lake/packages/mathlib` source "
+                     "for the name and its namespace before re-guessing (loogle tracks a newer "
+                     "pin — an upper bound only); do not invent a constant.")
     return ("\n" + "\n".join(hints)) if hints else ""
 
 
@@ -1795,6 +1806,31 @@ def normalize_deferred(val) -> list[str]:
     return out
 
 
+# A5: a `/-- … -/` decl docstring immediately followed by an `omit …/set_option …
+# in` modifier is a parse error (`unexpected token 'omit'`) — the modifier must sit
+# ABOVE the docstring. This regex captures (docstring)(modifier-lines) to swap them.
+_MODIFIER_AFTER_DOC_RE = re.compile(
+    r"(/--.*?-/)\n((?:[ \t]*(?:omit|set_option)\b[^\n]*?\bin\b[ \t]*\n)+)", re.DOTALL)
+# A7: a capital `Σ`/`Π` glued into an identifier collides with sigma/pi-type
+# notation (a recurring drafter slip — girsanov era). Match one adjacent to an
+# ASCII identifier char so the standalone `Σ x, …` type-former is NOT flagged.
+_SIGMA_PI_IDENT_RE = re.compile(r"[A-Za-z0-9_'][ΣΠ]|[ΣΠ][A-Za-z0-9_']")
+
+
+def _prelint_stub(stub: str) -> str:
+    """Emit-time deterministic fixes on a drafted stub, before assembly:
+    - A5: move an `omit …/set_option … in` modifier ABOVE an immediately preceding
+      decl docstring (else `unexpected token 'omit'; expected 'lemma'`).
+    - A7: reject a capital `Σ`/`Π` inside an identifier (sigma/pi-type collision);
+      raised so `formalize_with_repair`'s try/except surfaces it to the model."""
+    bad = _SIGMA_PI_IDENT_RE.search(stub)
+    if bad:
+        raise ValueError(
+            f"identifier uses `{bad.group()}` — a capital Σ/Π collides with sigma/pi-type "
+            "notation; rename it with an ASCII/lowercase identifier (e.g. `sigma`).")
+    return _MODIFIER_AFTER_DOC_RE.sub(lambda m: m.group(2) + m.group(1) + "\n", stub)
+
+
 def emit_target_files(issue: dict, stub: str, meta: dict) -> tuple[str, dict, dict]:
     """Assemble a queue target from a drafted stub — MECHANICAL, no model call.
 
@@ -1815,6 +1851,7 @@ def emit_target_files(issue: dict, stub: str, meta: dict) -> tuple[str, dict, di
     docstring = (meta.get("docstring") or "").strip()
     deferred = normalize_deferred(meta.get("deferred"))
     pointers = issue.get("pointers", [])
+    stub = _prelint_stub(stub)   # A5 modifier-order fix + A7 Σ/Π-identifier reject
     name, binders, concl = split_statement(stub)
 
     new_defs = [str(d) for d in (meta.get("definitions") or [])]

@@ -52,6 +52,38 @@ def test_drafter_prompt_unset_leaves_base_system_unchanged():
         == af.FORMALIZE_SYSTEM
 
 
+# --- Task 1.3: deterministic repair transforms + emit pre-lint ---------------
+
+def test_repair_hint_stuck_metavar_names_the_implicit():
+    h = af._repair_hint(["typeclass instance problem is stuck\n  IsFilteredPreBrownian X ?m P"])
+    assert "explicitly" in h and "(μ :=" in h
+
+
+def test_repair_hint_nnreal_misparse():
+    h = af._repair_hint(["failed to synthesize instance of type class\n  LE Type"])
+    assert "open scoped NNReal" in h
+
+
+def test_repair_hint_unknown_identifier_suggests_pinned_grep():
+    h = af._repair_hint(["Unknown identifier `MathFin.zcb`"])
+    assert ".lake/packages/mathlib" in h
+
+
+def test_emit_prelint_reorders_omit_before_docstring():
+    stub = "/-- d -/\nomit hB in\ntheorem foo (hB : True) : 1 = 1 := by sorry"
+    lean_text, _e, _p = af.emit_target_files(_ISSUE, stub, _META)
+    assert lean_text.index("omit hB in") < lean_text.index("/-- d -/")
+
+
+def test_emit_prelint_rejects_sigma_identifier():
+    stub = "theorem fooΣ : 1 = 1 := by sorry"
+    try:
+        af.emit_target_files(_ISSUE, stub, _META)
+        assert False, "expected emit to reject the Σ identifier"
+    except Exception as e:  # noqa: BLE001
+        assert "Σ" in str(e) or "sigma" in str(e).lower()
+
+
 def test_autoformalize_config_depth_gate_default_on():
     assert pl.AutoformalizeConfig.load(None).depth_gate is True
 
