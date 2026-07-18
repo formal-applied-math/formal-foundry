@@ -107,6 +107,28 @@ def test_daemon_check_infra_error_sets_sentinel():
     assert r.get("success") is False
 
 
+# --- Task 1.5: strengthen-pass pure-parse guards (H8) ------------------------
+
+def test_strengthen_keeps_sole_implicit_pin():
+    # hBmeas is the ONLY use of the implicit {B}; dropping it orphans B → protect it,
+    # even though the (faked) re-gate would pass.
+    candidate = "theorem foo {B : ℝ → ℝ} (hBmeas : Measurable B) (x : ℝ) : x = x := by rfl"
+    res = af.strengthen_candidate(candidate, None, "foo", ["unused variable `hBmeas`"],
+                                  regate_fn=lambda c: {"passed": True, "warnings": []})
+    assert "hBmeas" not in res["stripped"]
+    assert "hBmeas" in res["candidate"]
+
+
+def test_strengthen_whitelists_nonzero_binder_under_grind():
+    # hA is flagged unused, but the proof is `by grind`, which pulls hypotheses from
+    # context — the "unused variable" warning is unreliable, so keep the binder.
+    candidate = "theorem foo (A : ℝ) (hA : A ≠ 0) : A = A := by grind"
+    res = af.strengthen_candidate(candidate, None, "foo", ["unused variable `hA`"],
+                                  regate_fn=lambda c: {"passed": True, "warnings": []})
+    assert "hA" not in res["stripped"]
+    assert "hA" in res["candidate"]
+
+
 def test_autoformalize_config_depth_gate_default_on():
     assert pl.AutoformalizeConfig.load(None).depth_gate is True
 

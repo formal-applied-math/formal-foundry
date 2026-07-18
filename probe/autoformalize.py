@@ -1748,6 +1748,44 @@ def golf_candidate(candidate: str, *, chat_fn, regate_fn, log=lambda m: None) ->
     return {"candidate": golfed, "golfed": True}
 
 
+def _protected_from_strip(binders: str, body: str, drop: list[str]) -> set[str]:
+    """Flagged-unused binders the strengthen pass must NOT strip — pure-parse
+    pre-checks that avoid a wasted re-gate round / a broken PR before the full
+    re-gate backstop even runs (H8):
+    - (a) sole-implicit-pin: the binder is the only use of an implicit `{B}` — its
+      type mentions `B`, and `B` appears nowhere else in the binders, so dropping it
+      would orphan the implicit;
+    - (b) a `≠` (disequality) side-condition when the proof uses a context-pulling
+      tactic (`grind`/`nlinarith`/…): the classic `A ≠ 0` field/division side-condition
+      the linter reports `unused` although the tactic consumes it from context, not by
+      name. (Order hypotheses `0 ≤ …` are left to the re-gate — the linter is reliable
+      there, and over-protecting would keep genuinely-dead binders.)"""
+    protected: set[str] = set()
+    uses_ctx = bool(re.search(r"\b(?:grind|nlinarith|positivity|bound|gcongr|omega|polyrith)\b",
+                              body))
+    implicits: set[str] = set()
+    for m in re.finditer(r"[{⦃]\s*([^:{}⦃⦄]+?)\s*:", binders):
+        implicits.update(m.group(1).split())
+    for name in drop:
+        bm = re.search(r"\(\s*" + re.escape(name) + r"\b[^:()]*:\s*[^()]*\)", binders)
+        if not bm:
+            continue
+        btext = bm.group(0)
+        typ = btext.split(":", 1)[1] if ":" in btext else ""
+        if uses_ctx and "≠" in typ:
+            protected.add(name)
+            continue
+        for iv in implicits:
+            iv_re = r"(?<![\w'])" + re.escape(iv) + r"(?![\w'])"
+            # occurrences outside this binder; ≤1 means only the implicit's own
+            # `{iv : …}` declaration remains → stripping orphans it.
+            if re.search(iv_re, typ) and \
+                    len(re.findall(iv_re, binders)) - len(re.findall(iv_re, btext)) <= 1:
+                protected.add(name)
+                break
+    return protected
+
+
 def strengthen_candidate(candidate: str, snippet: str | None, thm_name: str,
                          warnings, *, regate_fn, max_passes: int = 3,
                          log=lambda m: None) -> dict:
@@ -1766,6 +1804,8 @@ def strengthen_candidate(candidate: str, snippet: str | None, thm_name: str,
             break
         binders = candidate[bstart:sep]
         drop = unused_theorem_hypotheses(warnings, binders)
+        prot = _protected_from_strip(binders, candidate[sep:], drop)  # H8 pure-parse guard
+        drop = [d for d in drop if d not in prot]
         if not drop:
             break
         new_binders, dropped = remove_explicit_binders(binders, set(drop))
