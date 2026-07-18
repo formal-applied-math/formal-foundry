@@ -31,10 +31,19 @@ fi
 # 2. Bring up the mem-capped lean-lsp service (idle; loads Lean only per session).
 docker compose -f "$BASE" -f "$LSP" up -d lean-lsp >/dev/null
 echo "[leanstral-vibe] waiting for lean-lsp-mcp…" >&2
+# H9: track readiness explicitly and ABORT-AS-TRANSIENT (exit 4) if it never comes
+# up — the old loop proceeded regardless, so a crashed/never-ready lean-lsp produced
+# an opaque run failure. Fail fast too if the container has died.
+ready=0
 for _ in $(seq 1 40); do
-  docker logs mathfin-lean-lsp 2>&1 | grep -q LEAN_LSP_MCP_READY && break
+  if docker logs mathfin-lean-lsp 2>&1 | grep -q LEAN_LSP_MCP_READY; then ready=1; break; fi
+  docker ps --format '{{.Names}}' | grep -q mathfin-lean-lsp || break   # container died
   sleep 3
 done
+if [ "$ready" != "1" ]; then
+  echo "[leanstral-vibe] lean-lsp-mcp not ready (timeout/crash) — aborting as transient" >&2
+  exit 4
+fi
 
 # 3. Leanstral API key (from the main repo .env; never logged).
 if [ -f "$MAIN/.env" ]; then set -a; . "$MAIN/.env"; set +a; export MISTRAL_API_KEY; fi

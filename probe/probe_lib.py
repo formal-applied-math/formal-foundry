@@ -179,3 +179,31 @@ def sha256_hex(s: str) -> str:
 def append_jsonl(path: str, record: dict) -> None:
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+# `:= [by] [exact] [Iff.]rfl` as a whole proof term; the negative lookahead keeps
+# it from firing inside a longer identifier (e.g. `foo_rfl`, `rfl_lemma`).
+_RFL_PROOF_RE = re.compile(r":=(by)?(exact)?(Iff\.)?rfl(?![A-Za-z0-9_.])")
+
+
+def rfl_proof_present(text: str) -> bool:
+    """True if a module's proof is a definitional/`rfl` discharge — a
+    reduced_core-in-disguise the values gate rejects for a `full` entry. Catches
+    `:= rfl`, `:= by rfl`, `:= Iff.rfl`, `:= by exact rfl` (with the term ending the
+    line or continuing on the next), ANYWHERE, not just at EOF — the shell glob it
+    replaces missed `:= by rfl` before an `end MathFin` and the `:=byrfl` variant.
+    Comment/import/structure lines are ignored; matching is per-line so a trailing
+    `end MathFin` never fuses onto the `rfl`."""
+    prev_opens_proof = False
+    for ln in text.splitlines():
+        if re.match(r"\s*(--|/-|import|module|open|namespace|variable|@\[)", ln):
+            continue
+        compact = re.sub(r"[ \t]+", "", ln)
+        if not compact:
+            continue
+        if _RFL_PROOF_RE.search(compact):
+            return True
+        if prev_opens_proof and re.fullmatch(r"(exact)?(Iff\.)?rfl", compact):
+            return True   # bare rfl continuing a `:=`/`:= by` from the previous line
+        prev_opens_proof = compact.endswith(":=") or compact.endswith(":=by")
+    return False

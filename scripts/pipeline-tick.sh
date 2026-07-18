@@ -57,9 +57,14 @@ if [ "$ACTION" = "skip" ] && [ "$REASON" = "no_unattempted_targets" ]; then
   AF="$(python3 -c "import sys,json,pipeline_lib as p; c=p.AutoformalizeConfig.load(sys.argv[1]); print(json.dumps({'enabled':c.enabled,'budget':c.budget,'max_issues':c.max_issues}))" "$CFG" 2>/dev/null || echo '{}')"
   if [ "$(jget "$AF" enabled)" = "True" ]; then
     echo "[tick] queue has no unattempted target → autoformalize refill…" >&2
+    # H9: a refill CRASH (non-zero exit) must be distinguishable from a legitimately
+    # empty backlog — else a broken refiller reads as "nothing to do" every tick.
     REFILL="$(GH_TOKEN="${MAIN_PR_TOKEN:-${GH_TOKEN:-}}" python3 autoformalize.py refill \
       --main-repo "$MAIN" --budget "$(jget "$AF" budget)" --max-issues "$(jget "$AF" max_issues)" \
-      2>>/dev/stderr || echo '{"seeded":[]}')"
+      2>>/dev/stderr || echo '{"seeded":[],"refill_error":true}')"
+    if printf '%s' "$REFILL" | python3 -c 'import sys,json; sys.exit(0 if json.load(sys.stdin).get("refill_error") else 1)' 2>/dev/null; then
+      echo "[tick] refill CRASHED (see stderr) — NOT an empty backlog; retryable next tick" >&2
+    fi
     SEEDED="$(printf '%s' "$REFILL" | python3 -c 'import sys,json;print(len(json.load(sys.stdin).get("seeded",[])))' 2>/dev/null || echo 0)"
     echo "[tick] refill seeded=$SEEDED" >&2
     # H5: attempts whose gates went indeterminate (wedged daemon) are retryable, not

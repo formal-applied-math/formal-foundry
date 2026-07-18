@@ -138,10 +138,11 @@ print("[open-pr] wrote:", ", ".join(written), file=sys.stderr)
 PY
 
 # --- 3. promotion-honesty guard (reject an rfl-trivial "full") ---------------
-PROOF_BODY="$(grep -viE '^\s*(--|/-|import|module|open|namespace|variable|@\[)' "$MAIN/$MODULE" | tr -d '[:space:]')"
-case "$PROOF_BODY" in
-  *":=rfl"*|*":=byrfl"|*":=Iff.rfl"*) blocked "proof is rfl-trivial (reduced_core-in-disguise; test_values rfl-tripwire would reject)";;
-esac
+# H9: use the tested probe_lib.rfl_proof_present (the shell glob missed `:= by rfl`
+# before `end MathFin` and the `:=byrfl` spelling — non-EOF variants slipped through).
+if python3 -c "import sys; sys.path.insert(0, '$FOUNDRY/probe'); from probe_lib import rfl_proof_present; sys.exit(0 if rfl_proof_present(open('$MAIN/$MODULE', encoding='utf-8').read()) else 1)"; then
+  blocked "proof is rfl-trivial (reduced_core-in-disguise; test_values rfl-tripwire would reject)"
+fi
 
 # --- 4. validate + regenerate (green-or-abort) -------------------------------
 # The Lean toolchain lives in the mathfin-verify IMAGE, not on the runner host,

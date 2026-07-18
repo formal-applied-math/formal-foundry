@@ -12,10 +12,27 @@ from probe_lib import (
     extract_lean_code,
     lint_violations,
     normalize_content,
+    rfl_proof_present,
     sha256_hex,
     slop_report,
     window_messages,
 )
+
+
+def test_rfl_guard_catches_by_rfl_before_end_namespace():
+    # the shell glob missed `:= by rfl` before `end MathFin` (anchored to EOF) and
+    # the `:=byrfl` spelling — the tested helper catches both.
+    assert rfl_proof_present(
+        "namespace MathFin\ntheorem t : 1 = 1 := by rfl\nend MathFin\n")
+    assert rfl_proof_present("theorem t : 1 = 1 := rfl\n")
+    assert rfl_proof_present("theorem t : (1 : ℝ) = 1 := Iff.rfl\n")
+    assert rfl_proof_present("theorem t : 1 = 1 := by exact rfl\n")
+
+
+def test_rfl_guard_ignores_real_proofs_and_rfl_named_lemmas():
+    assert not rfl_proof_present("theorem t : 1 = 1 := by simp\n")
+    assert not rfl_proof_present("theorem t : x = y := by rw [foo_rfl]; ring\n")
+    assert not rfl_proof_present("theorem t : P := by exact my_rfl_lemma h\n")
 
 
 def test_normalize_content_reasoning_blocks():
