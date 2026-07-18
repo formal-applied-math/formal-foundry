@@ -28,6 +28,30 @@ def test_autoformalize_config_reads_toml(tmp_path):
     assert cfg.gate_budget == 20_000        # unspecified keys keep defaults
 
 
+# --- Drafter authority (H1): pins + statement-design reach the drafter --------
+
+def test_formalize_messages_inject_drafter_authority(tmp_path):
+    from test_house_context import _fake_main_repo
+    repo = _fake_main_repo(tmp_path)
+    af.set_drafter_prompt(str(repo))
+    try:
+        sys_content = af.formalize_messages({"statement": "x", "objects": []}, "")[0]["content"]
+        assert "leanprover/lean4:v4.31.0" in sys_content          # pins reached the drafter
+        assert "autoformalization model" in sys_content.lower()   # base FORMALIZE_SYSTEM kept
+        assert "Statement design" in sys_content                  # statement-design authority
+        isys = af.intent_messages({"number": 1, "title": "t", "body": "b"}, "")[0]["content"]
+        assert "leanprover/lean4:v4.31.0" in isys
+    finally:
+        af._DRAFTER_PROMPT = ""   # reset the module global (test isolation)
+
+
+def test_drafter_prompt_unset_leaves_base_system_unchanged():
+    # With no wiring, the drafter system prompts are exactly the base constants.
+    af._DRAFTER_PROMPT = ""
+    assert af.formalize_messages({"statement": "x", "objects": []}, "")[0]["content"] \
+        == af.FORMALIZE_SYSTEM
+
+
 def test_autoformalize_config_depth_gate_default_on():
     assert pl.AutoformalizeConfig.load(None).depth_gate is True
 

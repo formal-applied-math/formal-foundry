@@ -25,7 +25,7 @@ import sys
 import time
 
 import embed as _embed
-from house_context import build_system_prompt, extract_signatures
+from house_context import build_drafter_prompt, build_system_prompt, extract_signatures
 from issues import difficulty_rank, select_issues
 from pipeline_lib import AutoformalizeConfig
 from probe import daemon_check, mistral_chat, run_target
@@ -282,6 +282,28 @@ INTENT_DEFS_ADDENDUM = (
 )
 
 
+# --- Drafter authority wiring (H1) -------------------------------------------
+# The drafter (intent + formalize) wrote statements with no pins and no house
+# statement-design rules — hence hallucinated constants and depth-gate deaths.
+# `set_drafter_prompt` wires the pins + statement-design preamble in once at
+# pipeline start (patterns.md read live); '' until wired, so the base system
+# prompts are unchanged for callers that never wire it.
+_DRAFTER_PROMPT: str = ""
+
+
+def set_drafter_prompt(main_repo: str) -> None:
+    """Wire the live drafter authority (pins + the statement-design section of
+    patterns.md) into the intent/formalize system prompts. Call once at pipeline
+    start; reads patterns.md live, not at import time."""
+    global _DRAFTER_PROMPT
+    _DRAFTER_PROMPT = build_drafter_prompt(main_repo)
+
+
+def _drafter_system(base: str) -> str:
+    """Prepend the wired drafter authority to a base drafter system prompt."""
+    return (_DRAFTER_PROMPT + "\n" + base) if _DRAFTER_PROMPT else base
+
+
 def intent_messages(issue: dict, context_pack: str, feedback: str | None = None,
                     route: str = "theorem",
                     prior_unknowns: list[str] | None = None) -> list[dict]:
@@ -296,7 +318,8 @@ def intent_messages(issue: dict, context_pack: str, feedback: str | None = None,
     if feedback:
         user += ("\n\n" + feedback
                  + "\nProduce a REVISED intent that fixes this; respond with the same JSON shape.")
-    return [{"role": "system", "content": INTENT_SYSTEM}, {"role": "user", "content": user}]
+    return [{"role": "system", "content": _drafter_system(INTENT_SYSTEM)},
+            {"role": "user", "content": user}]
 
 
 def parse_intent(reply: str) -> dict | None:
@@ -350,7 +373,8 @@ def formalize_messages(intent: dict, grounding: str, revision_note: str = "") ->
         user += "\nAVAILABLE SIGNATURES:\n" + grounding
     if revision_note:
         user += "\n\n" + revision_note
-    return [{"role": "system", "content": FORMALIZE_SYSTEM}, {"role": "user", "content": user}]
+    return [{"role": "system", "content": _drafter_system(FORMALIZE_SYSTEM)},
+            {"role": "user", "content": user}]
 
 
 # the elaborator emits BOTH spellings across versions: `Unknown identifier
@@ -1318,6 +1342,7 @@ def main() -> int:
           file=sys.stderr)
 
     prove_system = build_system_prompt(args.main_repo)   # the leaf-prover gate doctrine
+    set_drafter_prompt(args.main_repo)   # H1: pins + statement-design reach the drafter too
 
     def reason_fn(msgs):   # magistral: stage-1 intent + judge + intent-fidelity
         return mistral_chat(msgs, api_key=api_key, model=intent_model,

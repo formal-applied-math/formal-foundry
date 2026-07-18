@@ -4,6 +4,7 @@ import tempfile
 
 from house_context import (
     HOUSE_DOCTRINE,
+    build_drafter_prompt,
     build_system_prompt,
     extract_signatures,
     read_patterns,
@@ -11,6 +12,29 @@ from house_context import (
 )
 
 MAIN = "/home/rapha/code/automated_proofs_quantfin"
+
+
+def _fake_main_repo(tmp_path):
+    """Minimal main-repo layout: pins + a patterns.md carrying a 'Structural
+    patterns' section (with prover tactics) and a 'Statement design' section."""
+    repo = tmp_path
+    (repo / "lean-toolchain").write_text("leanprover/lean4:v4.31.0\n")
+    (repo / "lake-manifest.json").write_text(json.dumps({"packages": [
+        {"name": "mathlib", "rev": "abc123def456ghijkl"},
+        {"name": "brownianmotion", "rev": "d6f23da000011122"},
+    ]}))
+    docs = repo / "docs"
+    docs.mkdir(parents=True, exist_ok=True)
+    (docs / "patterns.md").write_text(
+        "## Structural patterns\n\n"
+        "reach for `nlinarith [sq_nonneg x]` on nonlinear goals; `grind` on algebra.\n\n"
+        "## Statement design (for the formalizer / drafter) (2026-07-18)\n\n"
+        "- Shape hard side-conditions to be inherited, not asserted.\n"
+        "- Casts go outward around lattice/arith ops.\n\n"
+        "## Repair table (compiler error -> fix)\n\n| a | b |\n|---|---|\n| x | y |\n",
+        encoding="utf-8",
+    )
+    return repo
 
 
 def test_doctrine_covers_values_and_coherence():
@@ -110,3 +134,25 @@ def test_context_pack_includes_dependency_closure():
         assert "helper : ℝ → Prop" in pack           # its cross-module dependency
         assert "the helper" in pack                  # closure carries the docstring too
         assert "DEPENDENCY-CLOSURE" in pack
+
+
+def test_drafter_prompt_has_statement_design_and_pins_not_proof_tactics(tmp_path):
+    # The DRAFTER writes STATEMENTS: it must get the pins + the statement-design
+    # section of patterns.md, but NOT the prover's tactic ladder (which would only
+    # tempt it to write proofs instead of a faithful statement).
+    repo = _fake_main_repo(tmp_path)
+    p = build_drafter_prompt(str(repo))
+    assert "Statement design" in p and "leanprover/lean4:v4.31.0" in p
+    assert "nlinarith" not in p  # prover-only tactic ladder stays out of the drafter prompt
+
+
+def test_drafter_prompt_falls_back_when_no_statement_design_section(tmp_path):
+    # Fail-open: patterns.md present but with no Statement-design header → the
+    # curated fallback still gives the drafter its statement-design authority + pins.
+    repo = _fake_main_repo(tmp_path)
+    (repo / "docs" / "patterns.md").write_text("## Something else\n\nno design here.\n",
+                                               encoding="utf-8")
+    p = build_drafter_prompt(str(repo))
+    assert "STATEMENT DESIGN" in p.upper()
+    assert "leanprover/lean4:v4.31.0" in p
+    assert "nlinarith" not in p

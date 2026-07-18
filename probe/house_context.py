@@ -165,6 +165,60 @@ def build_system_prompt(main_repo: str) -> str:
     return HOUSE_DOCTRINE + "\n" + patterns_block + pin_block
 
 
+# --- Drafter (statement) authority --------------------------------------------
+# The DRAFTER (intent + formalize stages) writes STATEMENTS, not proofs. Until
+# now it got none of the prover's context — no pins, no house statement-design
+# rules — which is why it hallucinated constants (e.g. `MathFin.zcb` onto a
+# barrier problem) and stated context-free theorems the depth-gate then killed.
+# It gets the pins + the statement-design section of patterns.md, and pointedly
+# NOT the prover's tactic ladder (which would only tempt it to write proofs).
+
+DRAFTER_STATEMENT_DESIGN_FALLBACK = """\
+── STATEMENT DESIGN (the drafter's job is a faithful, in-depth STATEMENT) ──
+The hardest failures are statement failures, not proof failures. Before `:= by sorry`:
+- Name objects ONLY from the declarations shown for THIS target. Never carry over an
+  example constant from these instructions (do not reach for `MathFin.zcb` unless it
+  appears in the shown declarations and the statement is about it).
+- If the primitive the statement needs is absent from the shown declarations, take the
+  DEFINITIONS route — do not invent a constant name.
+- Shape hard side-conditions to be inherited, not asserted; state at the natural level
+  of generality (`s.Nonempty` over a member-witness, `A ≠ 0` over provable positivity);
+  casts go outward around lattice/arith ops.
+"""
+
+
+def _slice_patterns_section(patterns: str, header_substr: str) -> str:
+    """The `## …<header_substr>…` section of patterns.md — the header line through
+    the line before the next `## ` (or EOF). '' if no such header is present."""
+    lines = patterns.splitlines()
+    start = next((i for i, ln in enumerate(lines)
+                  if ln.startswith("## ") and header_substr in ln), None)
+    if start is None:
+        return ""
+    end = next((j for j in range(start + 1, len(lines)) if lines[j].startswith("## ")),
+               len(lines))
+    return "\n".join(lines[start:end]).strip()
+
+
+def build_drafter_prompt(main_repo: str) -> str:
+    """System-prompt PREAMBLE for the DRAFTER (intent + formalize stages): the pins
+    it must target + the live 'Statement design' section of patterns.md (fail-open to
+    a curated fallback). Deliberately EXCLUDES the prover's tactic ladder — the
+    drafter states, it does not prove. Read live so patterns.md edits reach it."""
+    pins = read_pins(main_repo)
+    pin_block = (
+        "── PINS (target THIS API surface exactly) ──\n"
+        f"- Lean toolchain: {pins['toolchain']}\n"
+        f"- Mathlib: leanprover-community/mathlib4 @ {pins['mathlib']}\n"
+        f"- BrownianMotion: RemyDegenne/brownian-motion @ {pins['brownianmotion']}\n"
+        "Object and lemma names must exist at these revisions; if unsure a name exists, "
+        "do not guess it — take the definitions route or omit it.\n"
+    )
+    section = _slice_patterns_section(read_patterns(main_repo), "Statement design")
+    design_block = section if section else DRAFTER_STATEMENT_DESIGN_FALLBACK
+    return pin_block + "\n" + design_block + "\n"
+
+
 # --- Per-target context pack (consume-don't-reprove) --------------------------
 
 _DECL_RE = re.compile(
