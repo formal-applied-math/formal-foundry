@@ -166,8 +166,20 @@ jobs:
           # targets/queue: a self-feeding tick autoformalizes a new stub + entry +
           # manifest into the queue; commit those alongside the state + telemetry.
           git add pipeline_state.json runs targets/queue 2>/dev/null || true
-          git diff --cached --quiet || git commit -m "pipeline: state + telemetry + autoformalized targets [skip ci]"
-          git push || true
+          git diff --cached --quiet && exit 0
+          git commit -m "pipeline: state + telemetry + autoformalized targets [skip ci]"
+          # The push must survive commits landing on main MID-RUN (2026-07-17: a
+          # gate fix landed while a tick ran; `git push || true` swallowed the
+          # rejection and orphaned cal-bk-85's state — one tick from a duplicate
+          # PR). Rebase-and-retry; if it still cannot land, FAIL the step so the
+          # orphaned state is a red run, not a silent one.
+          for i in 1 2 3; do
+            git push && exit 0
+            echo "::warning::persist push rejected (attempt $i) — rebasing onto main and retrying"
+            git pull --rebase || true
+          done
+          echo "::error::persist push FAILED — this run's state/telemetry is NOT on main (recover from the pipeline-runs artifact)"
+          exit 1
 
       - name: Upload telemetry
         if: always()
