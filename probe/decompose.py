@@ -32,7 +32,7 @@ class Node:
     pointers: list[str] = field(default_factory=list)
     depends_on: list[str] = field(default_factory=list)
     is_main: bool = False
-    proof_sketch: str = ""
+    proof: str = ""   # the main node's Lean proof applying the leaves (leaves: "")
 
 
 @dataclass
@@ -91,7 +91,7 @@ def parse_dag(spec, *, max_leaves: int | None = None) -> Dag:
                 raise DagError(f"leaf {leaf.name} depends on unknown leaf {dep}")
 
     main = Node(name=m["name"], statement=m["statement"], is_main=True,
-                proof_sketch=m.get("proof_sketch", ""),
+                proof=m.get("proof", ""),
                 depends_on=[leaf.name for leaf in leaves])
     dag = Dag(main=main, leaves=leaves)
     topo_order(dag)   # raises DagError on a cycle
@@ -148,12 +148,13 @@ DECOMPOSE_SYSTEM = (
     "- Keep leaves FEW and short (a handful at most); a split that needs many leaves is "
     "mis-shaped.\n"
     "Respond with ONLY a JSON object:\n"
-    '{"main": {"name": "<snake_case>", "statement": "<Lean binders + conclusion>", '
-    '"proof_sketch": "<how the leaves combine>"}, '
-    '"leaves": [{"name": "<snake_case>", "statement": "<Lean theorem signature, no proof>", '
+    '{"main": {"name": "<snake_case>", "statement": "theorem <name> <binders> : <conclusion>", '
+    '"proof": "<Lean proof applying the leaves — a term or `by ...`, NO sorry>"}, '
+    '"leaves": [{"name": "<snake_case>", "statement": "theorem <name> <binders> : <conclusion>", '
     '"pointers": ["MathFin/.../X.lean"], "depends_on": ["<sibling leaf name>", ...]}]}. '
-    "Each leaf statement is a Lean 4 theorem signature; pointers name the modules whose "
-    "defs it consumes; depends_on lists sibling leaves it uses."
+    "Every `statement` is a COMPLETE Lean 4 theorem HEAD (`theorem <name> ... : ...`) with NO "
+    "`:=` — the leaves are assembled with `:= by sorry` and the main with your `proof`, and the "
+    "whole skeleton must elaborate. pointers name the modules whose defs a leaf consumes."
 )
 
 
@@ -225,3 +226,61 @@ def draft_decomposition(target: str, context_pack: str, *, chat_fn,
             last_err = str(e)
             feedback = f"That lemma-DAG was invalid: {e}"
     return {"ok": False, "dag": None, "tokens": tokens, "error": last_err}
+
+
+# --- the skeleton-elaboration gate (2.3, the load-bearing check) --------------
+
+_LICENSE = ("/-\nCopyright (c) 2026 Raphael Coelho. All rights reserved.\n"
+            "Released under Apache 2.0 license as described in the file LICENSE.\n"
+            "Authors: Raphael Coelho\n-/")
+
+
+def assemble_skeleton(dag: Dag, meta: dict | None = None) -> str:
+    """The skeleton module: every leaf `<statement> := by sorry`, the main theorem
+    `<statement> := <main.proof>` (its proof applying the leaves, NOT sorry). If a
+    good decomposition, this elaborates with exactly `len(leaves)` sorries — that is
+    what `skeleton_gate` checks, before any leaf gets proving budget."""
+    meta = meta or {}
+    pointers = sorted({p for leaf in dag.leaves for p in leaf.pointers if p.endswith(".lean")})
+    imports = "\n".join(["public import Mathlib"]
+                        + [f"public import {p[:-5].replace('/', '.')}" for p in pointers])
+    blocks: list[str] = []
+    for node in topo_order(dag):   # leaves first, main last
+        if node.is_main:
+            blocks.append(f"{node.statement} := {node.proof or 'by sorry'}")
+        else:
+            blocks.append(f"{node.statement} := by sorry")
+    return (
+        f"{_LICENSE}\nmodule\n\n"
+        f"{imports}\n\n"
+        "set_option autoImplicit false\n\n"
+        "@[expose] public section\n\n"
+        "namespace MathFin\n\n"
+        + "\n\n".join(blocks)
+        + "\n\nend MathFin\n"
+    )
+
+
+def skeleton_gate(lean_text: str, n_leaves: int, *, check_fn) -> dict:
+    """Elaborate the assembled skeleton. PASSES iff elaboration is clean AND
+    `sorry_count == n_leaves` — the leaves are the only sorries and the main genuinely
+    reduces to them. A daemon infra-error ⇒ INDETERMINATE (Task 1.4 `error` sentinel),
+    never a false pass. Returns `{passed, indeterminate, sorry_count, errors, verdict}`.
+
+    This is where a bad decomposition dies for ONE elaboration's cost — the mid-tier
+    reasoner compensation. On failure the caller does one bounded re-decomposition."""
+    res = check_fn(lean_text)
+    if res.get("error"):   # H5: wedged daemon is not a verdict
+        return {"passed": False, "indeterminate": True, "sorry_count": 0, "errors": [],
+                "verdict": "indeterminate: " + str(res["error"])[:120]}
+    errors = [str(e) for e in (res.get("errors") or [])]
+    sc = res.get("sorry_count", 0)
+    passed = (not errors) and (sc == n_leaves)
+    if passed:
+        verdict = ""
+    elif errors:
+        verdict = "skeleton does not elaborate: " + "; ".join(errors[:2])
+    else:
+        verdict = f"expected {n_leaves} sorries (the leaves), got {sc}"
+    return {"passed": passed, "indeterminate": False, "sorry_count": sc,
+            "errors": errors, "verdict": verdict}

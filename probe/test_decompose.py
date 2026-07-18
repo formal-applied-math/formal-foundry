@@ -83,3 +83,36 @@ def test_draft_decomposition_extracts_json_with_lean_braces():
     from decompose import draft_decomposition
     r = draft_decomposition("t", "", chat_fn=lambda msgs, **_kw: (reply, 1))
     assert r["ok"] and r["dag"].leaves[0].name == "a"
+
+
+# --- Task 2.3: the skeleton-elaboration gate ---------------------------------
+
+_SKEL_FIXTURE = {
+    "main": {"name": "main_thm", "statement": "theorem main_thm (x : ℝ) : x = x",
+             "proof": "by exact lem_refl x"},
+    "leaves": [{"name": "lem_refl", "statement": "theorem lem_refl (x : ℝ) : x = x",
+                "pointers": ["MathFin/Foundations/X.lean"], "depends_on": []}],
+}
+
+
+def test_skeleton_gate_requires_full_elaboration_with_n_sorries():
+    from decompose import assemble_skeleton, skeleton_gate
+    dag = parse_dag(_SKEL_FIXTURE)
+    n = len(dag.leaves)
+    lean = assemble_skeleton(dag)
+    assert "theorem lem_refl (x : ℝ) : x = x := by sorry" in lean
+    assert "theorem main_thm (x : ℝ) : x = x := by exact lem_refl x" in lean
+    assert "public import MathFin.Foundations.X" in lean
+
+    # clean elaboration with exactly n_leaves sorries → pass
+    ok = skeleton_gate(lean, n, check_fn=lambda c: {"success": True, "errors": [], "sorry_count": n})
+    assert ok["passed"] and not ok["indeterminate"]
+    # the main also left sorried (too many sorries) → fail
+    extra = skeleton_gate(lean, n, check_fn=lambda c: {"errors": [], "sorry_count": n + 1})
+    assert not extra["passed"] and "sorries" in extra["verdict"]
+    # the main's proof does not elaborate → fail
+    err = skeleton_gate(lean, n, check_fn=lambda c: {"errors": ["type mismatch"], "sorry_count": n})
+    assert not err["passed"]
+    # daemon infra error → indeterminate (Task 1.4 sentinel), never a false pass
+    ind = skeleton_gate(lean, n, check_fn=lambda c: {"error": "daemon timeout"})
+    assert ind["indeterminate"] and not ind["passed"]
