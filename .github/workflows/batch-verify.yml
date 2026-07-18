@@ -1,0 +1,93 @@
+name: batch verify (parallel Lean pool)
+
+# CI/big-box substrate (Phase 3, Task 3.1): verify many Lean targets in PARALLEL across a
+# pool of `lake env lean` workers. It exists to (a) prove the decomposition loop's
+# independent leaves at once and (b) speed the corpus re-verify after a deep-module change —
+# both single-Lean-slot-bound in the daily pipeline.
+#
+# workflow_dispatch ONLY (never on the cron): the pool runs N Lean processes at once, which
+# overcommits a small box. The local one-Lean-process doctrine is untouched. On the free
+# 2-core/7 GB runner keep `workers: 1` (a valid sweep; the parallel win needs a ≥16 GB
+# runner — set `workers: 2+` there). A worker OOM-killed (exit 137) is recycled + retried.
+
+on:
+  workflow_dispatch:
+    inputs:
+      manifest:
+        description: "foundry-relative manifest.json of stubs to verify (default: the live queue)"
+        type: string
+        default: "targets/queue/manifest.json"
+      workers:
+        description: "parallel Lean workers (1 on the 7 GB runner; 2+ on a ≥16 GB runner)"
+        type: string
+        default: "1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: batch-verify
+  cancel-in-progress: false
+
+jobs:
+  batch-verify:
+    runs-on: ubuntu-latest              # swap to a ≥16 GB label to use workers > 1
+    timeout-minutes: 120
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+                      /usr/local/.ghcup /usr/local/share/boost /opt/hostedtoolcache/CodeQL \
+                      /usr/local/lib/node_modules 2>/dev/null || true
+          docker image prune -af >/dev/null 2>&1 || true
+          df -h / | tail -1
+
+      - name: Checkout foundry
+        uses: actions/checkout@v4
+
+      - name: Checkout MathFin (live pins)
+        uses: actions/checkout@v4
+        with:
+          repository: raphaelrrcoelho/formal-mathfin
+          path: main
+          fetch-depth: 1
+
+      - name: Pull the pinned verify image
+        run: docker pull ghcr.io/raphaelrrcoelho/mathfin-verify:latest
+
+      - name: Verify the manifest in parallel (inside the image)
+        env:
+          MANIFEST: ${{ inputs.manifest }}
+          WORKERS: ${{ inputs.workers }}
+        run: |
+          # Validate the dispatch inputs BEFORE they reach any shell (defense in depth —
+          # workflow_dispatch is write-access only, but never splice untrusted text).
+          case "$WORKERS" in ''|*[!0-9]*) echo "workers must be a positive integer"; exit 1 ;; esac
+          case "$MANIFEST" in
+            *[!A-Za-z0-9._/-]*|/*|*..*) echo "manifest must be a safe foundry-relative path"; exit 1 ;;
+          esac
+          # Run the pool INSIDE the image (the Lean toolchain lives there, not on the runner
+          # host). MANIFEST/WORKERS are passed as CONTAINER env (`-e`) and expanded by the
+          # inner shell — never spliced into the script text. `cache get` + `lake build
+          # MathFin` prime the shared oleans the stubs import, then the pool elaborates each
+          # stub with N concurrent `lake env lean` workers; the job fails if any target does not verify.
+          docker run --rm --entrypoint bash \
+            -e MANIFEST -e WORKERS \
+            -v "${{ github.workspace }}/main":/app \
+            -v "${{ github.workspace }}":/foundry \
+            -w /app ghcr.io/raphaelrrcoelho/mathfin-verify:latest -lc '
+              set -e
+              lake exe cache get >/dev/null 2>&1 || true
+              lake build MathFin
+              python3 /foundry/probe/verify_pool.py \
+                --main-repo /app --manifest "/foundry/$MANIFEST" --workers "$WORKERS" \
+                | tee /foundry/runs-batch-verify.json
+            '
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: batch-verify-results
+          path: runs-batch-verify.json
+          if-no-files-found: ignore
