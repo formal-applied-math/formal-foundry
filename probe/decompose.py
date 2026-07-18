@@ -207,14 +207,26 @@ def _extract_json_object(text: str | None):
     return None
 
 
+def dag_to_dict(dag: Dag) -> dict:
+    """Serialize a `Dag` back to the decomposer's JSON shape (inverse of `parse_dag`), so
+    a run can persist the DAG and reparse it in the recompose step."""
+    return {
+        "main": {"name": dag.main.name, "statement": dag.main.statement,
+                 "proof": dag.main.proof},
+        "leaves": [{"name": leaf.name, "statement": leaf.statement,
+                    "pointers": leaf.pointers, "depends_on": leaf.depends_on}
+                   for leaf in dag.leaves],
+    }
+
+
 def draft_decomposition(target: str, context_pack: str, *, chat_fn,
-                        system_preamble: str = "", max_reask: int = 1,
-                        max_leaves: int | None = None) -> dict:
+                        system_preamble: str = "", feedback: str | None = None,
+                        max_reask: int = 1, max_leaves: int | None = None) -> dict:
     """Stage: the general reasoner (Magistral) SPLITS a hard target into a validated
     lemma-DAG. A malformed/invalid reply ⇒ up to `max_reask` re-ask rounds (feedback =
-    the `DagError`), then a structured failure — never an infinite loop. Engine is the
-    injected `chat_fn`. Returns `{ok, dag, tokens, error}`."""
-    feedback = None
+    the `DagError`), then a structured failure — never an infinite loop. `feedback` seeds
+    the FIRST message (the skeleton-gate re-decompose round passes the elaboration errors
+    here). Engine is the injected `chat_fn`. Returns `{ok, dag, tokens, error}`."""
     tokens = 0
     last_err = "no reply"
     for _ in range(max(1, max_reask + 1)):

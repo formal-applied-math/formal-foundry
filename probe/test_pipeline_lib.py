@@ -33,6 +33,19 @@ def test_load_config_missing_returns_defaults():
     assert PipelineConfig.load("/no/such/file.toml").interval_days == 3
 
 
+def test_decompose_config_defaults_off_and_loads():
+    from pipeline_lib import DecomposeConfig
+    d = DecomposeConfig()
+    assert d.enabled is False and d.max_leaves == 3 and d.leaf_max_turns == 40
+    assert DecomposeConfig.load(None).enabled is False   # off by default (tag-only path)
+    with tempfile.TemporaryDirectory() as t:
+        p = os.path.join(t, "pipeline.toml")
+        with open(p, "w") as f:
+            f.write("[decompose]\nenabled = true\nmax_leaves = 5\n")
+        c = DecomposeConfig.load(p)
+        assert c.enabled is True and c.max_leaves == 5 and c.leaf_max_turns == 40
+
+
 def test_roll_month_resets_counter_on_boundary():
     st = P.new_state("2026-07")
     st["tokens_spent_this_month"] = 400_000

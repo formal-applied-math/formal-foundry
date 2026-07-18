@@ -246,6 +246,24 @@ FIDELITY_NOTES="$(python3 "$FOUNDRY/probe/fidelity_notes.py" \
 REFINERY_NOTES="$(python3 "$FOUNDRY/probe/refinery_notes.py" --lean-file "$CAND" 2>/dev/null \
   || echo "_(first-pass refinery notes unavailable)_")"
 
+# Phase 2 (Task 2.5): a decompose-path candidate carries a DAG sidecar — list the split in
+# the PR body so the reviewer sees the leaf structure. Absent for a plain cron PR (no change).
+DAG_SIDE="$FOUNDRY/runs/$TAG-$ID.dag.json"
+DAG_SECTION=""
+if [ -f "$DAG_SIDE" ]; then
+  DAG_SECTION="$(python3 - "$DAG_SIDE" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+out = ["", "## lemma-DAG (decomposition)", "",
+       f"main `{d['main']['name']}` is proved by applying:"]
+for leaf in d.get("leaves", []):
+    dep = (" — depends on " + ", ".join(f"`{x}`" for x in leaf["depends_on"])) if leaf.get("depends_on") else ""
+    out.append(f"- `{leaf['name']}`{dep}")
+print("\n".join(out))
+PY
+)"
+fi
+
 BODY="$(cat <<EOF
 $BODY_INTRO $CLOSE_LINE.
 
@@ -253,6 +271,7 @@ what it adds:
 $PROOF_BULLET
 - a re-export entry in \`$BENCH\`.
 - regenerated \`MathFin/AxiomAuditGen.lean\` + \`formalization.yaml\`.
+$DAG_SECTION
 
 provenance: $PROVENANCE_DESC, run tag \`$TAG\`, ~$TOKENS tokens.
 

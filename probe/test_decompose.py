@@ -74,6 +74,28 @@ def test_draft_decomposition_returns_valid_dag_or_error():
     assert calls["n"] == 2   # initial + exactly one re-ask, then stop (no infinite loop)
 
 
+def test_dag_to_dict_roundtrips():
+    from decompose import dag_to_dict
+    dag = parse_dag(_FIXTURE)
+    again = parse_dag(dag_to_dict(dag))
+    assert [n.name for n in topo_order(again)] == ["lemA", "lemB", "main"]
+    assert again.main.proof == dag.main.proof
+
+
+def test_draft_decomposition_seeds_feedback_into_first_message():
+    # the skeleton-gate re-decompose passes the elaboration errors as `feedback`; it must
+    # reach the very first decomposer message (not only after a DagError).
+    import json
+    from decompose import draft_decomposition
+    seen = {}
+
+    def cap(msgs, **_kw):
+        seen["user"] = msgs[-1]["content"]
+        return (json.dumps(_FIXTURE), 1)
+    draft_decomposition("prove P", "", chat_fn=cap, feedback="skeleton did not elaborate: boom")
+    assert "boom" in seen["user"]
+
+
 def test_draft_decomposition_extracts_json_with_lean_braces():
     # a Lean `{x : ℝ}` implicit binder inside a leaf statement must not break brace
     # matching in the JSON extractor.

@@ -86,30 +86,40 @@ ID="$(printf '%s' "$DEC" | python3 -c 'import sys,json;print(json.load(sys.stdin
 TURNS="$(printf '%s' "$DEC" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("max_turns",40))')"
 echo "[tick] running target $ID via vibe ⇄ lean-lsp-mcp (max_turns=$TURNS)" >&2
 
-# 2. Prove via the trained-for vibe ⇄ lean-lsp-mcp harness (spec:
-#    docs/superpowers/specs/2026-07-17-leanstral-vibe-cron-harness-design.md).
-#    Phase A (lean-lsp UP): headless vibe drives lean_goal / lean_multi_attempt /
-#      search → runs/$TAG-$ID.candidate. leanstral-vibe.sh stops the daemon + brings
-#      lean-lsp up (one Lean process at a time).
-#    Flip: stop lean-lsp, restart the daemon — `stop`/`up`, NEVER `down` (down removes
-#      the shared docker_default network the daemon publishes 7878 on).
-#    Phase B (daemon UP): gate the candidate → runs/$TAG-$ID.lean + summary row.
-#    NOTE: the flip below is the LOCAL (compose) path. W5 adapts it for the CI runner
-#    (docker-run daemon + lean-lsp, vibe baked into the image). Do not deploy to CI
-#    until W5 — the live cron keeps running the old text-loop from main until then.
+# 2. Prove the target. TWO paths, same artifacts (runs/$TAG-$ID.lean + a summary row) so
+#    steps 3-6 are shared. A `decompose`-tagged target takes the lemma-DAG path ONLY when
+#    [decompose].enabled — otherwise the plain vibe path below runs byte-identically (the
+#    running cron is untouched until the flag is flipped on).
 BASE="$MAIN/docker/docker-compose.yml"
 LSP="$MAIN/docker/docker-compose.lean-lsp.yml"
-set +e
-python3 vibe_prove.py run --manifest "$QUEUE" --only "$ID" \
-  --max-turns "$TURNS" --run-tag "$TAG" --main-repo "$MAIN"
-echo "[tick] flipping the Lean slot back to the daemon for the gate…" >&2
-docker compose -f "$BASE" -f "$LSP" stop lean-lsp >/dev/null 2>&1
-docker compose -f "$BASE" -p docker up -d lean-repl >/dev/null 2>&1
-# Probe the port until the daemon actually serves — NOT `docker logs | grep READY:`,
-# which matches the stale READY from before the restart and races the cold load.
-python3 wait_daemon.py || echo "[tick] WARNING: daemon not ready after probes; gate may fail" >&2
-python3 vibe_prove.py gate --manifest "$QUEUE" --only "$ID" --run-tag "$TAG" --main-repo "$MAIN"
-set -e
+DECOMPOSE_TAG="$(printf '%s' "$DEC" | python3 -c 'import sys,json;print("1" if json.load(sys.stdin)["target"].get("decompose") else "")' 2>/dev/null || true)"
+DECOMPOSE_ON="$(python3 -c "import pipeline_lib as p; print('1' if p.DecomposeConfig.load('$CFG').enabled else '')" 2>/dev/null || true)"
+if [ -n "$DECOMPOSE_ON" ] && [ -n "$DECOMPOSE_TAG" ]; then
+  # Phase 2 lemma-DAG path (decompose-tick.sh owns its own daemon↔lsp flips + records the
+  # summary + A/B scoreboard rows). Non-fatal: on a crash the tick reads whatever row exists.
+  echo "[tick] target $ID tagged decompose + [decompose].enabled → lemma-DAG path" >&2
+  "$FOUNDRY/scripts/decompose-tick.sh" --id "$ID" --tag "$TAG" \
+    || echo "[tick] decompose-tick.sh failed rc=$? — reading summary for the outcome" >&2
+else
+  # Plain vibe ⇄ lean-lsp-mcp harness (spec:
+  #   docs/superpowers/specs/2026-07-17-leanstral-vibe-cron-harness-design.md).
+  #   Phase A (lean-lsp UP): headless vibe drives lean_goal / lean_multi_attempt / search
+  #     → runs/$TAG-$ID.candidate. leanstral-vibe.sh stops the daemon + brings lean-lsp up.
+  #   Flip: stop lean-lsp, restart the daemon — `stop`/`up`, NEVER `down` (down removes the
+  #     shared docker_default network the daemon publishes 7878 on).
+  #   Phase B (daemon UP): gate the candidate → runs/$TAG-$ID.lean + summary row.
+  set +e
+  python3 vibe_prove.py run --manifest "$QUEUE" --only "$ID" \
+    --max-turns "$TURNS" --run-tag "$TAG" --main-repo "$MAIN"
+  echo "[tick] flipping the Lean slot back to the daemon for the gate…" >&2
+  docker compose -f "$BASE" -f "$LSP" stop lean-lsp >/dev/null 2>&1
+  docker compose -f "$BASE" -p docker up -d lean-repl >/dev/null 2>&1
+  # Probe the port until the daemon actually serves — NOT `docker logs | grep READY:`,
+  # which matches the stale READY from before the restart and races the cold load.
+  python3 wait_daemon.py || echo "[tick] WARNING: daemon not ready after probes; gate may fail" >&2
+  python3 vibe_prove.py gate --manifest "$QUEUE" --only "$ID" --run-tag "$TAG" --main-repo "$MAIN"
+  set -e
+fi
 
 # 3. Read the outcome + actual tokens from the run summary.
 SUMMARY="$FOUNDRY/runs/$TAG-summary.jsonl"

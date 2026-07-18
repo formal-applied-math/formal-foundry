@@ -107,6 +107,28 @@ class AutoformalizeConfig:
         return AutoformalizeConfig(**{k: v for k, v in section.items() if k in fields})
 
 
+@dataclasses.dataclass(frozen=True)
+class DecomposeConfig:
+    """Config for the lemma-DAG decompose path (the `[decompose]` block). OFF BY DEFAULT
+    and tag-only (R decision 2026-07-18): only a target tagged `decompose` takes the path,
+    and only when `enabled`, so the running cron is byte-identical until it is flipped on.
+    Design: docs/superpowers/specs/2026-07-18-decomposer-design.md."""
+    enabled: bool = False
+    max_leaves: int = 3        # tight splits first; a DAG wanting more is usually mis-shaped
+    leaf_max_turns: int = 40   # vibe turns per leaf (leaves are individually short by design)
+    max_reask: int = 1         # bounded re-decompose rounds on a malformed DAG / failed skeleton gate
+
+    @staticmethod
+    def load(path: str | None) -> "DecomposeConfig":
+        if not path or not os.path.isfile(path) or tomllib is None:
+            return DecomposeConfig()
+        with open(path, "rb") as f:
+            data = tomllib.load(f)
+        section = data.get("decompose", {})
+        fields = {f.name for f in dataclasses.fields(DecomposeConfig)}
+        return DecomposeConfig(**{k: v for k, v in section.items() if k in fields})
+
+
 def new_state(now_ym: str = "", now_epoch: int = 0) -> dict:
     return {
         "month": now_ym,
