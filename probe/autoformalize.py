@@ -476,6 +476,9 @@ def _dump_draft(issue: dict, rnd: int, lean_text: str, elab: dict) -> None:
         pass
 
 
+_NOCODE_RETRIES = 2   # bounded retries for a no-code reply (a glitch, not a round)
+
+
 def formalize_with_repair(intent: dict, grounding: str, *, issue: dict, chat_fn, check_fn,
                           emit_fn, rounds: int = 3, retrieve_fn=None,
                           token_budget: int = 40_000, proactive_premises: str = "",
@@ -506,17 +509,28 @@ def formalize_with_repair(intent: dict, grounding: str, *, issue: dict, chat_fn,
         if tokens >= token_budget:
             log(f"round {i + 1}: aborted — token budget reached ({tokens} >= {token_budget})")
             break   # doomed draft — stop before another expensive, likely-futile round
-        content, tk = chat_fn(messages)
-        tokens += tk
-        stub = extract_lean_code(content)
-        if stub is None:
-            log(f"round {i + 1}: no ```lean block (reply {len(content or '')}c, {tk} tok)")
+        # Fetch a reply that carries a ```lean block. A no-code reply (leanstral at high
+        # reasoning effort returns ~21k tokens and no code roughly half the time) is a
+        # transient glitch, NOT a round: retry it a bounded number of times WITHOUT
+        # charging the token budget or consuming a productive round — one empty reply
+        # otherwise halves a 40k budget and craters the draft (seen on every #73 probe).
+        stub, content = None, None
+        for _nc in range(_NOCODE_RETRIES + 1):
+            content, tk = chat_fn(messages)
+            stub = extract_lean_code(content)
+            if stub is not None:
+                tokens += tk          # only a productive (code-bearing) reply is charged
+                break
+            log(f"round {i + 1}: no ```lean block (reply {len(content or '')}c, {tk} tok) "
+                f"— retry {_nc + 1}/{_NOCODE_RETRIES}")
             messages += [
                 _assistant(content),
                 {"role": "user", "content":
                  "Output exactly one ```lean block: a single "
                  "`theorem NAME <binders> : <conclusion> := by sorry`."}]
-            continue
+        if stub is None:
+            log(f"round {i + 1}: no ```lean block after {_NOCODE_RETRIES + 1} tries — giving up")
+            break
         # the ACTUAL defs this round's stub introduces (empty on a plain theorem
         # stub) ride the meta so emit discloses them (`-- new-defs:` header).
         round_meta = {**meta, "definitions": drafted_def_names(stub)}

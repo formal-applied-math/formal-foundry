@@ -1930,6 +1930,36 @@ def test_formalize_with_repair_accepts_bundle_on_last_round():
     assert r["ok"] is True and "∧" in r["lean_text"]
 
 
+def test_formalize_with_repair_retries_no_code_without_consuming_a_round():
+    # a no-code reply (leanstral at high reasoning effort returns ~21k tokens and no
+    # ```lean block ~half the time) is a transient glitch, NOT a round: with rounds=1,
+    # two no-code replies then a good stub must still succeed — the no-code replies
+    # neither consume the productive round nor charge the token budget.
+    replies = iter(["(reasoning, no code block)", "(still no code)",
+                    _formalize_reply(concl="x = x")])
+
+    def chat(_msgs):
+        return (next(replies), 10)
+    r = af.formalize_with_repair(_INTENT, "", issue=_issue(5), chat_fn=chat,
+                                 check_fn=_ELAB_OK, emit_fn=af.emit_target_files, rounds=1)
+    assert r["ok"] is True and "x = x" in r["lean_text"]
+    assert r["tokens"] == 10          # only the productive reply is charged
+
+
+def test_formalize_with_repair_gives_up_after_persistent_no_code():
+    # all replies lack a ```lean block — the no-code retries are BOUNDED (no hang),
+    # then it gives up with ok=False.
+    calls = {"n": 0}
+
+    def chat(_msgs):
+        calls["n"] += 1
+        return ("no code here at all", 10)
+    r = af.formalize_with_repair(_INTENT, "", issue=_issue(5), chat_fn=chat,
+                                 check_fn=_ELAB_OK, emit_fn=af.emit_target_files, rounds=2)
+    assert r["ok"] is False
+    assert calls["n"] <= 4            # bounded retries, not an infinite loop
+
+
 def test_formalize_accepts_core_plus_sorry_free_corollary():
     two = ("```lean\n/-- core. -/\ntheorem coreThm (x : ℝ) (hx : x ≠ 0) : x / x = 1 "
            ":= by sorry\n\n/-- issue-shaped. -/\ntheorem corThm (x : ℝ) (hx : x ≠ 0) :"
