@@ -424,6 +424,10 @@ def _repair_hint(errors) -> str:
                      "(e.g. `MathFin.zcb r t T`, never `MathFin.zcb r`).")
     # (the "invalid 'import' command" hint is retired — _prelint_stub now strips stub-level
     #  imports deterministically at emit time, so that error can no longer reach the model.)
+    if "unknown universe level" in blob:  # A14 backstop (prelint rewrites the common cases)
+        hints.append("Do NOT write an explicit universe variable (`Type u`, `Sort v`) or a "
+                     "`universe` declaration — the build uses `autoImplicit false`, so `u` is "
+                     "unbound. Use the auto-generalized `Type*` / `Sort*` instead.")
     if re.search(r"typeclass instance problem is stuck.*\?m", blob, re.DOTALL):  # A3
         hints.append("A typeclass instance metavariable is stuck (`?m…`): name the ambiguous "
                      "implicit explicitly at the call site (e.g. `(μ := μ)`) or `@`-apply the "
@@ -1976,6 +1980,11 @@ def _prelint_stub(stub: str) -> str:
     - A7: reject a capital `Σ`/`Π` inside an identifier (sigma/pi-type collision);
       raised so `formalize_with_repair`'s try/except surfaces it to the model."""
     stub = re.sub(r"(?m)^[ \t]*(?:public[ \t]+)?import[ \t]+\S.*\n?", "", stub)
+    # A14: rewrite an autobound universe variable (`Type u`, `Sort u_1`, `Type v`) to the
+    # Mathlib idiom `Type*`/`Sort*`. emit pins `autoImplicit false` for build-parity, so an
+    # explicit `u` is unbound → "unknown universe level u" (recurred live on #109/#60). Only
+    # u/v/w-prefixed vars (Lean's autobound naming) are touched; numeric levels are left alone.
+    stub = re.sub(r"\b(Type|Sort)[ \t]+([uvw][A-Za-z0-9_']*)\b", r"\1*", stub)
     bad = _SIGMA_PI_IDENT_RE.search(stub)
     if bad:
         raise ValueError(

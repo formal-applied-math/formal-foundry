@@ -103,6 +103,22 @@ def test_emit_strips_stub_imports_so_module_stays_valid():
     assert "import" not in body and "theorem foo" in body
 
 
+def test_prelint_rewrites_autobound_universe_to_star():
+    # the model writes `{Ω : Type u}`; emit pins `autoImplicit false` (build-parity), so `u`
+    # is unbound → "unknown universe level u" (recurred live on #109/#60). Rewrite the
+    # autobound universe vars to the Mathlib idiom `Type*`/`Sort*`.
+    out = af._prelint_stub("theorem foo {Ω : Type u} {β : Sort v} (κ : Type u_1) : True := by sorry")
+    assert "Type*" in out and "Sort*" in out
+    assert "Type u" not in out and "Sort v" not in out and "Type u_1" not in out
+    # an explicit numeric level is valid — leave it alone
+    assert "Type 0" in af._prelint_stub("theorem g (x : Type 0) : True := by sorry")
+
+
+def test_repair_hint_unknown_universe_suggests_type_star():
+    h = af._repair_hint(["line 30:55: unknown universe level `u`"])
+    assert "Type*" in h
+
+
 # --- Task 1.4: gates go INDETERMINATE (not pass) on a wedged daemon ----------
 
 def test_structural_gates_indeterminate_on_daemon_error():
