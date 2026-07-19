@@ -114,6 +114,22 @@ def test_prelint_rewrites_autobound_universe_to_star():
     assert "Type 0" in af._prelint_stub("theorem g (x : Type 0) : True := by sorry")
 
 
+def test_prelint_marks_defs_noncomputable():
+    # MathFin is proof-only — every real-valued def is effectively noncomputable (ℝ
+    # division/order are). The drafter routinely omits the modifier and then burns
+    # every repair round on "consider marking it noncomputable" (the #1 recurring
+    # defs-route error). Prepend it deterministically; it never breaks a proof.
+    out = af._prelint_stub("def omegaRatio (a b : ℝ) : ℝ := a / b\ntheorem t : True := by trivial")
+    assert "noncomputable def omegaRatio" in out
+    assert "noncomputable theorem" not in out          # theorems/lemmas untouched
+    # idempotent: an already-noncomputable def is not double-marked
+    out2 = af._prelint_stub("noncomputable def foo (a : ℝ) : ℝ := a\ntheorem t : True := by trivial")
+    assert "noncomputable noncomputable" not in out2 and "noncomputable def foo" in out2
+    # a private modifier is preserved
+    out3 = af._prelint_stub("private def bar (a : ℝ) : ℝ := a\ntheorem t : True := by trivial")
+    assert "private noncomputable def bar" in out3
+
+
 def test_repair_hint_unknown_universe_suggests_type_star():
     h = af._repair_hint(["line 30:55: unknown universe level `u`"])
     assert "Type*" in h
@@ -780,10 +796,14 @@ def test_render_gate_feedback_depth_carries_stub_and_instruction():
     assert "inline" in fb
 
 
-def test_render_gate_feedback_false_never_weaken():
+def test_render_gate_feedback_false_drops_genuinely_false_conjunct():
+    # a "false" verdict still guards a genuinely-true claim from being weakened, but
+    # a conjunct that is FALSE as the issue states it must be DROPPED, corrected in
+    # `deferred`, and the true remainder proved (subset-drop — the #73 maxDD case).
     fb = af.render_gate_feedback("false", "", None)
     assert "NEGATION" in fb
-    assert "Do NOT weaken" in fb
+    assert "weaken" in fb                              # a true claim is still protected
+    assert "CORRECTION" in fb and "deferred" in fb     # false conjunct → drop + correct + defer
     assert "```lean" not in fb                         # no stub block when none given
 
 
@@ -930,6 +950,34 @@ def test_route_for_history_beats_measurement():
     assert af.route_for({}, def_count=0, family=None) == "defs"
     assert af.route_for({}, def_count=1, family=None) == "theorem"
     assert af.route_for({}, def_count=1, family="seeded") == "theorem"
+
+
+def test_resolve_route_cli_override_beats_auto():
+    # an explicit --route wins over the automatic classifier (operator/test
+    # affordance); None falls back to route_for. Lets a def-rich-pointer target
+    # like #73 be driven straight to the defs route without a wasted theorem tick.
+    iss = {"number": 73}
+    assert af.resolve_route("defs", iss, def_count=5, family=None) == "defs"
+    assert af.resolve_route("theorem", iss, def_count=0, family="needs_primitives") == "theorem"
+    assert af.resolve_route(None, iss, def_count=0, family=None) == "defs"
+    assert af.resolve_route(None, iss, def_count=5, family=None) == "theorem"
+
+
+def test_dump_draft_writes_only_when_env_set(tmp_path, monkeypatch):
+    import json as _json
+    issue = {"number": 73}
+    lean = "theorem t : True := by sorry"
+    elab = {"errors": ["boom"], "sorry_count": 1, "warnings": []}
+    # unset ⇒ no-op (failed drafts are discarded unless a dir is requested)
+    monkeypatch.delenv("AUTOFORM_DUMP_DRAFTS", raising=False)
+    af._dump_draft(issue, 1, lean, elab)
+    assert not list(tmp_path.iterdir())
+    # set ⇒ writes the emitted draft + its elaborator verdict, per round
+    monkeypatch.setenv("AUTOFORM_DUMP_DRAFTS", str(tmp_path))
+    af._dump_draft(issue, 2, lean, elab)
+    assert (tmp_path / "draft-73-r2.lean").read_text() == lean
+    v = _json.loads((tmp_path / "draft-73-r2.errors.json").read_text())
+    assert v["errors"] == ["boom"] and v["sorry_count"] == 1
 
 
 def test_order_by_route_route_does_not_rank():
@@ -1869,6 +1917,17 @@ def test_formalize_with_repair_advises_once_on_bundle_then_accepts():
     assert r["ok"] is True and len(seen) == 2   # one advisory round, then accepted as-is
     fb = " ".join(m["content"] for m in seen[1])
     assert "∧" in fb and "corollar" in fb.lower()
+
+
+def test_formalize_with_repair_accepts_bundle_on_last_round():
+    # regression (#73 defs seed): a ∧-bundle stub that ELABORATES on the FINAL
+    # round must be ACCEPTED, not discarded by the soft advisory (which has no
+    # round left to land in). Before the fix this dropped a good errors:[]/sorry:1
+    # stub and reported "no elaborating Lean after N rounds".
+    r = af.formalize_with_repair(_INTENT, "", issue=_issue(5),
+                                 chat_fn=_script_chat([_formalize_reply(concl="x = y ∧ y = x")]),
+                                 check_fn=_ELAB_OK, emit_fn=af.emit_target_files, rounds=1)
+    assert r["ok"] is True and "∧" in r["lean_text"]
 
 
 def test_formalize_accepts_core_plus_sorry_free_corollary():

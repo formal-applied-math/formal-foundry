@@ -457,6 +457,25 @@ def _repair_hint(errors) -> str:
     return ("\n" + "\n".join(hints)) if hints else ""
 
 
+def _dump_draft(issue: dict, rnd: int, lean_text: str, elab: dict) -> None:
+    """Diagnostic: when `AUTOFORM_DUMP_DRAFTS` names a dir, write each emitted draft
+    and its elaborator verdict there — failed drafts are otherwise discarded, which
+    is exactly the evidence a formalize-death root-cause needs. No-op unless set."""
+    d = os.environ.get("AUTOFORM_DUMP_DRAFTS")
+    if not d:
+        return
+    try:
+        os.makedirs(d, exist_ok=True)
+        n = issue.get("number", "x")
+        with open(os.path.join(d, f"draft-{n}-r{rnd}.lean"), "w", encoding="utf-8") as f:
+            f.write(lean_text)
+        with open(os.path.join(d, f"draft-{n}-r{rnd}.errors.json"), "w", encoding="utf-8") as f:
+            json.dump({"errors": elab.get("errors"), "sorry_count": elab.get("sorry_count"),
+                       "warnings": elab.get("warnings")}, f, indent=2, ensure_ascii=False)
+    except OSError:
+        pass
+
+
 def formalize_with_repair(intent: dict, grounding: str, *, issue: dict, chat_fn, check_fn,
                           emit_fn, rounds: int = 3, retrieve_fn=None,
                           token_budget: int = 40_000, proactive_premises: str = "",
@@ -512,6 +531,7 @@ def formalize_with_repair(intent: dict, grounding: str, *, issue: dict, chat_fn,
                  "well-formed `theorem … := by sorry`."}]
             continue
         elab = check_fn(lean_text)
+        _dump_draft(issue, i + 1, lean_text, elab)   # AUTOFORM_DUMP_DRAFTS: no-op unless set
         if not elab.get("errors") and elab.get("sorry_count", 0) == 1:
             lint = lint_violations(stub)
             if not lint:
@@ -519,8 +539,13 @@ def formalize_with_repair(intent: dict, grounding: str, *, issue: dict, chat_fn,
                     concl = split_statement(stub)[2]
                 except ValueError:
                     concl = ""
-                if not advised_bundle and bundle_conclusion(concl):
-                    # soft: exactly one nudge round; whatever comes back is accepted
+                # soft nudge, but ONLY when a round remains to land the response in.
+                # On the final round (or with the token budget spent) the advisory
+                # would `continue` into nothing and discard a perfectly good
+                # errors:[]/sorry:1 stub — the confirmed #73 defs-seed killer. In that
+                # case fall through and accept the elaborating stub as-is.
+                spare_round = i < max(1, rounds) - 1 and tokens < token_budget
+                if not advised_bundle and bundle_conclusion(concl) and spare_round:
                     advised_bundle = True
                     log(f"round {i + 1}: ∧-bundle conclusion — one advisory round")
                     messages += [_assistant(content),
@@ -886,6 +911,16 @@ def route_for(issue: dict, *, def_count: int, family: str | None) -> str:
     return "theorem"
 
 
+def resolve_route(cli_route: str | None, issue: dict, *, def_count: int,
+                  family: str | None) -> str:
+    """An explicit `--route` overrides the automatic `route_for` classifier
+    (operator + test affordance); `None` falls back to the classifier. Lets a
+    def-rich-pointer target whose faithful statement needs a NEW primitive (the
+    #73 Omega-ratio class) be driven straight to defs, skipping the wasted
+    theorem tick the static `def_count` heuristic otherwise forces."""
+    return cli_route or route_for(issue, def_count=def_count, family=family)
+
+
 # families that failed for non-primitives reasons under the CURRENT architecture:
 # fresh issues attempt first; these lemons go to the back of their route group
 # (the first CI run burned ~100k tokens re-attempting #61's empty-reply furnace
@@ -1042,10 +1077,15 @@ _GATE_INSTRUCTIONS = {
                "them), so the theorem is vacuously true. Fix the hypothesis set — "
                "check inequality directions and degenerate parameter values.",
     "false": "The NEGATION of the conclusion was PROVED under the hypotheses — the "
-             "statement is false AS WRITTEN. The issue's mathematics is presumed "
-             "right; the rendering flipped an inequality or sign, swapped arguments, "
-             "or omitted a needed hypothesis. Fix the rendering. Do NOT weaken the "
-             "conclusion.",
+             "statement is false AS WRITTEN. First suspect the RENDERING: a flipped "
+             "inequality or sign, swapped arguments, or a missing hypothesis — fix "
+             "that, and do NOT weaken a claim that is genuinely true. But if a "
+             "specific conjunct is FALSE as the ISSUE itself states it (a real "
+             "counterexample exists — e.g. an invariance written for all `c` that "
+             "holds only for `c > 0`), stop fighting it: DROP that conjunct from the "
+             "conclusion, add a one-line `CORRECTION: …` to `deferred` naming what the "
+             "issue got wrong and the fix, and prove the TRUE remainder through the "
+             "same definitions.",
     "unfaithful": "A faithfulness judge found the statement diverges grossly from "
                   "the issue. Address each listed divergence without weakening any "
                   "fact you state.",
@@ -1386,6 +1426,8 @@ def main() -> int:
     p.add_argument("--slug", default="raphaelrrcoelho/formal-mathfin")
     p.add_argument("--queue-dir", default=None, help="default: <foundry>/targets/queue")
     p.add_argument("--only", type=int, default=None, help="attempt only this issue number")
+    p.add_argument("--route", choices=["theorem", "defs"], default=None,
+                   help="force the route, overriding the auto classifier (default: auto)")
     # the rest override the [autoformalize] config only when given (default: None)
     p.add_argument("--budget", type=int, default=None)
     p.add_argument("--max-issues", type=int, default=None)
@@ -1448,7 +1490,7 @@ def main() -> int:
     for i in issues:
         i["def_count"] = count_pointer_defs(args.main_repo, i.get("pointers", []))
         i["family"] = families.get(i["number"])
-        i["route"] = route_for(i, def_count=i["def_count"], family=i["family"])
+        i["route"] = resolve_route(args.route, i, def_count=i["def_count"], family=i["family"])
         i["prior_unknowns"] = prior_unknowns.get(i["number"], [])
     issues = order_by_route(issues)
     print(f"[refill] routes: " + ", ".join(f"#{i['number']}→{i['route']}" for i in issues[:8]),
@@ -2001,6 +2043,14 @@ def _prelint_stub(stub: str) -> str:
     # explicit `u` is unbound → "unknown universe level u" (recurred live on #109/#60). Only
     # u/v/w-prefixed vars (Lean's autobound naming) are touched; numeric levels are left alone.
     stub = re.sub(r"\b(Type|Sort)[ \t]+([uvw][A-Za-z0-9_']*)\b", r"\1*", stub)
+    # A15: MathFin is a proof-only library, so every real-valued def is effectively
+    # noncomputable (ℝ division and order are). The drafter routinely omits the
+    # modifier and then burns every repair round on "consider marking it as
+    # 'noncomputable'" (the #1 recurring defs-route error, seen on every #73 probe).
+    # Prepend it deterministically: marking a def noncomputable never breaks a proof
+    # (it only forbids code generation, which the library never does) and is lint-clean.
+    # `abbrev`/`instance`/`structure` are left alone; an existing modifier is not doubled.
+    stub = re.sub(r"(?m)^(private[ \t]+)?def ", r"\1noncomputable def ", stub)
     bad = _SIGMA_PI_IDENT_RE.search(stub)
     if bad:
         raise ValueError(
