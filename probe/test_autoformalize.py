@@ -84,6 +84,25 @@ def test_emit_prelint_rejects_sigma_identifier():
         assert "Σ" in str(e) or "sigma" in str(e).lower()
 
 
+def test_prelint_strips_model_imports():
+    # Leanstral (RL-trained on complete files) emits its own `import` lines; the module
+    # header already imports Mathlib + pointers, so a stub-level import lands mid-file and
+    # the module system rejects it ("invalid 'import' command" — recurred live on #109/#60).
+    stub = "import Mathlib\npublic import MathFin.FixedIncome.ZCB\n\ntheorem foo : True := by sorry"
+    out = af._prelint_stub(stub)
+    assert "import" not in out
+    assert "theorem foo : True := by sorry" in out
+
+
+def test_emit_strips_stub_imports_so_module_stays_valid():
+    stub = "import Mathlib\n\ntheorem foo : 1 = 1 := by sorry"
+    lean_text, _e, _p = af.emit_target_files(_ISSUE, stub, _META)
+    # the model's import must NOT survive into the body (after the namespace) — that is the
+    # mid-file position the elaborator rejects; the only imports are the header's.
+    body = lean_text.split("namespace MathFin", 1)[1]
+    assert "import" not in body and "theorem foo" in body
+
+
 # --- Task 1.4: gates go INDETERMINATE (not pass) on a wedged daemon ----------
 
 def test_structural_gates_indeterminate_on_daemon_error():
@@ -1922,9 +1941,13 @@ def test_repair_hint_partial_application():
     assert "PARTIALLY-APPLIED" in h and "all its arguments" in h.lower()
 
 
-def test_repair_hint_import_mid_file():
+def test_import_error_handled_by_prelint_not_hint():
+    # the mid-file-import error is now PREVENTED deterministically by _prelint_stub (it
+    # strips stub-level imports), so no repair hint is emitted for it — the error can no
+    # longer reach the model. Superseded the old soft-hint approach it kept ignoring.
     errs = ["line 26:0: invalid 'import' command, it must be used in the beginning of the file"]
-    assert "import" in af._repair_hint(errs).lower()
+    assert af._repair_hint(errs) == ""
+    assert "import" not in af._prelint_stub("import Mathlib\ntheorem t : True := by sorry")
 
 
 def test_repair_hint_empty_for_generic_error():

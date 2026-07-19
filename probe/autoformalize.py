@@ -422,9 +422,8 @@ def _repair_hint(errors) -> str:
         hints.append("A term is a PARTIALLY-APPLIED function (a `… → …` where a value is "
                      "expected): apply every MathFin/Mathlib definition to ALL its arguments "
                      "(e.g. `MathFin.zcb r t T`, never `MathFin.zcb r`).")
-    if "invalid 'import' command" in blob:
-        hints.append("Do NOT write any `import` inside the theorem — the module already imports "
-                     "Mathlib and the pointer modules.")
+    # (the "invalid 'import' command" hint is retired — _prelint_stub now strips stub-level
+    #  imports deterministically at emit time, so that error can no longer reach the model.)
     if re.search(r"typeclass instance problem is stuck.*\?m", blob, re.DOTALL):  # A3
         hints.append("A typeclass instance metavariable is stuck (`?m…`): name the ambiguous "
                      "implicit explicitly at the call site (e.g. `(μ := μ)`) or `@`-apply the "
@@ -1965,10 +1964,18 @@ _SIGMA_PI_IDENT_RE = re.compile(r"[A-Za-z0-9_'][ΣΠ]|[ΣΠ][A-Za-z0-9_']")
 
 def _prelint_stub(stub: str) -> str:
     """Emit-time deterministic fixes on a drafted stub, before assembly:
+    - A13: STRIP any model-emitted `import` line. Leanstral (RL-trained on complete
+      files) prepends `import Mathlib`; but `emit_target_files` inserts the stub AFTER
+      the module header's own imports, so a stub import lands mid-file and the module
+      system rejects it (`invalid 'import' command, it must be used in the beginning of
+      the file` — recurred live on #109/#60, 2026-07-19). The header already imports
+      Mathlib + the pointer modules, so the stub never needs one. Deterministic beats the
+      soft repair hint the model kept ignoring.
     - A5: move an `omit …/set_option … in` modifier ABOVE an immediately preceding
       decl docstring (else `unexpected token 'omit'; expected 'lemma'`).
     - A7: reject a capital `Σ`/`Π` inside an identifier (sigma/pi-type collision);
       raised so `formalize_with_repair`'s try/except surfaces it to the model."""
+    stub = re.sub(r"(?m)^[ \t]*(?:public[ \t]+)?import[ \t]+\S.*\n?", "", stub)
     bad = _SIGMA_PI_IDENT_RE.search(stub)
     if bad:
         raise ValueError(
