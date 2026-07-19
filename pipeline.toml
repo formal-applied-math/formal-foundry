@@ -80,11 +80,15 @@ triviality_gate = true     # splice `first | rfl | simp` over the sorry at draft
 # main theorem applying them; a Lean-side skeleton gate rejects a bad split for one
 # elaboration's cost BEFORE any leaf gets proving budget; leaves reuse the vibe prover
 # verbatim as ordinary single-sorry targets; a recomposition gate assembles the whole.
-# OFF BY DEFAULT and TAG-ONLY (R decision 2026-07-18): only a target tagged `decompose`
-# (a `-- decompose` stub header) takes this path — never a plain cron target. `enabled`
-# gates the whole path, so the running cron is byte-identical until it is flipped on.
+# `enabled` gates the whole path. When ON, the tick routes to decompose in three ways:
+#   1. a workflow_dispatch `decompose=true` one-shot (forces the CI-selected target);
+#   2. a target tagged `decompose` (a `-- decompose` stub header);
+#   3. AUTONOMOUS ESCALATION (R decision 2026-07-18, corrected from "difficulty:hard" —
+#      the ready+proof backlog has no hard issues; the real signal is failure): a plain
+#      attempt that can't close the target (max_rounds/fail_gate) escalates that same
+#      target to decompose. So CI decides to decompose exactly what plain proving fails on.
 [decompose]
-enabled = false
+enabled = true
 max_leaves = 3             # tight splits first; a DAG wanting more is usually mis-shaped (raise on evidence)
 leaf_max_turns = 40        # vibe turns per leaf (leaves are individually short by design)
 max_reask = 1              # bounded re-decompose rounds on a malformed DAG or a failed skeleton gate

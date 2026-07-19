@@ -86,20 +86,42 @@ ID="$(printf '%s' "$DEC" | python3 -c 'import sys,json;print(json.load(sys.stdin
 TURNS="$(printf '%s' "$DEC" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("max_turns",40))')"
 echo "[tick] running target $ID via vibe ⇄ lean-lsp-mcp (max_turns=$TURNS)" >&2
 
-# 2. Prove the target. TWO paths, same artifacts (runs/$TAG-$ID.lean + a summary row) so
-#    steps 3-6 are shared. A `decompose`-tagged target takes the lemma-DAG path ONLY when
-#    [decompose].enabled — otherwise the plain vibe path below runs byte-identically (the
-#    running cron is untouched until the flag is flipped on).
+# 2. Prove the target. Same artifacts either way (runs/$TAG-$ID.lean + a summary row) so
+#    steps 3-6 are shared. Routing:
+#      • plain vibe path by default (the running cron, byte-identical when decompose is off);
+#      • the lemma-DAG decompose path when a workflow_dispatch FORCES it (DECOMPOSE_FORCE),
+#        or the target is tagged `decompose` and [decompose].enabled;
+#      • AND the autonomous standing rule: when [decompose].enabled, a plain attempt that
+#        can't close the target (max_rounds/fail_gate) ESCALATES that same target to decompose.
 BASE="$MAIN/docker/docker-compose.yml"
 LSP="$MAIN/docker/docker-compose.lean-lsp.yml"
+SUMMARY="$FOUNDRY/runs/$TAG-summary.jsonl"
 DECOMPOSE_TAG="$(printf '%s' "$DEC" | python3 -c 'import sys,json;print("1" if json.load(sys.stdin)["target"].get("decompose") else "")' 2>/dev/null || true)"
 DECOMPOSE_ON="$(python3 -c "import pipeline_lib as p; print('1' if p.DecomposeConfig.load('$CFG').enabled else '')" 2>/dev/null || true)"
-if [ -n "$DECOMPOSE_ON" ] && [ -n "$DECOMPOSE_TAG" ]; then
-  # Phase 2 lemma-DAG path (decompose-tick.sh owns its own daemon↔lsp flips + records the
-  # summary + A/B scoreboard rows). Non-fatal: on a crash the tick reads whatever row exists.
-  echo "[tick] target $ID tagged decompose + [decompose].enabled → lemma-DAG path" >&2
+# one-shot override: `gh workflow run … -f decompose=true` sets DECOMPOSE_FORCE, routing the
+# CI-SELECTED target straight to decompose (CI still picks the target; we skip the plain try).
+DECOMPOSE_FORCE="${DECOMPOSE_FORCE:-}"
+
+last_outcome() { python3 - "$SUMMARY" "$ID" <<'PY'
+import json, sys
+out = "error"
+try:
+    for line in open(sys.argv[1]):
+        r = json.loads(line)
+        if r.get("target") == sys.argv[2]: out = r.get("outcome", "error")
+except OSError: pass
+print(out)
+PY
+}
+run_decompose() {  # decompose-tick.sh owns its own daemon↔lsp flips + records the summary + A/B rows
   "$FOUNDRY/scripts/decompose-tick.sh" --id "$ID" --tag "$TAG" \
     || echo "[tick] decompose-tick.sh failed rc=$? — reading summary for the outcome" >&2
+}
+
+if [ -n "$DECOMPOSE_FORCE" ] || { [ -n "$DECOMPOSE_ON" ] && [ -n "$DECOMPOSE_TAG" ]; }; then
+  WHY="$([ -n "$DECOMPOSE_FORCE" ] && echo 'forced by dispatch' || echo 'tagged decompose + enabled')"
+  echo "[tick] $ID → lemma-DAG decompose path ($WHY)" >&2
+  run_decompose
 else
   # Plain vibe ⇄ lean-lsp-mcp harness (spec:
   #   docs/superpowers/specs/2026-07-17-leanstral-vibe-cron-harness-design.md).
@@ -119,10 +141,19 @@ else
   python3 wait_daemon.py || echo "[tick] WARNING: daemon not ready after probes; gate may fail" >&2
   python3 vibe_prove.py gate --manifest "$QUEUE" --only "$ID" --run-tag "$TAG" --main-repo "$MAIN"
   set -e
+  # Autonomous escalation (the standing rule): the plain path couldn't close it → escalate the
+  # SAME target to decompose. Its summary row (written last) supersedes the plain one at step 3.
+  if [ -n "$DECOMPOSE_ON" ]; then
+    case "$(last_outcome)" in
+      max_rounds|fail_gate)
+        echo "[tick] plain path did not close $ID → escalating to the decompose path" >&2
+        run_decompose ;;
+    esac
+  fi
 fi
 
-# 3. Read the outcome + actual tokens from the run summary.
-SUMMARY="$FOUNDRY/runs/$TAG-summary.jsonl"
+# 3. Read the final outcome + tokens (the LAST row for $ID — a decompose escalation's row
+#    supersedes the plain attempt's; SUMMARY defined in step 2).
 read -r OUTCOME TOKENS < <(python3 - "$SUMMARY" "$ID" <<'PY'
 import json,sys
 path,tid=sys.argv[1],sys.argv[2]

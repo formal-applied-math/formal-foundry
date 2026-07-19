@@ -20,6 +20,10 @@ on:
         description: "ignore the due (interval) check"
         type: boolean
         default: false
+      decompose:
+        description: "route the CI-selected target straight to the lemma-DAG decompose path (one-shot)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write                  # commit state + telemetry back
@@ -154,6 +158,7 @@ jobs:
           MAIN_REPO: ${{ github.workspace }}/main
           FOUNDRY_REPO: ${{ github.repository }}
           FORCE: ${{ inputs.force && '1' || '' }}
+          DECOMPOSE_FORCE: ${{ inputs.decompose && '1' || '' }}   # one-shot: force the decompose path
           COMPOSE_PROJECT_NAME: docker    # the tick's daemon<->lean-lsp flip + leanstral-vibe.sh
           VERIFY_CPUSET: "0-1"            # share the 2-core cpuset with the daemon step
         run: bash scripts/pipeline-tick.sh
