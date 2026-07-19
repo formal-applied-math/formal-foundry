@@ -376,6 +376,26 @@ def test_emit_stub_pins_autoImplicit_false_for_lake_parity():
         < lean_text.index("namespace MathFin")
 
 
+def test_emit_stub_opens_measuretheory_so_bare_names_resolve():
+    # live root cause (run 29667784310, #60 + #109): the drafter emits IDIOMATIC
+    # bare Mathlib names — `IsProbabilityMeasure`, `IntegrableOn`, `Measure` (all
+    # under `MeasureTheory`) — exactly as the 155/262 MathFin modules that
+    # `open MeasureTheory` do. The emitted stub module omitted the open, so every
+    # measure-theory target died `unknown identifier` after a faithful re-draft.
+    # Emit the house-idiom opens (Girsanov.lean:50-51) right after `namespace
+    # MathFin`, so the model's correct idiomatic names resolve.
+    stub = ("theorem prob_int {Ω : Type*} {m : MeasurableSpace Ω} (Q : Measure Ω)\n"
+            "    [IsProbabilityMeasure Q] (f : Ω → ℝ) (hf : IntegrableOn f Set.univ Q) :\n"
+            "    True := by sorry")
+    lean_text, _e, _p = af.emit_target_files(_ISSUE, stub, _META)
+    assert "open MeasureTheory ProbabilityTheory" in lean_text
+    assert "open scoped NNReal ENNReal" in lean_text
+    # in scope for the stub: opens sit between `namespace MathFin` and the theorem
+    assert (lean_text.index("namespace MathFin")
+            < lean_text.index("open MeasureTheory ProbabilityTheory")
+            < lean_text.index("theorem prob_int"))
+
+
 def test_emit_stub_imports_pointer_modules():
     # coherence-first: the stub imports its pointer modules so a drafted statement
     # can consume existing MathFin defs, not just Mathlib.
@@ -794,6 +814,28 @@ def test_draft_intent_threads_feedback_to_chat():
     r = af.draft_intent(_ISSUE, "", chat_fn=chat, feedback="FIX-THIS")
     assert r["ok"] is True
     assert "FIX-THIS" in seen["user"]
+
+
+def test_intent_reject_reason_pinpoints_the_missing_piece():
+    # "no parseable intent reply" was opaque (#109 r1; recurs on #66/#88/#73) — it
+    # fired identically whether the reply carried no JSON at all or JSON missing any
+    # one required field. Record WHICH, so the next run's telemetry pinpoints the
+    # cause instead of us guessing which piece the model dropped.
+    assert af.intent_reject_reason("prose, no json") == "no JSON object in reply"
+    assert (af.intent_reject_reason('{"module_name":"M","benchmark_id":"b"}')
+            == "JSON missing 'statement'")
+    assert (af.intent_reject_reason('{"statement":"s","benchmark_id":"b"}')
+            == "JSON missing 'module_name'")
+    assert (af.intent_reject_reason('{"statement":"s","module_name":"M"}')
+            == "JSON missing 'benchmark_id'")
+    assert af.intent_reject_reason(
+        '{"statement":"s","module_name":"M","benchmark_id":"b"}') is None
+
+
+def test_draft_intent_surfaces_reject_reason():
+    di = af.draft_intent(_ISSUE, "", chat_fn=lambda m: ("prose, no json", 4))
+    assert di["ok"] is False
+    assert di["reason"] == "no JSON object in reply"
 
 
 def test_formalize_messages_carry_revision_note():

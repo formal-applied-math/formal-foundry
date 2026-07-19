@@ -322,13 +322,27 @@ def intent_messages(issue: dict, context_pack: str, feedback: str | None = None,
             {"role": "user", "content": user}]
 
 
-def parse_intent(reply: str) -> dict | None:
-    """Parse a magistral intent reply into a dict. None unless it carries a `statement` plus the
-    naming meta (`module_name`, `benchmark_id`) the mechanical emit needs."""
+def intent_reject_reason(reply: str) -> str | None:
+    """WHY a magistral intent reply is unusable, or None if it parses. The emit is
+    mechanical, so it needs a `statement` plus the naming meta (`module_name`,
+    `benchmark_id`); this pinpoints which piece is missing so a rejected draft is
+    DIAGNOSABLE in the telemetry — the old blanket "no parseable intent reply"
+    fired identically for no-JSON and each missing field (#109 r1; #66/#88/#73)."""
     v = _extract_json(reply)
-    if not isinstance(v, dict) or not v.get("statement") or not v.get("module_name") \
-            or not v.get("benchmark_id"):
+    if not isinstance(v, dict):
+        return "no JSON object in reply"
+    for field in ("statement", "module_name", "benchmark_id"):
+        if not v.get(field):
+            return f"JSON missing '{field}'"
+    return None
+
+
+def parse_intent(reply: str) -> dict | None:
+    """Parse a magistral intent reply into a dict, or None if `intent_reject_reason`
+    finds it unusable (missing JSON or any required field)."""
+    if intent_reject_reason(reply) is not None:
         return None
+    v = _extract_json(reply)
     v.setdefault("objects", [])
     v.setdefault("docstring", "")
     v.setdefault("deferred", [])
@@ -346,7 +360,8 @@ def draft_intent(issue: dict, context_pack: str, *, chat_fn, feedback: str | Non
     content, tokens = chat_fn(intent_messages(issue, context_pack, feedback,
                                               route=route, prior_unknowns=prior_unknowns))
     intent = parse_intent(content)
-    return {"ok": intent is not None, "intent": intent, "tokens": tokens}
+    reason = None if intent is not None else intent_reject_reason(content)
+    return {"ok": intent is not None, "intent": intent, "tokens": tokens, "reason": reason}
 
 
 def formalize_messages(intent: dict, grounding: str, revision_note: str = "") -> list[dict]:
@@ -1204,9 +1219,10 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn,
                                   route=route, prior_unknowns=issue.get("prior_unknowns"))
                 spent += di["tokens"]
                 if not di["ok"]:
-                    fail = {"gate": "intent", "detail": "no parseable intent reply"}
+                    fail = {"gate": "intent",
+                            "detail": di.get("reason") or "no parseable intent reply"}
                     history.append({"attempt": attempt, **fail})
-                    log(f"#{n}: no parseable intent (attempt {attempt})")
+                    log(f"#{n}: intent rejected — {fail['detail']} (attempt {attempt})")
                     feedback = render_gate_feedback(fail["gate"], fail["detail"], None)
                     continue
                 intent = di["intent"]
@@ -2058,6 +2074,14 @@ def emit_target_files(issue: dict, stub: str, meta: dict) -> tuple[str, dict, di
         "set_option autoImplicit false\n\n"
         "@[expose] public section\n\n"
         "namespace MathFin\n\n"
+        # the house preamble (Girsanov.lean:50-51 — 155/262 MathFin modules do this):
+        # the drafter emits bare `IsProbabilityMeasure`/`IntegrableOn`/`Measure`
+        # exactly as a MathFin author would, so the module must open the namespaces
+        # that carry them. Without this, every measure-theory target died `unknown
+        # identifier` even after a FAITHFUL draft (run 29667784310, #60 + #109). An
+        # unused open is harmless; a missing one is a silent bare-name death.
+        "open MeasureTheory ProbabilityTheory\n"
+        "open scoped NNReal ENNReal\n\n"
         f"{stub.strip()}\n\n"
         "end MathFin\n"
     )
