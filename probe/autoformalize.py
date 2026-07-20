@@ -652,17 +652,46 @@ _GATE_FANOUT = 1
 _GATE_ROUNDS = 1
 
 
+def _probed_conclusion(text: str, name: str) -> str | None:
+    """The whitespace-normalized conclusion of the theorem/lemma named `name` in
+    `text`, or None if it is absent or unparseable. Used to verify an adversarial
+    gate proof kept the PROBED conclusion (`False` / `¬…`) rather than reverting to
+    the provable original."""
+    m = re.search(
+        rf"(?m)^\s*(?:@\[[^\]]*\]\s*)?(?:theorem|lemma)\s+{re.escape(name)}(?![\w'.])",
+        text)
+    if not m:
+        return None
+    sub = text[m.start():]
+    try:
+        _n, _b, sep, end = _locate(sub)
+    except ValueError:
+        return None
+    return " ".join(sub[sep + 1:end].split())
+
+
 def _try_prove(goal: str, sorry_name: str, *, chat_fn, check_fn, budget: int,
                fanout: int = _GATE_FANOUT, rounds: int = _GATE_ROUNDS,
                system_prompt=None) -> tuple[bool, int]:
     """Short pass@k attempt to prove `goal`. Returns `(proved, tokens)` — `proved`
-    is True only on an axioms-clean success (run_target's `pass`). `rounds` bounds
-    both the sampling rounds and the compiler-feedback repairs (`rounds - 1`)."""
+    is True only on an axioms-clean success (run_target's `pass`) whose winning
+    candidate still asserts the PROBED conclusion. `rounds` bounds both the sampling
+    rounds and the compiler-feedback repairs (`rounds - 1`)."""
     target = {"id": "gate", "stream": "gate", "statement": goal, "sorry_name": sorry_name}
     res = run_target(target, budget=budget, max_rounds=rounds, chat_fn=chat_fn,
                      check_fn=check_fn, log_fn=lambda r: None, system_prompt=system_prompt,
                      fanout=fanout, repair_rounds=max(0, rounds - 1))
-    return res["outcome"] == "pass", res["tokens"]
+    if res["outcome"] != "pass":
+        return False, res["tokens"]
+    # Statement-fidelity guard. run_target checks whatever FILE the prover returns,
+    # with no pin on the statement — so an adversarial prover (vacuity: prove `False`;
+    # disproof: prove `¬C`) that cannot close the probed conclusion instead REVERTS it
+    # to the provable original and "passes". That false verdict deterministically kills
+    # easy TRUE targets (caught on cal-bk-161: `0 ≤ gainToPain` reverted from `False`).
+    # Count the pass only when the winning candidate still asserts the probed conclusion.
+    want = _probed_conclusion(goal, sorry_name)
+    got = _probed_conclusion(target.get("_winning_candidate", ""), sorry_name)
+    return (want is not None and got == want), res["tokens"]
 
 
 def hypothesis_rejection(lean_text: str, sorry_name: str, *, chat_fn, check_fn,

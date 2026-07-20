@@ -623,8 +623,10 @@ _FAILS = lambda code: {"success": False, "errors": ["unsolved goals"], "sorry_co
 
 def test_hypothesis_rejection_flags_provable_false():
     lean_text, _e, _p = af.emit_target_files(_ISSUE, _STUB, _META)
+    # an HONEST vacuity proof keeps the probed `: False` conclusion
+    honest = "```lean\n" + af.vacuity_goal(lean_text).replace("sorry", "trivial") + "\n```"
     r = af.hypothesis_rejection(lean_text, "fra_value",
-                                chat_fn=_canned_chat("```lean\nproof\n```", 50),
+                                chat_fn=_canned_chat(honest, 50),
                                 check_fn=_PROVES, budget=20000)
     assert r["vacuous"] is True
     assert r["tokens"] > 0
@@ -638,10 +640,28 @@ def test_hypothesis_rejection_passes_when_unprovable():
     assert r["vacuous"] is False
 
 
+def test_hypothesis_rejection_rejects_reverted_conclusion():
+    # The adversarial prover cannot prove the probed `: False`, so it REVERTS the
+    # conclusion to the provable original and returns a clean file. run_target checks
+    # whatever file it returns, so this "passes" — a false vacuous verdict that
+    # deterministically kills easy TRUE targets (caught on cal-bk-161). The
+    # statement-fidelity guard must count a pass only when the winning candidate
+    # still asserts the probed conclusion.
+    lean_text, _e, _p = af.emit_target_files(_ISSUE, _STUB, _META)
+    # sorry-free (the prover reverts AND proves), original conclusion, not False
+    reverted = "```lean\n" + lean_text.replace("sorry", "trivial") + "\n```"
+    r = af.hypothesis_rejection(lean_text, "fra_value",
+                                chat_fn=_canned_chat(reverted, 50),
+                                check_fn=_PROVES, budget=20000)
+    assert r["vacuous"] is False
+
+
 def test_disproof_flags_provable_negation():
     lean_text, _e, _p = af.emit_target_files(_ISSUE, _STUB, _META)
+    # an HONEST disproof keeps the probed `¬ (C)` conclusion
+    honest = "```lean\n" + af.disproof_goal(lean_text).replace("sorry", "trivial") + "\n```"
     r = af.disproof(lean_text, "fra_value",
-                    chat_fn=_canned_chat("```lean\nproof\n```", 50),
+                    chat_fn=_canned_chat(honest, 50),
                     check_fn=_PROVES, budget=20000)
     assert r["false"] is True
 
