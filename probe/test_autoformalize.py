@@ -3,6 +3,8 @@ injected chat_fn/check_fn, temp trees; no Lean, no API, no network."""
 
 from __future__ import annotations
 
+import os
+
 import build_manifest as bm
 import pipeline_lib as pl
 
@@ -125,6 +127,107 @@ def test_agentic_formalize_args_wires_lean_lsp_strict_and_tools():
     assert argv[argv.index("--model") + 1] == "claude-opus-4-8"
     tools = argv[argv.index("--allowedTools") + 1]
     assert "lean-lsp" in tools and "Write" in tools               # draft a file + self-validate via lean tools
+
+
+_AGENTIC_INTENT = {"statement": "upCapture is scale-invariant in portfolio returns",
+                   "module_name": "UpCapAgentic", "benchmark_id": "mf-agentic", "docstring": "d",
+                   "definitions": [{"name": "upCapture", "signature": "Finset S → (S→ℝ) → (S→ℝ) → ℝ",
+                                    "meaning": "ratio of sums"}]}
+
+
+def test_agentic_formalize_prompt_carries_intent_scaffold_and_selfcheck():
+    p = af._agentic_formalize_prompt(_AGENTIC_INTENT, "SCAFFOLD", "MathFin/X.lean")
+    assert "upCapture" in p and "MathFin/X.lean" in p and "SCAFFOLD" in p
+    assert "lean_diagnostic" in p and "sorry" in p                # self-validate; keep the sorry
+
+
+def test_extract_core_stub_pulls_body_between_scaffold():
+    module = ("junk\nopen scoped NNReal ENNReal\n\n"
+              "noncomputable def foo : ℝ := 1\n\ntheorem t : foo = 1 := by sorry\n\nend MathFin\n")
+    core = af._extract_core_stub(module)
+    assert "def foo" in core and "theorem t" in core
+    assert "end MathFin" not in core and "junk" not in core
+
+
+def _agentic_scaffolded(core):
+    lt, _e, _p = af.emit_target_files(
+        _ISSUE, core, {"module_name": "UpCapAgentic", "benchmark_id": "mf-agentic",
+                       "docstring": "d", "definitions": ["upCapture"]})
+    return lt
+
+
+def test_agentic_formalize_ok_on_elaborating_module(tmp_path):
+    main = str(tmp_path); os.makedirs(os.path.join(main, "MathFin"))
+
+    def fake_run(argv, stdin, cwd):
+        lt = _agentic_scaffolded("noncomputable def upCapture : ℝ := 1\n\n"
+                                 "theorem t : upCapture = 1 := by sorry")
+        with open(os.path.join(cwd, af._AGENTIC_SCRATCH_REL), "w") as f:
+            f.write(lt)
+        return _FakeRun(stdout='{"is_error":false,"subtype":"success","result":"DONE",'
+                               '"usage":{"input_tokens":2,"output_tokens":3}}')
+    r = af.agentic_formalize(_AGENTIC_INTENT, issue=_ISSUE, main_repo=main,
+                             check_fn=lambda code: {"errors": [], "sorry_count": 1},
+                             run_fn=fake_run, mcp_config_path="/tmp/x.json")
+    assert r["ok"] is True and "upCapture" in r["lean_text"]
+    assert r["entry"] is not None and r["tokens"] == 5
+
+
+def test_agentic_formalize_fails_when_not_elaborating(tmp_path):
+    main = str(tmp_path); os.makedirs(os.path.join(main, "MathFin"))
+
+    def fake_run(argv, stdin, cwd):
+        with open(os.path.join(cwd, af._AGENTIC_SCRATCH_REL), "w") as f:
+            f.write("broken lean")
+        return _FakeRun(stdout='{"is_error":false,"subtype":"success","result":"DONE"}')
+    r = af.agentic_formalize(_AGENTIC_INTENT, issue=_ISSUE, main_repo=main,
+                             check_fn=lambda code: {"errors": ["boom"], "sorry_count": 0},
+                             run_fn=fake_run, mcp_config_path="/tmp/x.json")
+    assert r["ok"] is False and r["reason"]
+
+
+def test_agentic_formalize_fails_when_no_file_written(tmp_path):
+    main = str(tmp_path); os.makedirs(os.path.join(main, "MathFin"))
+    r = af.agentic_formalize(_AGENTIC_INTENT, issue=_ISSUE, main_repo=main,
+                             check_fn=lambda code: {"errors": [], "sorry_count": 1},
+                             run_fn=lambda a, s, c: _FakeRun(stdout='{}'),
+                             mcp_config_path="/tmp/x.json")
+    assert r["ok"] is False and "no file" in r["reason"]
+
+
+def test_agentic_formalize_skips_verify_when_check_fn_none(tmp_path):
+    # live-pipe path: check_fn=None trusts claude's lean-lsp self-validation (gates re-check)
+    main = str(tmp_path); os.makedirs(os.path.join(main, "MathFin"))
+
+    def fake_run(argv, stdin, cwd):
+        lt = _agentic_scaffolded("noncomputable def upCapture : ℝ := 1\n\n"
+                                 "theorem t : upCapture = 1 := by sorry")
+        with open(os.path.join(cwd, af._AGENTIC_SCRATCH_REL), "w") as f:
+            f.write(lt)
+        return _FakeRun(stdout='{"result":"DONE"}')
+    r = af.agentic_formalize(_AGENTIC_INTENT, issue=_ISSUE, main_repo=main,
+                             run_fn=fake_run, mcp_config_path="/tmp/x.json")   # check_fn defaults None
+    assert r["ok"] is True and r["entry"] is not None
+
+
+def test_refill_routes_to_agentic_formalize_fn(monkeypatch, tmp_path):
+    # engine=claude mode=agentic: refill routes the FORMALIZE stage to the agentic fn
+    calls = {"agentic": 0, "completion": 0}
+    monkeypatch.setattr(af, "draft_intent", lambda issue, ctx, *, chat_fn, **k:
+                        {"ok": True, "tokens": 1, "unknowns": [],
+                         "intent": {"statement": "s", "module_name": "M", "benchmark_id": "mf-x",
+                                    "docstring": "d"}})
+    monkeypatch.setattr(af, "formalize_with_repair",
+                        lambda *a, **k: calls.__setitem__("completion", calls["completion"] + 1)
+                        or {"ok": False, "tokens": 0})
+
+    def agentic_fn(intent, ctx, issue):
+        calls["agentic"] += 1
+        return {"ok": False, "tokens": 0}          # stop after formalize
+    af.refill([_issue(9)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
+              context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000,
+              agentic_formalize_fn=agentic_fn)
+    assert calls["agentic"] >= 1 and calls["completion"] == 0
 
 
 def test_select_draft_fns_mistral_keeps_today():

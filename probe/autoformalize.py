@@ -461,6 +461,105 @@ def _agentic_formalize_args(mcp_config_path: str, *, model: str = "") -> list[st
     return argv
 
 
+_AGENTIC_SCRATCH_REL = "MathFin/_AutoformAgentic.lean"
+
+
+def _agentic_formalize_prompt(intent: dict, scaffold_module: str, scratch_rel: str) -> str:
+    """The task prompt for the agentic formalize session: write the module realizing
+    `intent` to `scratch_rel`, using the given scaffold, and self-validate to elaboration
+    via the lean-lsp tools (leaving the theorem's `sorry`)."""
+    stmt = intent.get("statement", "")
+    defs = [d for d in (intent.get("definitions") or []) if isinstance(d, dict)]
+    defspec = "\n".join(
+        f"- {d.get('name')} : {d.get('signature', '?')} — {d.get('meaning', '')}" for d in defs)
+    return (
+        "Formalize the following into Lean 4 (Mathlib) and make it ELABORATE cleanly.\n\n"
+        f"INTENDED STATEMENT:\n{stmt}\n\n"
+        + (f"NEW DEFINITIONS TO INTRODUCE:\n{defspec}\n\n" if defspec else "")
+        + f"Write the COMPLETE module to the file `{scratch_rel}` (relative to the project root), "
+        "using EXACTLY this scaffold — replace only the body between the `open` lines and "
+        "`end MathFin` with the definition(s) and the single theorem (ending `:= by sorry`), "
+        "plus 1-2 concrete `example ... := by norm_num`/`decide` instance checks per new def:\n\n"
+        f"```lean\n{scaffold_module}\n```\n\n"
+        f"Then use the lean-lsp MCP tools (e.g. lean_diagnostics on `{scratch_rel}`) to CHECK and "
+        "ITERATE — fix every elaboration error — until diagnostics report NO errors and exactly "
+        "ONE `sorry` (the main theorem's). Keep the statement FAITHFUL to the intended statement; "
+        "do NOT prove the theorem (leave its `sorry`); do not touch the license/module/import/"
+        "namespace scaffold lines. Reply DONE when it elaborates cleanly."
+    )
+
+
+def _extract_core_stub(lean_text: str) -> str:
+    """The body an emit-scaffolded module wraps: the text between the `open scoped …` line
+    and `end MathFin` (the defs + theorem + examples). '' if the markers are absent."""
+    m = re.search(r"open scoped NNReal ENNReal\n+(.*?)\n+end MathFin", lean_text, re.DOTALL)
+    return m.group(1).strip() if m else ""
+
+
+def agentic_formalize(intent: dict, *, issue: dict, main_repo: str, check_fn=None, model: str = "",
+                      run_fn=None, mcp_config_path: str | None = None,
+                      scratch_rel: str = _AGENTIC_SCRATCH_REL, log=lambda m: None) -> dict:
+    """Item I phase 2: ONE agentic `claude -p` session (lean-lsp MCP) drafts the module for
+    `intent` to `scratch_rel` (under `main_repo`, bind-mounted into the lean-lsp container),
+    self-validating to elaboration via lean tools. We read it back, daemon-verify, and
+    re-emit for a consistent (lean_text, entry). ASSUMES lean-lsp is up + the daemon is up
+    for `check_fn` — the caller flips the slot. `run_fn(argv, stdin, cwd)` / `check_fn`
+    injectable for tests. Returns the formalize_with_repair shape
+    `{ok, stub, lean_text, entry, meta, tokens, reason}`."""
+    meta = {"module_name": intent["module_name"], "benchmark_id": intent["benchmark_id"],
+            "docstring": intent.get("docstring", ""),
+            "definitions": intent.get("definitions") or [], "deferred": intent.get("deferred")}
+    scaffold, _e0, _p0 = emit_target_files(issue, "theorem _agentic_placeholder : True := by sorry", meta)
+    scratch_abs = os.path.join(main_repo, scratch_rel)
+
+    tmp_cfg = None
+    if mcp_config_path is None:
+        import tempfile
+        fd, mcp_config_path = tempfile.mkstemp(suffix=".json", prefix="lean-lsp-mcp-")
+        with os.fdopen(fd, "w") as f:
+            json.dump(_lean_lsp_mcp_config(), f)
+        tmp_cfg = mcp_config_path
+
+    if run_fn is None:
+        def run_fn(argv, stdin, cwd):
+            return subprocess.run(argv, input=stdin, capture_output=True, text=True,
+                                  timeout=1800, cwd=cwd)
+    argv = _agentic_formalize_args(mcp_config_path, model=model)
+    prompt = _agentic_formalize_prompt(intent, scaffold, scratch_rel)
+    try:
+        res = run_fn(argv, prompt, main_repo)
+    finally:
+        if tmp_cfg:
+            try:
+                os.unlink(tmp_cfg)
+            except OSError:
+                pass
+    tokens = 0
+    try:
+        data = json.loads((getattr(res, "stdout", "") or "").strip())
+        u = data.get("usage") or {}
+        tokens = int(u.get("input_tokens", 0) or 0) + int(u.get("output_tokens", 0) or 0)
+    except (ValueError, TypeError):
+        pass
+
+    if not os.path.exists(scratch_abs):
+        return {"ok": False, "stub": None, "lean_text": None, "entry": None, "meta": meta,
+                "tokens": tokens, "reason": "agentic session wrote no file"}
+    lean_final = open(scratch_abs, encoding="utf-8").read()
+    if check_fn is not None:                         # None ⇒ trust claude's lean-lsp self-validation
+        elab = check_fn(lean_final)                  # (the gate battery re-checks elaboration anyway)
+        if elab.get("errors") or elab.get("sorry_count", 0) != 1:
+            return {"ok": False, "stub": None, "lean_text": lean_final, "entry": None, "meta": meta,
+                    "tokens": tokens, "reason": "final module does not elaborate cleanly"}
+    core = _extract_core_stub(lean_final)
+    if core:                                        # canonicalise via emit → consistent entry
+        lean_text, entry, _placement = emit_target_files(issue, core, meta)
+    else:                                           # markers absent — ship claude's module as-is
+        lean_text, entry = lean_final, None
+    return {"ok": True, "stub": core, "lean_text": lean_text, "entry": entry, "meta": meta,
+            "tokens": tokens, "reason": ""}
+
+
 def draft_intent(issue: dict, context_pack: str, *, chat_fn, feedback: str | None = None,
                  route: str = "theorem", prior_unknowns: list[str] | None = None) -> dict:
     """Stage 1: magistral SPECIFIES the intended statement (prose + objects + naming meta) from the
@@ -1435,6 +1534,7 @@ def route_feasibility(intent: dict, pointers: list[str], *, lookup_fn) -> dict:
 
 
 def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn, intent_fn=None,
+           agentic_formalize_fn=None,
            queue_dir: str, budget: int, max_issues: int = 1,
            max_attempt_issues: int = 3, gate_budget: int = 20_000, formalize_rounds: int = 3,
            formalize_token_budget: int = 40_000, formalize_fn=None, retrieve_fn=None,
@@ -1512,14 +1612,17 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn, int
                         break   # doomed target — surface for the defs route / a human
 
                 proactive = proactive_fn(intent["statement"]) if proactive_fn else ""
-                fr = formalize_with_repair(intent, ctx, issue=issue, chat_fn=formalize_fn,
-                                           check_fn=check_fn, emit_fn=emit_target_files,
-                                           rounds=formalize_rounds, retrieve_fn=retrieve_fn,
-                                           token_budget=formalize_token_budget,
-                                           proactive_premises=proactive,
-                                           revision_note=feedback or "",
-                                           derivable_fn=derivable_fn,
-                                           log=lambda m: log(f"#{n} formalize {m}"))
+                if agentic_formalize_fn is not None:     # item I phase 2: claude+lean-lsp session
+                    fr = agentic_formalize_fn(intent, ctx, issue)
+                else:
+                    fr = formalize_with_repair(intent, ctx, issue=issue, chat_fn=formalize_fn,
+                                               check_fn=check_fn, emit_fn=emit_target_files,
+                                               rounds=formalize_rounds, retrieve_fn=retrieve_fn,
+                                               token_budget=formalize_token_budget,
+                                               proactive_premises=proactive,
+                                               revision_note=feedback or "",
+                                               derivable_fn=derivable_fn,
+                                               log=lambda m: log(f"#{n} formalize {m}"))
                 spent += fr["tokens"]
                 unknowns = fr.get("unknowns") or []
                 if fr.get("advised_bundle"):
@@ -1748,9 +1851,20 @@ def main() -> int:
     drafter = DrafterConfig.load(args.config or os.path.join(_foundry_root(), "pipeline.toml"))
     draft_intent_fn, draft_formalize_fn = select_draft_fns(
         drafter, mistral_intent_fn=reason_fn, mistral_formalize_fn=formalize_fn)
-    print("[refill] drafter engine=" + drafter.engine
+    print("[refill] drafter engine=" + drafter.engine + " mode=" + drafter.mode
           + (f" model={drafter.claude_model}" if drafter.engine == "claude" else ""),
           file=sys.stderr)
+
+    # item I phase 2: the agentic drafter replaces the FORMALIZE stage with one claude -p
+    # session on the lean-lsp MCP (self-validates to elaboration). Requires the tick to
+    # have flipped the slot to lean-lsp; check_fn=None here defers the elaboration check to
+    # the gate battery (post-flip, on the daemon). Only when engine=claude + mode=agentic.
+    agentic_fn = None
+    if drafter.engine == "claude" and drafter.mode == "agentic":
+        def agentic_fn(intent, ctx, issue):
+            return agentic_formalize(intent, issue=issue, main_repo=args.main_repo,
+                                     model=drafter.claude_model, check_fn=None,
+                                     log=lambda m: print(f"[agentic] {m}", file=sys.stderr))
 
     def context_fn(issue):
         ptrs = issue.get("pointers", [])
@@ -1786,7 +1900,7 @@ def main() -> int:
             return True   # can't check ⇒ fail-open (never block a good target)
 
     res = refill(issues, reason_fn=reason_fn, intent_fn=draft_intent_fn, prove_fn=prove_fn,
-                 check_fn=daemon_check,
+                 agentic_formalize_fn=agentic_fn, check_fn=daemon_check,
                  context_fn=context_fn, queue_dir=queue_dir, budget=budget,
                  max_issues=max_issues, max_attempt_issues=max_attempt, gate_budget=gate_budget,
                  formalize_rounds=formalize_rounds, formalize_token_budget=formalize_token_budget,
