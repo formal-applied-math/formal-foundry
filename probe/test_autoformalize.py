@@ -432,6 +432,66 @@ def test_emit_stub_roundtrips_through_build_manifest():
     assert bm.parse_pointers(lean_text) == _ISSUE["pointers"]
 
 
+# --- new-object placement: the module is named for the object it introduces --
+
+_ISSUE_162 = {
+    "number": 162,
+    "area": "performance",
+    "title": "Upside-capture ratio",
+    "pointers": ["MathFin/Performance/RatiosExtended.lean"],
+}
+_STUB_162 = ("theorem upCapture_scale_invariant {S : Type*} (up : Finset S)\n"
+             "    (p b : S → ℝ) (c : ℝ) (h : (∑ s ∈ up, b s) ≠ 0) :\n"
+             "    True := by sorry")
+
+
+def test_emit_new_object_module_named_for_def_not_magistral_bucket():
+    # #162 repro: magistral picked module_name "RatiosExtended" — an EXISTING module
+    # the target also imports as a pointer (main-module == its own import). The old
+    # code trusted that name and apply_contribution overwrote RatiosExtended.lean,
+    # deleting its theorems -> AxiomAuditGen "unknown constant" -> PR blocked. A
+    # new-object contribution creates its OWN module named for the object it
+    # introduces: def `upCapture` -> module `UpCapture` (like #161 gainToPain -> GainToPain).
+    meta = {"module_name": "RatiosExtended", "benchmark_id": "mf-performance-upside_capture",
+            "docstring": "Upside-capture ratio.", "definitions": ["upCapture"]}
+    lean_text, entry, placement = af.emit_target_files(_ISSUE_162, _STUB_162, meta)
+    assert placement["main_module"] == "MathFin/Performance/UpCapture.lean"
+    assert "-- main-module: MathFin/Performance/UpCapture.lean" in lean_text
+    # the re-export imports the SAME fresh module, not the (would-be clobbered) pointer
+    assert "import MathFin.Performance.UpCapture" in entry["code"]["lean"]
+    # the pointer is still imported as a dependency (coherence-first)
+    assert "public import MathFin.Performance.RatiosExtended" in lean_text
+
+
+def test_emit_new_object_module_idempotent_when_magistral_already_canonical():
+    # #161-style regression: magistral's bucket already equals the object's canonical
+    # module (def gainToPain -> module GainToPain), so the collision guard never fires
+    # and placement is unchanged.
+    issue = {"number": 161, "area": "performance", "title": "Gain-to-pain ratio",
+             "pointers": ["MathFin/Performance/RatiosExtended.lean"]}
+    stub = ("theorem gainToPain_nonneg {α : Type*} (S : Finset α) (r : α → ℝ) :\n"
+            "    True := by sorry")
+    meta = {"module_name": "GainToPain", "benchmark_id": "mf-performance-gain_to_pain",
+            "docstring": "Gain-to-pain ratio.", "definitions": ["gainToPain"]}
+    _lt, _e, placement = af.emit_target_files(issue, stub, meta)
+    assert placement["main_module"] == "MathFin/Performance/GainToPain.lean"
+
+
+def test_emit_rejects_self_import_when_no_new_def_to_derive_from():
+    # a theorem-route target whose module_name equals a pointer would make
+    # apply_contribution overwrite that existing module, and there is no new def to
+    # derive a fresh name from -> reject loudly rather than clobber.
+    issue = {"number": 200, "area": "performance", "title": "x",
+             "pointers": ["MathFin/Performance/RatiosExtended.lean"]}
+    meta = {"module_name": "RatiosExtended", "benchmark_id": "mf-x", "docstring": "d"}
+    try:
+        af.emit_target_files(issue, "theorem foo : True := by sorry", meta)
+        raised = False
+    except ValueError:
+        raised = True
+    assert raised, "self-importing main-module with no new def must be rejected"
+
+
 # --- honest subsetting: declared `deferred` remainder ------------------------
 
 _DEFERRED_FACT = "term-structure monotonicity: T ↦ F(T) increasing iff r > δ"

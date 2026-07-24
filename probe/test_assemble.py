@@ -54,6 +54,34 @@ def test_apply_contribution_adds_trailing_newline_to_module():
         assert open(os.path.join(main, "MathFin/A.lean")).read().endswith("\n")
 
 
+def test_apply_contribution_refuses_to_overwrite_existing_module():
+    # A new-object contribution creates a NEW module; the candidate is a whole
+    # standalone file (license + `module` + `namespace`), so writing it over an
+    # EXISTING module deletes that module's theorems. #162 hit this: the drafter set
+    # main_module to MathFin/Performance/RatiosExtended.lean (an existing module it
+    # also imported), apply_contribution clobbered it, and AxiomAuditGen then failed
+    # with "unknown constant" for the deleted theorems. Refuse loud-and-early here so
+    # no route can silently corrupt an existing module.
+    with tempfile.TemporaryDirectory() as main:
+        os.makedirs(os.path.join(main, "benchmarks"))
+        with open(os.path.join(main, "benchmarks", "x.json"), "w") as f:
+            f.write('{\n  "theorems": []\n}\n')
+        os.makedirs(os.path.join(main, "MathFin", "Performance"))
+        existing = os.path.join(main, "MathFin", "Performance", "RatiosExtended.lean")
+        with open(existing, "w") as f:
+            f.write("theorem informationRatio_scale_invariant : True := trivial\n")
+        target = {"main_module": "MathFin/Performance/RatiosExtended.lean",
+                  "benchmark": "benchmarks/x.json", "benchmark_id": "id"}
+        try:
+            apply_contribution("theorem upCapture_x : True := trivial\n",
+                               target, {"id": "id"}, main)
+            raised = False
+        except FileExistsError:
+            raised = True
+        assert raised, "must refuse to overwrite an existing module"
+        assert "informationRatio_scale_invariant" in open(existing).read()  # untouched
+
+
 def test_ensure_umbrella_import_appends_once():
     from assemble import ensure_umbrella_import
     with tempfile.TemporaryDirectory() as main:

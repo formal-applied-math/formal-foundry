@@ -57,13 +57,24 @@ def append_entry(benchmark_text: str, entry: dict) -> str:
 
 def apply_contribution(candidate_code: str, target: dict, benchmark_entry: dict,
                        main_repo: str) -> list[str]:
-    """Write the proven candidate to `target['main_module']` and append
-    `benchmark_entry` to `target['benchmark']`, both under `main_repo`. Returns
-    the repo-relative paths written (for logging / `git add`)."""
+    """Write the proven candidate as a NEW module file `target['main_module']` and
+    append `benchmark_entry` to `target['benchmark']`, both under `main_repo`.
+    Returns the repo-relative paths written (for logging / `git add`)."""
     written: list[str] = []
 
     mod_rel = target["main_module"]
     mod_abs = os.path.join(main_repo, mod_rel)
+    if os.path.exists(mod_abs):
+        # The candidate is a whole standalone module (license + `module` + namespace),
+        # so an open-in-"w" would DELETE the existing module's theorems rather than add
+        # to it. #162 hit exactly this: the drafter set main_module to an existing
+        # module it also imported; the clobber then surfaced as a confusing downstream
+        # AxiomAuditGen "unknown constant". The emit-time placement guard heals that
+        # case; this backstop guarantees NO route can silently corrupt an existing
+        # module — it aborts the PR loud-and-early instead.
+        raise FileExistsError(
+            f"main_module {mod_rel} already exists — a new-object contribution must "
+            "create a fresh module, not overwrite an existing one.")
     os.makedirs(os.path.dirname(mod_abs), exist_ok=True)
     with open(mod_abs, "w", encoding="utf-8") as f:
         f.write(candidate_code if candidate_code.endswith("\n") else candidate_code + "\n")

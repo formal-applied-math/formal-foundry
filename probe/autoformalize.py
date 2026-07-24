@@ -2116,16 +2116,34 @@ def emit_target_files(issue: dict, stub: str, meta: dict) -> tuple[str, dict, di
     """
     n = issue["number"]
     section = section_for_area(issue.get("area") or "")
-    module_name = meta["module_name"]
-    main_module = f"MathFin/{section}/{module_name}.lean"
     benchmark_id = meta["benchmark_id"]
     docstring = (meta.get("docstring") or "").strip()
     deferred = normalize_deferred(meta.get("deferred"))
     pointers = issue.get("pointers", [])
+    new_defs = [str(d) for d in (meta.get("definitions") or [])]
     stub = _prelint_stub(stub)   # A5 modifier-order fix + A7 Σ/Π-identifier reject
     name, binders, concl = split_statement(stub)
 
-    new_defs = [str(d) for d in (meta.get("definitions") or [])]
+    # main-module placement: a new-object contribution creates its OWN module, so
+    # main_module must be a NEW file. Trusting magistral's free-text module_name let
+    # it pick an EXISTING module the target also imports as a pointer (#162:
+    # module_name "RatiosExtended" == its own pointer); apply_contribution then
+    # overwrote that module, deleting its theorems (AxiomAuditGen "unknown constant",
+    # PR blocked). Heal deterministically by naming the module for the object it
+    # introduces (def `upCapture` -> module `UpCapture`, like #161 gainToPain ->
+    # GainToPain); reject loudly if it still collides (a module cannot import itself).
+    module_name = meta["module_name"]
+    main_module = f"MathFin/{section}/{module_name}.lean"
+    if main_module in pointers:
+        primary = new_defs[0].split(".")[-1].strip() if new_defs else ""
+        if primary:
+            module_name = primary[:1].upper() + primary[1:]
+            main_module = f"MathFin/{section}/{module_name}.lean"
+        if main_module in pointers:
+            raise ValueError(
+                f"main-module {main_module} collides with a pointer import; a "
+                "new-object contribution must create a fresh module named for the "
+                "object it introduces (set meta.definitions / meta.module_name).")
     header_lines = [
         f"-- pointers: {', '.join(pointers)}",
         f"-- main-module: {main_module}",
