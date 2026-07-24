@@ -122,9 +122,46 @@ def test_select_draft_fns_claude_routes_both_to_adapter(monkeypatch):
     d = pl.DrafterConfig(engine="claude", claude_model="claude-sonnet-5")
     i, f = af.select_draft_fns(d, mistral_intent_fn=lambda m: ("i", 0),
                                mistral_formalize_fn=lambda m: ("f", 0))
-    assert i is f                                   # both draft sub-stages use one claude adapter
     assert i([{"role": "user", "content": "z"}]) == ("x", 3)
-    assert calls == ["claude-sonnet-5"]             # called with the configured model
+    assert f([{"role": "user", "content": "z"}]) == ("x", 3)
+    assert calls == ["claude-sonnet-5", "claude-sonnet-5"]   # both draft sub-stages route to claude
+
+
+def test_select_draft_fns_claude_falls_back_to_mistral_on_cap(monkeypatch):
+    def capping(msgs, model=""):
+        raise af.ClaudeCapError("5-hour usage limit reached")
+    monkeypatch.setattr(af, "claude_draft_fn", capping)
+    d = pl.DrafterConfig(engine="claude", on_cap="fallback")
+    i, f = af.select_draft_fns(d, mistral_intent_fn=lambda m: ("m-intent", 5),
+                               mistral_formalize_fn=lambda m: ("m-formalize", 5))
+    assert i([{"role": "user", "content": "x"}]) == ("m-intent", 5)       # intent → mistral
+    assert f([{"role": "user", "content": "x"}]) == ("m-formalize", 5)    # formalize → mistral
+
+
+def test_select_draft_fns_claude_defer_reraises_cap(monkeypatch):
+    def capping(msgs, model=""):
+        raise af.ClaudeCapError("usage limit reached")
+    monkeypatch.setattr(af, "claude_draft_fn", capping)
+    d = pl.DrafterConfig(engine="claude", on_cap="defer")
+    i, _f = af.select_draft_fns(d, mistral_intent_fn=lambda m: ("m", 0),
+                                mistral_formalize_fn=lambda m: ("m", 0))
+    try:
+        i([{"role": "user", "content": "x"}])
+        raised = False
+    except af.ClaudeCapError:
+        raised = True
+    assert raised is True                                                 # defer → propagate to refill
+
+
+def test_refill_records_deferred_on_claude_cap(monkeypatch, tmp_path):
+    def capping_draft(issue, ctx, *, chat_fn, **kw):
+        raise af.ClaudeCapError("5-hour usage limit reached")
+    monkeypatch.setattr(af, "draft_intent", capping_draft)
+    res = af.refill([_issue(9)], reason_fn=_NOOP, intent_fn=_NOOP, prove_fn=_NOOP,
+                    check_fn=_ELAB_OK, context_fn=lambda i: "", queue_dir=str(tmp_path),
+                    budget=100000)
+    assert res["seeded"] == []
+    assert [a["outcome"] for a in res["attempted"]] == ["deferred"]       # not "error"
 
 
 def test_drafter_config_loads_claude_block(tmp_path):

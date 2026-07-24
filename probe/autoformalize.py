@@ -416,13 +416,23 @@ def claude_draft_fn(messages: list[dict], *, model: str = "", run_fn=None) -> tu
 def select_draft_fns(drafter, *, mistral_intent_fn, mistral_formalize_fn):
     """Pick the DRAFT-stage (intent_fn, formalize_fn) pair for `[drafter] engine`
     (item I). engine="mistral" (default) keeps magistral-intent + leanstral-formalize;
-    engine="claude" routes BOTH draft sub-stages to the one `claude -p` adapter. The
-    judge/fidelity (reason_fn) and prove (prove_fn) are chosen elsewhere — untouched."""
-    if getattr(drafter, "engine", "mistral") == "claude":
-        def claude_fn(msgs):
-            return claude_draft_fn(msgs, model=drafter.claude_model)
-        return claude_fn, claude_fn
-    return mistral_intent_fn, mistral_formalize_fn
+    engine="claude" routes BOTH draft sub-stages to the `claude -p` adapter. On a
+    subscription cap: on_cap="fallback" retries that call with the mistral counterpart,
+    on_cap="defer" re-raises `ClaudeCapError` for refill to requeue. The judge/fidelity
+    (reason_fn) and prove (prove_fn) are chosen elsewhere — untouched."""
+    if getattr(drafter, "engine", "mistral") != "claude":
+        return mistral_intent_fn, mistral_formalize_fn
+
+    def make(fallback):
+        def draft(msgs):
+            try:
+                return claude_draft_fn(msgs, model=drafter.claude_model)
+            except ClaudeCapError:
+                if getattr(drafter, "on_cap", "fallback") == "fallback":
+                    return fallback(msgs)          # this draft call reverts to mistral
+                raise                               # "defer" → refill records a deferred outcome
+        return draft
+    return make(mistral_intent_fn), make(mistral_formalize_fn)
 
 
 def draft_intent(issue: dict, context_pack: str, *, chat_fn, feedback: str | None = None,
@@ -1544,6 +1554,13 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn, int
                    "arch": ROUTING_ARCH, "telemetry": tele}
             rec["family"] = classify_refill(rec)
             attempted.append(rec)
+        except ClaudeCapError as e:   # item I: subscription cap under [drafter] on_cap="defer"
+            log(f"#{n}: claude drafter cap — deferring (requeue, no obstruction)")
+            rec = {"issue": n, "attempts": len(history), "outcome": "deferred",
+                   "history": history + [{"gate": "deferred", "detail": str(e)[:120]}],
+                   "arch": ROUTING_ARCH}
+            attempted.append(rec)          # deferred is NOT classified as an obstruction
+            continue
         except Exception as e:  # noqa: BLE001 — resilience: skip the issue, not the tick
             log(f"#{n}: error ({type(e).__name__}: {e}) — skipping")
             history.append({"attempt": len(history) + 1, "gate": "error",
