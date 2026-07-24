@@ -279,6 +279,10 @@ INTENT_DEFS_ADDENDUM = (
     "definitions. When the natural shape is a GENERAL core plus the issue-shaped "
     'instantiation, also emit "corollary": {"name": "<snake_case>", "statement": '
     '"<one line>"} — the core carries the proof, the corollary applies it.'
+    ' For EACH definition also emit "examples": ["<def> <explicit small inputs> = '
+    '<intended value>", ...] — 1-2 concrete instance checks whose value you compute by '
+    "hand from the issue's semantics; the formalizer turns each into an "
+    "`example … := by norm_num`, so a wrong sign or normalization is caught before proving."
 )
 
 
@@ -374,12 +378,17 @@ def formalize_messages(intent: dict, grounding: str, revision_note: str = "") ->
             f"- {d.get('name')} : {d.get('signature', '?')} — {d.get('meaning', '')}"
             + (f" (built from: {', '.join(d.get('built_from') or [])})"
                if d.get("built_from") else "")
+            + (f" | instance checks: {'; '.join(d.get('examples') or [])}"
+               if d.get("examples") else "")
             for d in defs)
         user += ("\nNEW DEFINITIONS TO INTRODUCE (this module defines them):\n" + spec
-                 + "\nEmit ONE ```lean block containing these definitions (complete — no "
-                 "sorry; each built from existing constants; lowerCamelCase names, each with "
-                 "a `/-- … -/` docstring above it) followed by the single theorem "
-                 "stated THROUGH them, ending `:= by sorry`.\n")
+                 + "\nEmit ONE ```lean block: the definitions (complete — no sorry; each built "
+                 "from existing constants; lowerCamelCase names, each with a `/-- … -/` "
+                 "docstring); then for EACH definition 1-2 concrete-instance checks "
+                 "`example : <def> <explicit small inputs, e.g. ![1, 2] over Finset (Fin 2)> = "
+                 "<intended value> := by norm_num [<def>]` (use the intent's instance checks when "
+                 "given; `decide` for ℕ/Bool) so a wrong sign/normalization fails to elaborate; "
+                 "then the single theorem stated THROUGH the defs, ending `:= by sorry`.\n")
     cor = intent.get("corollary")
     if isinstance(cor, dict) and cor.get("statement"):
         user += ("\nCOROLLARY TO ADD AFTER THE CORE (a sorry-free theorem proved by a term "
@@ -1062,6 +1071,60 @@ def defs_rejection(lean_text: str, thm_name: str, def_names: list[str], *, check
     return {"failed": True, "gate": gate, "verdict": errs[0], "tokens": 0}
 
 
+# item M — the instance-probe gate. `newdef_depth`/`ungrounded` prove a def is
+# USED and GROUNDED, but not that it COMPUTES the intended quantity: a sign flip,
+# a normalization slip, or sup-vs-max reads as a plausible def the faithfulness
+# judge and the vacuity/disproof probes all pass (the #73 maxDD `∀c` class). The
+# fix, transplanted from Nexus's OEIS anti-misformalization guard: every new def
+# must ship ≥1 concrete-instance `example` evaluating it on explicit small inputs
+# against its intended value, proved by a norm_num/decide-class tactic. Those
+# examples elaborate as ordinary stub content, so a slipped def makes its own
+# intended-value example FAIL to elaborate — caught before the prove stage. This
+# gate enforces the examples are PRESENT and real (not skipped, not faked, not a
+# `x = x` tautology); the daemon check the battery already ran does the catching.
+_INSTANCE_PROBE_TACTIC_RE = re.compile(r"\b(norm_num1?|decide|simp)\b")
+
+
+def _example_blocks(lean_text: str) -> list[str]:
+    """Each top-level `example … := …` block in the stub, up to the next decl."""
+    return re.findall(
+        r"(?ms)^[ \t]*example\b.*?"
+        r"(?=^[ \t]*(?:example|theorem|lemma|def|noncomputable|abbrev|structure|end|/-|@\[)\b|\Z)",
+        lean_text)
+
+
+def _example_probes_def(block: str, def_name: str) -> bool:
+    """True iff `block` is a CONCRETE-VALUE probe of `def_name`: an equation whose
+    LHS applies the def and whose RHS is a concrete value (a numeral, NOT the def
+    again), closed by a norm_num/decide/simp-class tactic (never sorry/admit)."""
+    if ":=" not in block:
+        return False
+    stmt, proof = block.split(":=", 1)            # the first := ends the type
+    if def_name not in stmt or "=" not in stmt:
+        return False
+    if re.search(r"\b(sorry|admit)\b", proof) or not _INSTANCE_PROBE_TACTIC_RE.search(proof):
+        return False
+    rhs = stmt.rsplit("=", 1)[1]                   # the asserted value
+    return def_name not in rhs and re.search(r"\d", rhs) is not None
+
+
+def instance_probe_rejection(lean_text: str, def_names: list[str]) -> dict:
+    """Item M gate: reject unless every drafted def has ≥1 concrete-value `example`
+    probing it. Pure-parse (presence + shape); the elaboration that turns a slipped
+    def into a hard error was already run by the battery's daemon check. Returns
+    `{failed, gate: "instance_probe"|None, verdict, tokens: 0}`."""
+    if not def_names:                              # theorem route — nothing to probe
+        return {"failed": False, "gate": None, "verdict": "", "tokens": 0}
+    blocks = _example_blocks(lean_text)
+    missing = [d for d in def_names
+               if not any(_example_probes_def(b, d) for b in blocks)]
+    if missing:
+        return {"failed": True, "gate": "instance_probe", "tokens": 0,
+                "verdict": ("no concrete-instance example for " + ", ".join(missing)
+                            + " — add `example : <def> <small inputs> = <value> := by norm_num`")}
+    return {"failed": False, "gate": None, "verdict": "", "tokens": 0}
+
+
 # --- issue preparation --------------------------------------------------------
 
 _POINTER_RE = re.compile(r"MathFin/[\w/]+\.lean")
@@ -1116,6 +1179,11 @@ _GATE_INSTRUCTIONS = {
                "restatement with no mathematical content. State the SUBSTANTIVE fact "
                "the issue asks for: an identity or inequality between INDEPENDENTLY "
                "defined quantities, not a definition unfolded into itself.",
+    "instance_probe": "A new definition ships no concrete-instance check. For EACH new "
+                      "def add 1-2 `example : <def> <explicit small inputs, e.g. ![1, 2] "
+                      "over Finset (Fin 2)> = <intended value> := by norm_num [<def>]` (or "
+                      "`decide`), the value taken from the issue's semantics — a wrong "
+                      "sign/normalization then fails to elaborate.",
     "vacuous": "The hypotheses are mutually contradictory (`False` is provable from "
                "them), so the theorem is vacuously true. Fix the hypothesis set — "
                "check inequality directions and degenerate parameter values.",
@@ -1181,6 +1249,10 @@ def semantic_verdict(*, lean_text: str, stub: str, name: str, intent: dict, issu
             return {"gate": "indeterminate", "detail": dr.get("verdict", "")}, tokens
         if dr["failed"]:
             return {"gate": dr["gate"], "detail": dr.get("verdict", "")}, tokens
+        ip = instance_probe_rejection(lean_text, def_names or [])
+        tokens += ip["tokens"]
+        if ip["failed"]:                    # item M: each new def needs a concrete probe
+            return {"gate": ip["gate"], "detail": ip.get("verdict", "")}, tokens
     elif depth_gate:
         dep = depth_rejection(lean_text, name, issue.get("pointers", []), check_fn=check_fn)
         tokens += dep["tokens"]

@@ -1139,6 +1139,8 @@ def test_formalize_with_repair_returns_collected_unknowns():
 
 _DEFS_STUB = ("noncomputable def knockInPayoff (hit f : ℝ) : ℝ := hit * f\n\n"
               "noncomputable def knockOutPayoff (hit f : ℝ) : ℝ := (1 - hit) * f\n\n"
+              "example : knockInPayoff 1 5 = 5 := by norm_num [knockInPayoff]\n\n"
+              "example : knockOutPayoff 1 5 = 0 := by norm_num [knockOutPayoff]\n\n"
               "theorem in_out_parity (hit f : ℝ) :\n"
               "    knockInPayoff hit f + knockOutPayoff hit f = f * 1 := by sorry")
 
@@ -1234,6 +1236,90 @@ def test_semantic_verdict_defs_route_swaps_depth_for_defs_gate(monkeypatch):
 def test_render_gate_feedback_covers_defs_gates():
     assert "drafted def" in af.render_gate_feedback("newdef_depth", "", None)
     assert "wrapper" in af.render_gate_feedback("ungrounded", "", None)
+
+
+# --- instance-probe gate (item M): concrete-value examples per new def -------
+
+_PROBE_DEF = ("noncomputable def upCapture {S : Type*} (up : Finset S) (p b : S → ℝ) : ℝ :=\n"
+              "  (∑ s ∈ up, p s) / (∑ s ∈ up, b s)\n\n")
+_PROBE_THM = ("theorem upCapture_scale_invariant {S : Type*} (up : Finset S) (p b : S → ℝ)\n"
+              "    (c : ℝ) (h : (∑ s ∈ up, b s) ≠ 0) :\n"
+              "    upCapture up (fun s => c * p s) b = c * upCapture up p b := by sorry")
+_GOOD_PROBE = ("example : upCapture (Finset.univ : Finset (Fin 2)) ![1, 2] ![3, 4] = 3 / 7 := by\n"
+               "  norm_num [upCapture, Fin.sum_univ_two]\n\n")
+
+
+def test_instance_probe_rejects_missing_probe():
+    r = af.instance_probe_rejection(_PROBE_DEF + _PROBE_THM, ["upCapture"])
+    assert r["failed"] is True and r["gate"] == "instance_probe"
+    assert "upCapture" in r["verdict"]
+
+
+def test_instance_probe_rejects_fake_true_probe():
+    # an example that never mentions the def evaluates nothing about it
+    stub = _PROBE_DEF + "example : True := by trivial\n\n" + _PROBE_THM
+    assert af.instance_probe_rejection(stub, ["upCapture"])["failed"] is True
+
+
+def test_instance_probe_rejects_sorry_probe():
+    stub = (_PROBE_DEF
+            + "example : upCapture (Finset.univ : Finset (Fin 2)) ![1,2] ![3,4] = 3/7 := by sorry\n\n"
+            + _PROBE_THM)
+    assert af.instance_probe_rejection(stub, ["upCapture"])["failed"] is True
+
+
+def test_instance_probe_rejects_tautological_probe():
+    # RHS repeats the def application -> asserts no concrete value
+    taut = "example : upCapture Finset.univ p b = upCapture Finset.univ p b := by norm_num\n\n"
+    assert af.instance_probe_rejection(_PROBE_DEF + taut + _PROBE_THM, ["upCapture"])["failed"] is True
+
+
+def test_instance_probe_passes_concrete_norm_num_probe():
+    r = af.instance_probe_rejection(_PROBE_DEF + _GOOD_PROBE + _PROBE_THM, ["upCapture"])
+    assert r["failed"] is False and r["gate"] is None
+
+
+def test_instance_probe_requires_a_probe_for_every_def():
+    two = (_PROBE_DEF
+           + "noncomputable def downCapture {S : Type*} (dn : Finset S) (p b : S → ℝ) : ℝ :=\n"
+             "  (∑ s ∈ dn, p s) / (∑ s ∈ dn, b s)\n\n"
+           + _GOOD_PROBE            # probes upCapture only
+           + _PROBE_THM)
+    r = af.instance_probe_rejection(two, ["upCapture", "downCapture"])
+    assert r["failed"] is True and "downCapture" in r["verdict"] and "upCapture" not in r["verdict"]
+
+
+def test_instance_probe_no_defs_passes():
+    # theorem route: no new defs -> the gate is a no-op
+    assert af.instance_probe_rejection("theorem t : True := by sorry", [])["failed"] is False
+
+
+def test_render_gate_feedback_covers_instance_probe():
+    fb = af.render_gate_feedback("instance_probe", "no probe for upCapture", None)
+    assert "example" in fb and ("norm_num" in fb or "decide" in fb)
+
+
+def test_intent_defs_addendum_requires_instance_probes():
+    assert "example" in af.INTENT_DEFS_ADDENDUM
+    assert "norm_num" in af.INTENT_DEFS_ADDENDUM or "decide" in af.INTENT_DEFS_ADDENDUM
+
+
+def test_semantic_verdict_defs_route_runs_instance_probe_after_defs(monkeypatch):
+    order = []
+    monkeypatch.setattr(af, "defs_rejection",
+                        lambda lt, nm, dn, **k: order.append("defs") or
+                        {"failed": False, "gate": None, "verdict": "", "tokens": 0})
+    monkeypatch.setattr(af, "instance_probe_rejection",
+                        lambda lt, dn: order.append("instance_probe") or
+                        {"failed": True, "gate": "instance_probe", "verdict": "upCapture", "tokens": 0})
+    monkeypatch.setattr(af, "triviality_rejection",
+                        lambda *a, **k: order.append("triviality") or {"trivial": False, "verdict": "", "tokens": 0})
+    fail, _tok = af.semantic_verdict(
+        lean_text="lt", stub="s", name="t", intent={}, issue={"pointers": []},
+        deferred=[], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
+        gate_budget=100, route="defs", def_names=["upCapture"])
+    assert order == ["defs", "instance_probe"]        # after defs, short-circuits before triviality
+    assert fail == {"gate": "instance_probe", "detail": "upCapture"}
 
 
 def test_emit_target_files_defs_meta_header_and_provenance():
