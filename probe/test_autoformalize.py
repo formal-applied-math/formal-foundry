@@ -18,6 +18,129 @@ def test_autoformalize_config_defaults():
     assert cfg.prover_model == "labs-leanstral-1-5"
 
 
+# --- [drafter] engine switch (item I) ----------------------------------------
+
+def test_drafter_config_defaults_are_todays_behaviour():
+    d = pl.DrafterConfig.load(None)
+    assert d.engine == "mistral"       # default = magistral-intent + leanstral-formalize
+    assert d.mode == "completion"
+    assert d.on_cap == "fallback"
+    assert d.claude_model.startswith("claude-")   # a real model, not the weak CLI default
+
+
+# --- claude -p draft adapter (item I) ----------------------------------------
+
+class _FakeRun:
+    def __init__(self, stdout="", stderr=""):
+        self.stdout, self.stderr = stdout, stderr
+
+
+def test_claude_draft_args_shape():
+    argv, stdin = af._claude_draft_args(
+        [{"role": "system", "content": "SYS"}, {"role": "user", "content": "USR"}],
+        model="claude-sonnet-5")
+    assert argv[:2] == ["claude", "-p"]
+    assert "--output-format" in argv and "json" in argv
+    assert "--allowedTools" in argv                              # tools disabled → pure completion
+    assert argv[argv.index("--model") + 1] == "claude-sonnet-5"
+    assert argv[argv.index("--append-system-prompt") + 1] == "SYS"
+    assert stdin == "USR"                                        # user content on stdin
+
+
+def test_claude_draft_fn_parses_result_and_tokens():
+    j = ('{"is_error": false, "subtype": "success", "result": "INTENT", '
+         '"usage": {"input_tokens": 5, "output_tokens": 7}}')
+    text, tokens = af.claude_draft_fn([{"role": "user", "content": "x"}],
+                                      run_fn=lambda argv, stdin: _FakeRun(stdout=j))
+    assert text == "INTENT" and tokens == 12
+
+
+def test_claude_draft_fn_raises_cap_error_on_usage_limit():
+    j = '{"is_error": true, "subtype": "error", "result": "5-hour usage limit reached"}'
+    try:
+        af.claude_draft_fn([{"role": "user", "content": "x"}],
+                           run_fn=lambda argv, stdin: _FakeRun(stdout=j))
+        raised = False
+    except af.ClaudeCapError:
+        raised = True
+    assert raised is True
+
+
+def test_claude_draft_fn_other_error_is_runtime_not_cap():
+    j = '{"is_error": true, "subtype": "error", "result": "some other failure"}'
+    try:
+        af.claude_draft_fn([{"role": "user", "content": "x"}],
+                           run_fn=lambda argv, stdin: _FakeRun(stdout=j))
+        kind = None
+    except af.ClaudeCapError:
+        kind = "cap"
+    except RuntimeError:
+        kind = "runtime"
+    assert kind == "runtime"
+
+
+def test_refill_uses_intent_fn_for_draft(monkeypatch, tmp_path):
+    # the engine switch routes the DRAFT to intent_fn while the judge keeps reason_fn
+    captured = {}
+
+    def fake_draft(issue, ctx, *, chat_fn, **kw):
+        captured["chat_fn"] = chat_fn
+        return {"ok": False, "reason": "stop after intent", "tokens": 1}
+    monkeypatch.setattr(af, "draft_intent", fake_draft)
+    intent_sentinel = lambda m: ("i", 0)
+    reason_sentinel = lambda m: ("r", 0)
+    af.refill([_issue(9)], reason_fn=reason_sentinel, intent_fn=intent_sentinel,
+              prove_fn=_NOOP, check_fn=_ELAB_OK, context_fn=lambda i: "",
+              queue_dir=str(tmp_path), budget=100000)
+    assert captured["chat_fn"] is intent_sentinel
+
+
+def test_refill_intent_fn_defaults_to_reason_fn(monkeypatch, tmp_path):
+    captured = {}
+
+    def fake_draft(issue, ctx, *, chat_fn, **kw):
+        captured["chat_fn"] = chat_fn
+        return {"ok": False, "reason": "stop", "tokens": 1}
+    monkeypatch.setattr(af, "draft_intent", fake_draft)
+    reason_sentinel = lambda m: ("r", 0)
+    af.refill([_issue(9)], reason_fn=reason_sentinel, prove_fn=_NOOP, check_fn=_ELAB_OK,
+              context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
+    assert captured["chat_fn"] is reason_sentinel   # back-compat: no intent_fn → reason_fn
+
+
+def test_select_draft_fns_mistral_keeps_today():
+    mi, mf = (lambda m: ("i", 0)), (lambda m: ("f", 0))
+    i, f = af.select_draft_fns(pl.DrafterConfig(),
+                               mistral_intent_fn=mi, mistral_formalize_fn=mf)
+    assert i is mi and f is mf
+
+
+def test_select_draft_fns_claude_routes_both_to_adapter(monkeypatch):
+    calls = []
+    monkeypatch.setattr(af, "claude_draft_fn",
+                        lambda msgs, model="": calls.append(model) or ("x", 3))
+    d = pl.DrafterConfig(engine="claude", claude_model="claude-sonnet-5")
+    i, f = af.select_draft_fns(d, mistral_intent_fn=lambda m: ("i", 0),
+                               mistral_formalize_fn=lambda m: ("f", 0))
+    assert i is f                                   # both draft sub-stages use one claude adapter
+    assert i([{"role": "user", "content": "z"}]) == ("x", 3)
+    assert calls == ["claude-sonnet-5"]             # called with the configured model
+
+
+def test_drafter_config_loads_claude_block(tmp_path):
+    p = tmp_path / "pipeline.toml"
+    p.write_text('[drafter]\nengine = "claude"\nmode = "agentic"\non_cap = "defer"\n')
+    d = pl.DrafterConfig.load(str(p))
+    assert d.engine == "claude" and d.mode == "agentic" and d.on_cap == "defer"
+
+
+def test_drafter_config_ignores_unknown_keys(tmp_path):
+    p = tmp_path / "pipeline.toml"
+    p.write_text('[drafter]\nengine = "claude"\nbogus = 1\n')
+    d = pl.DrafterConfig.load(str(p))
+    assert d.engine == "claude" and d.mode == "completion"   # unknown dropped, rest defaulted
+
+
 def test_autoformalize_config_reads_toml(tmp_path):
     toml = tmp_path / "pipeline.toml"
     toml.write_text("[autoformalize]\nenabled = false\nbudget = 123456\nmax_issues = 2\n")

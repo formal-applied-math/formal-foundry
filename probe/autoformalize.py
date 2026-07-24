@@ -27,7 +27,7 @@ import time
 import embed as _embed
 from house_context import build_drafter_prompt, build_system_prompt, extract_signatures
 from issues import difficulty_rank, select_issues
-from pipeline_lib import AutoformalizeConfig
+from pipeline_lib import AutoformalizeConfig, DrafterConfig
 from probe import daemon_check, mistral_chat, run_target
 from probe_lib import DEF_RE, append_jsonl, extract_lean_code, lint_violations
 
@@ -352,6 +352,77 @@ def parse_intent(reply: str) -> dict | None:
     v.setdefault("deferred", [])
     v.setdefault("definitions", [])
     return v
+
+
+# --- the frontier draft engine (item I): a `claude -p` adapter ----------------
+# `claude -p --output-format json` runs a headless completion; with tools DISABLED it
+# is a pure text generator, drop-in for `mistral_chat` (returns (text, tokens)). The
+# DRAFT stage (intent + formalize) routes here when [drafter] engine="claude"; the
+# judge stays magistral and Leanstral still PROVES — the gate battery is drafter-
+# agnostic. Design: docs/superpowers/specs/2026-07-24-frontier-drafter-design.md.
+_CLAUDE_CAP_MARKERS = ("usage limit", "rate limit", "limit reached", "quota", "capacity")
+
+
+class ClaudeCapError(RuntimeError):
+    """The claude.ai subscription hit a usage cap for this window. Per `[drafter]
+    on_cap`, the tick defers the target (requeue, no obstruction) or falls back to the
+    mistral drafter — distinct from a real draft failure."""
+
+
+def _claude_draft_args(messages: list[dict], *, model: str = "") -> tuple[list[str], str]:
+    """Build the `claude -p` argv + stdin from chat `messages`. System messages become
+    `--append-system-prompt`; the user content is the stdin prompt (avoids arg-length
+    limits on big context packs). Tools DISABLED (`--allowedTools ""`) → a pure
+    completion, no file/bash/agentic side effects. Returns (argv, stdin)."""
+    system = "\n\n".join(m["content"] for m in messages if m.get("role") == "system")
+    user = "\n\n".join(m["content"] for m in messages if m.get("role") != "system")
+    argv = ["claude", "-p", "--output-format", "json", "--allowedTools", ""]
+    if model:
+        argv += ["--model", model]
+    if system:
+        argv += ["--append-system-prompt", system]
+    return argv, user
+
+
+def claude_draft_fn(messages: list[dict], *, model: str = "", run_fn=None) -> tuple[str, int]:
+    """A `claude -p` adapter shaped like `mistral_chat`: returns (text, tokens). Used for
+    the DRAFT stage under [drafter] engine="claude". `run_fn(argv, stdin)` is injectable
+    for tests (defaults to `subprocess.run`). Raises `ClaudeCapError` on a subscription
+    cap so the tick can defer / fall back."""
+    if run_fn is None:
+        def run_fn(argv, stdin):
+            return subprocess.run(argv, input=stdin, capture_output=True,
+                                  text=True, timeout=600)
+    argv, stdin = _claude_draft_args(messages, model=model)
+    res = run_fn(argv, stdin)
+    out = (getattr(res, "stdout", "") or "").strip()
+    try:
+        data = json.loads(out)
+    except (ValueError, TypeError):
+        err = (getattr(res, "stderr", "") or out or "")[:400]
+        if any(m in err.lower() for m in _CLAUDE_CAP_MARKERS):
+            raise ClaudeCapError(err)
+        raise RuntimeError(f"claude -p produced no JSON: {err}")
+    if data.get("is_error") or data.get("subtype") != "success":
+        msg = str(data.get("result") or data.get("subtype") or "")
+        if any(m in msg.lower() for m in _CLAUDE_CAP_MARKERS):
+            raise ClaudeCapError(msg)
+        raise RuntimeError(f"claude -p error: {msg[:400]}")
+    usage = data.get("usage") or {}
+    tokens = int(usage.get("input_tokens", 0) or 0) + int(usage.get("output_tokens", 0) or 0)
+    return data.get("result", ""), tokens
+
+
+def select_draft_fns(drafter, *, mistral_intent_fn, mistral_formalize_fn):
+    """Pick the DRAFT-stage (intent_fn, formalize_fn) pair for `[drafter] engine`
+    (item I). engine="mistral" (default) keeps magistral-intent + leanstral-formalize;
+    engine="claude" routes BOTH draft sub-stages to the one `claude -p` adapter. The
+    judge/fidelity (reason_fn) and prove (prove_fn) are chosen elsewhere — untouched."""
+    if getattr(drafter, "engine", "mistral") == "claude":
+        def claude_fn(msgs):
+            return claude_draft_fn(msgs, model=drafter.claude_model)
+        return claude_fn, claude_fn
+    return mistral_intent_fn, mistral_formalize_fn
 
 
 def draft_intent(issue: dict, context_pack: str, *, chat_fn, feedback: str | None = None,
@@ -1327,7 +1398,7 @@ def route_feasibility(intent: dict, pointers: list[str], *, lookup_fn) -> dict:
     return {"feasible": False, "missing": missing, "note": note}
 
 
-def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn,
+def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn, intent_fn=None,
            queue_dir: str, budget: int, max_issues: int = 1,
            max_attempt_issues: int = 3, gate_budget: int = 20_000, formalize_rounds: int = 3,
            formalize_token_budget: int = 40_000, formalize_fn=None, retrieve_fn=None,
@@ -1352,6 +1423,7 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn,
     one `{issue, attempts, outcome: "seeded"|<last gate>|"error", history}` record per
     issue tried, so a zero-seed tick says exactly which gate ate each issue."""
     formalize_fn = formalize_fn or prove_fn
+    intent_fn = intent_fn or reason_fn   # the DRAFT chat_fn ([drafter] engine); judge keeps reason_fn
     seeded, attempted, spent = [], [], 0
     for issue in issues[:max_attempt_issues]:
         if len(seeded) >= max_issues or spent >= budget:
@@ -1370,7 +1442,7 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn,
                     history.append({"attempt": attempt, "gate": "budget",
                                     "detail": f"refill budget exhausted ({spent} >= {budget})"})
                     break
-                di = draft_intent(issue, ctx, chat_fn=reason_fn, feedback=feedback,
+                di = draft_intent(issue, ctx, chat_fn=intent_fn, feedback=feedback,
                                   route=route, prior_unknowns=issue.get("prior_unknowns"))
                 spent += di["tokens"]
                 if not di["ok"]:
@@ -1626,6 +1698,17 @@ def main() -> int:
         return mistral_chat(msgs, api_key=api_key, model=prover_model,
                             reasoning_effort="high")
 
+    # item I — the DRAFT engine switch ([drafter] engine). Mistral (default) keeps
+    # magistral-intent (reason_fn) + leanstral-formalize (formalize_fn); claude routes
+    # BOTH draft sub-stages to the `claude -p` adapter. reason_fn stays the JUDGE and
+    # prove_fn stays PROVE — the gate battery is drafter-agnostic.
+    drafter = DrafterConfig.load(args.config or os.path.join(_foundry_root(), "pipeline.toml"))
+    draft_intent_fn, draft_formalize_fn = select_draft_fns(
+        drafter, mistral_intent_fn=reason_fn, mistral_formalize_fn=formalize_fn)
+    print("[refill] drafter engine=" + drafter.engine
+          + (f" model={drafter.claude_model}" if drafter.engine == "claude" else ""),
+          file=sys.stderr)
+
     def context_fn(issue):
         ptrs = issue.get("pointers", [])
         return extract_signatures(args.main_repo, ptrs) if ptrs else ""
@@ -1659,11 +1742,12 @@ def main() -> int:
         except (OSError, subprocess.SubprocessError):
             return True   # can't check ⇒ fail-open (never block a good target)
 
-    res = refill(issues, reason_fn=reason_fn, prove_fn=prove_fn, check_fn=daemon_check,
+    res = refill(issues, reason_fn=reason_fn, intent_fn=draft_intent_fn, prove_fn=prove_fn,
+                 check_fn=daemon_check,
                  context_fn=context_fn, queue_dir=queue_dir, budget=budget,
                  max_issues=max_issues, max_attempt_issues=max_attempt, gate_budget=gate_budget,
                  formalize_rounds=formalize_rounds, formalize_token_budget=formalize_token_budget,
-                 formalize_fn=formalize_fn, retrieve_fn=retrieve_fn, proactive_fn=proactive_fn,
+                 formalize_fn=draft_formalize_fn, retrieve_fn=retrieve_fn, proactive_fn=proactive_fn,
                  depth_gate=depth_gate, triviality_gate=triviality_gate,
                  semantic_rounds=semantic_rounds, system_prompt=prove_system,
                  derivable_fn=lambda lt: derivable_hypotheses(lt, check_fn=daemon_check),

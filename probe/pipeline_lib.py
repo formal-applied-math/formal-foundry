@@ -129,6 +129,31 @@ class DecomposeConfig:
         return DecomposeConfig(**{k: v for k, v in section.items() if k in fields})
 
 
+@dataclasses.dataclass(frozen=True)
+class DrafterConfig:
+    """Config for the DRAFT-stage engine (the `[drafter]` block, item I). `engine`
+    picks who drafts intent+formalize: "mistral" (default) is today's magistral-intent
+    + leanstral-formalize; "claude" routes both draft sub-stages to a `claude -p`
+    adapter. Leanstral still PROVES and the judge stays magistral either way — the gate
+    battery is drafter-agnostic (the SP1-SP3 payoff). `mode`/`on_cap` matter only for
+    engine="claude". Default = today's cron, byte-identical until flipped.
+    Design: docs/superpowers/specs/2026-07-24-frontier-drafter-design.md."""
+    engine: str = "mistral"       # "mistral" | "claude"
+    mode: str = "completion"      # "completion" | "agentic" (claude only; agentic = phase 2)
+    on_cap: str = "fallback"      # on a subscription cap: "fallback" (mistral this tick) | "defer" (requeue)
+    claude_model: str = "claude-sonnet-5"   # `claude -p --model`; the CLI default (fable) is too weak to draft
+
+    @staticmethod
+    def load(path: str | None) -> "DrafterConfig":
+        if not path or not os.path.isfile(path) or tomllib is None:
+            return DrafterConfig()
+        with open(path, "rb") as f:
+            data = tomllib.load(f)
+        section = data.get("drafter", {})
+        fields = {f.name for f in dataclasses.fields(DrafterConfig)}
+        return DrafterConfig(**{k: v for k, v in section.items() if k in fields})
+
+
 def new_state(now_ym: str = "", now_epoch: int = 0) -> dict:
     return {
         "month": now_ym,
