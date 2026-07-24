@@ -24,6 +24,10 @@ on:
         description: "route the CI-selected target straight to the lemma-DAG decompose path (one-shot)"
         type: boolean
         default: false
+      mtest_only:
+        description: "validate the instance-probe daemon test (item M) on real Lean, then STOP — no tick, no tokens, no PR"
+        type: boolean
+        default: false
 
 permissions:
   contents: write                  # commit state + telemetry back
@@ -149,7 +153,22 @@ jobs:
           python3 probe/wait_daemon.py \
             || { echo "::error::daemon not ready"; docker logs docker-lean-repl-1 2>&1 | tail -60; exit 1; }
 
+      - name: Item M — instance-probe gate on real Lean (daemon warm, pre-tick)
+        # The instance-probe gate's slip-catch depends on Lean/Mathlib behaviour
+        # (`norm_num` evaluating a def against its intended value), so it needs the
+        # daemon — the fast unit lane covers only the gate's parse logic. The daemon
+        # is up + idle here (the tick has not claimed the slot yet), so this runs on
+        # REAL Lean with no extra cold-load and reds the run BEFORE any token spend if
+        # a pin bump regressed the catch. Light `norm_num` probes only (no heavy simp,
+        # which OOM-crashed the REPL on the 10 GB box). `test_instance_probe_daemon.py`
+        # self-skips when 7878 is not serving, so this is a no-op on any daemonless
+        # future runner rather than a false red.
+        run: |
+          python3 -m pip show pytest >/dev/null 2>&1 || python3 -m pip install -q pytest
+          cd probe && python3 -m pytest test_instance_probe_daemon.py -v
+
       - name: Run one pipeline tick (prove → on pass, open the PR)
+        if: ${{ !inputs.mtest_only }}   # mtest_only dispatch validates item M then stops
         env:
           MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
           MAIN_PR_TOKEN: ${{ secrets.MAIN_PR_TOKEN }}
