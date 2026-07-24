@@ -1534,7 +1534,7 @@ def route_feasibility(intent: dict, pointers: list[str], *, lookup_fn) -> dict:
 
 
 def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn, intent_fn=None,
-           agentic_formalize_fn=None,
+           agentic_formalize_fn=None, slot_switch_fn=None,
            queue_dir: str, budget: int, max_issues: int = 1,
            max_attempt_issues: int = 3, gate_budget: int = 20_000, formalize_rounds: int = 3,
            formalize_token_budget: int = 40_000, formalize_fn=None, retrieve_fn=None,
@@ -1613,7 +1613,11 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn, int
 
                 proactive = proactive_fn(intent["statement"]) if proactive_fn else ""
                 if agentic_formalize_fn is not None:     # item I phase 2: claude+lean-lsp session
+                    if slot_switch_fn is not None:
+                        slot_switch_fn("lean-lsp")       # agentic formalize needs the lean-lsp slot
                     fr = agentic_formalize_fn(intent, ctx, issue)
+                    if slot_switch_fn is not None:
+                        slot_switch_fn("daemon")         # flip back — the gate battery needs the daemon
                 else:
                     fr = formalize_with_repair(intent, ctx, issue=issue, chat_fn=formalize_fn,
                                                check_fn=check_fn, emit_fn=emit_target_files,
@@ -1860,11 +1864,18 @@ def main() -> int:
     # have flipped the slot to lean-lsp; check_fn=None here defers the elaboration check to
     # the gate battery (post-flip, on the daemon). Only when engine=claude + mode=agentic.
     agentic_fn = None
+    slot_switch_fn = None
     if drafter.engine == "claude" and drafter.mode == "agentic":
         def agentic_fn(intent, ctx, issue):
             return agentic_formalize(intent, issue=issue, main_repo=args.main_repo,
                                      model=drafter.claude_model, check_fn=None,
                                      log=lambda m: print(f"[agentic] {m}", file=sys.stderr))
+
+        _slot_script = os.path.join(_foundry_root(), "scripts", "slot-switch.sh")
+
+        def slot_switch_fn(slot):        # flip the single Lean slot around the agentic formalize
+            subprocess.run(["bash", _slot_script, slot], check=True,
+                           env={**os.environ, "MAIN_REPO": args.main_repo})
 
     def context_fn(issue):
         ptrs = issue.get("pointers", [])
@@ -1900,7 +1911,7 @@ def main() -> int:
             return True   # can't check ⇒ fail-open (never block a good target)
 
     res = refill(issues, reason_fn=reason_fn, intent_fn=draft_intent_fn, prove_fn=prove_fn,
-                 agentic_formalize_fn=agentic_fn, check_fn=daemon_check,
+                 agentic_formalize_fn=agentic_fn, slot_switch_fn=slot_switch_fn, check_fn=daemon_check,
                  context_fn=context_fn, queue_dir=queue_dir, budget=budget,
                  max_issues=max_issues, max_attempt_issues=max_attempt, gate_budget=gate_budget,
                  formalize_rounds=formalize_rounds, formalize_token_budget=formalize_token_budget,

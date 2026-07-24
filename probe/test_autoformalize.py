@@ -230,6 +230,23 @@ def test_refill_routes_to_agentic_formalize_fn(monkeypatch, tmp_path):
     assert calls["agentic"] >= 1 and calls["completion"] == 0
 
 
+def test_refill_flips_slot_around_agentic_formalize(monkeypatch, tmp_path):
+    # autonomous tick: lean-lsp for the agentic formalize, then flip to the daemon for the gates
+    events = []
+    monkeypatch.setattr(af, "draft_intent", lambda issue, ctx, *, chat_fn, **k:
+                        {"ok": True, "tokens": 1, "unknowns": [],
+                         "intent": {"statement": "s", "module_name": "M", "benchmark_id": "mf-x",
+                                    "docstring": "d"}})
+
+    def agentic_fn(intent, ctx, issue):
+        events.append("formalize")
+        return {"ok": False, "tokens": 0}          # stop after formalize (records a gate fail)
+    af.refill([_issue(9)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
+              context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000, semantic_rounds=1,
+              agentic_formalize_fn=agentic_fn, slot_switch_fn=lambda s: events.append("slot:" + s))
+    assert events[:3] == ["slot:lean-lsp", "formalize", "slot:daemon"]
+
+
 def test_select_draft_fns_mistral_keeps_today():
     mi, mf = (lambda m: ("i", 0)), (lambda m: ("f", 0))
     i, f = af.select_draft_fns(pl.DrafterConfig(),
