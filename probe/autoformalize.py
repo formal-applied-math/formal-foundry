@@ -435,6 +435,32 @@ def select_draft_fns(drafter, *, mistral_intent_fn, mistral_formalize_fn):
     return make(mistral_intent_fn), make(mistral_formalize_fn)
 
 
+# --- item I phase 2: the agentic drafter (claude -p + lean-lsp MCP) ------------
+# When [drafter] mode="agentic", the FORMALIZE stage becomes ONE `claude -p` session
+# wired to the same lean-lsp MCP the vibe harness gives Leanstral: Claude drafts the
+# stub to a scratch file, self-validates against Lean (lean_diagnostics / lean_goal),
+# and iterates until it elaborates — its OWN tool loop instead of the fixed round-based
+# completion repair. Needs the lean-lsp container up + the daemon down (one Lean
+# process; the tick flips the slot). Design: 2026-07-24-frontier-drafter-design.md.
+def _lean_lsp_mcp_config(container: str = "mathfin-lean-lsp", project: str = "/app") -> dict:
+    """The `claude --mcp-config` JSON for the lean-lsp MCP — the SAME server (docker exec,
+    stdio) the vibe harness wires for Leanstral (scripts/vibe-setup.sh)."""
+    return {"mcpServers": {"lean-lsp": {
+        "command": "docker",
+        "args": ["exec", "-i", container, "lean-lsp-mcp", "--lean-project-path", project]}}}
+
+
+def _agentic_formalize_args(mcp_config_path: str, *, model: str = "") -> list[str]:
+    """`claude -p` argv for the agentic formalize session: the lean-lsp MCP (strict — no
+    other MCP) plus the tools to draft a stub file and self-validate it against Lean."""
+    argv = ["claude", "-p", "--output-format", "json",
+            "--mcp-config", mcp_config_path, "--strict-mcp-config",
+            "--allowedTools", "Read,Write,Edit,mcp__lean-lsp"]
+    if model:
+        argv += ["--model", model]
+    return argv
+
+
 def draft_intent(issue: dict, context_pack: str, *, chat_fn, feedback: str | None = None,
                  route: str = "theorem", prior_unknowns: list[str] | None = None) -> dict:
     """Stage 1: magistral SPECIFIES the intended statement (prose + objects + naming meta) from the

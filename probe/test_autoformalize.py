@@ -108,6 +108,25 @@ def test_refill_intent_fn_defaults_to_reason_fn(monkeypatch, tmp_path):
     assert captured["chat_fn"] is reason_sentinel   # back-compat: no intent_fn → reason_fn
 
 
+def test_lean_lsp_mcp_config_targets_the_container():
+    # phase 2: the agentic drafter gets the SAME lean-lsp MCP the vibe harness gives Leanstral
+    c = af._lean_lsp_mcp_config()
+    s = c["mcpServers"]["lean-lsp"]
+    assert s["command"] == "docker"
+    assert "mathfin-lean-lsp" in s["args"] and "lean-lsp-mcp" in s["args"]
+    assert "--lean-project-path" in s["args"] and "/app" in s["args"]
+
+
+def test_agentic_formalize_args_wires_lean_lsp_strict_and_tools():
+    argv = af._agentic_formalize_args("/tmp/mcp.json", model="claude-opus-4-8")
+    assert argv[:2] == ["claude", "-p"]
+    assert "--mcp-config" in argv and "/tmp/mcp.json" in argv
+    assert "--strict-mcp-config" in argv                          # ONLY the lean-lsp MCP
+    assert argv[argv.index("--model") + 1] == "claude-opus-4-8"
+    tools = argv[argv.index("--allowedTools") + 1]
+    assert "lean-lsp" in tools and "Write" in tools               # draft a file + self-validate via lean tools
+
+
 def test_select_draft_fns_mistral_keeps_today():
     mi, mf = (lambda m: ("i", 0)), (lambda m: ("f", 0))
     i, f = af.select_draft_fns(pl.DrafterConfig(),
