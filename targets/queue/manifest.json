@@ -1,7 +1,48 @@
 {
   "toolchain": "leanprover/lean4:v4.31.0",
-  "main_commit": "38e4d1c76cc3ecc8c9b2cc864ffae9022d82b4c9",
+  "main_commit": "0445ae8d6fa1d2dbb05c7274ae5f4a9fb2cfb12d",
   "targets": [
+    {
+      "id": "cal-bk-161",
+      "stream": "backlog",
+      "kind": "prove",
+      "sorry_name": "gainToPain_nonneg_of_denom_pos",
+      "file": "cal-bk-161.lean",
+      "pointers": [
+        "MathFin/Performance/RatiosExtended.lean"
+      ],
+      "input_hash": "66a68bc2b4c3c7ffae8966ddac8b573f570ddbdcc4933ec03b6a2f55e54a4efd",
+      "main_module": "MathFin/Performance/PerformanceRatios.lean",
+      "benchmark": "benchmarks/mathematical_finance.json",
+      "benchmark_id": "mf-performance-gain_to_pain",
+      "source_issue": 161,
+      "benchmark_entry": {
+        "id": "mf-performance-gain_to_pain",
+        "name": "Add the gain-to-pain ratio and prove it is nonnegative",
+        "description": "The gain-to-pain ratio is nonnegative when defined.",
+        "domain": "mathematical_finance",
+        "code": {
+          "lean": "import MathFin.Performance.PerformanceRatios\n\nopen MathFin\n\n/-- The gain-to-pain ratio is nonnegative when defined. -/\ntheorem mf_performance_gain_to_pain {S : Type*} (finset_S : Finset S) (r : S \u2192 \u211d)\n    (h : 0 < \u2211 s \u2208 finset_S, max (-r s) 0) : 0 \u2264 gainToPain S finset_S r :=\n  MathFin.gainToPain_nonneg_of_denom_pos finset_S r h\n"
+        },
+        "metadata": {
+          "chapter": 0,
+          "reference": "Add the gain-to-pain ratio and prove it is nonnegative",
+          "difficulty": "good-first",
+          "formalization_status": "full",
+          "formalization_scope": "Full formal proof in MathFin/Performance/PerformanceRatios.lean (magistral-drafted statement, leanstral proof). Re-export from MathFin. Axioms-clean. Introduces definitions: gainToPain (new-defs review class).",
+          "provenance": {
+            "statement_source": "magistral-autoform",
+            "statement_model": "magistral-medium",
+            "source": "leanstral-autoform",
+            "model": "labs-leanstral-1-5",
+            "issue": 161,
+            "new_defs": [
+              "gainToPain"
+            ]
+          }
+        }
+      }
+    },
     {
       "id": "cal-bk-66",
       "stream": "backlog",

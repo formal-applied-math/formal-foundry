@@ -1,0 +1,1 @@
+{"target": "cal-bk-161", "stream": "backlog", "ts": "2026-07-25T08:52:24", "harness": "vibe", "arm": "cron", "tokens": 0, "trimmed_imports": ["MathFin.Performance.RatiosExtended"], "golfed": true, "outcome": "pass", "axioms_clean": true}
