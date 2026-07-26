@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "mathfin-foundry run record (v1)",
+  "description": "One NORMALIZED telemetry record per (subject x attempt x stage), DERIVED (never authored) from runs/*.jsonl by probe/provenance.py. Grain: a draft record per (issue x refill-history attempt); a prove record per (target x prove-summary). Per-stage fields that the source stream does not carry are null (an honest gap, not a fabrication). One substrate for the obstruction census, the price-sheet decision, and any future meta-review.",
+  "type": "object",
+  "required": ["record_id", "stage", "attempt", "outcome", "ts", "source_file"],
+  "additionalProperties": false,
+  "properties": {
+    "record_id": {"type": "string", "description": "sha256[:16] of the identifying tuple (stage, issue, target, attempt, outcome, gate, ts, source_file); stable across rebuilds and the dedup key"},
+    "stage": {"enum": ["draft", "prove"], "description": "draft = refill (magistral intent + leanstral/claude formalize); prove = vibe/text-loop"},
+    "issue": {"type": ["integer", "null"], "description": "the source-issue number"},
+    "target": {"type": ["string", "null"], "description": "the queue target id, e.g. cal-bk-88"},
+    "attempt": {"type": "integer", "description": "draft = the refill-history attempt index; prove = the prover round count"},
+    "outcome": {"type": "string", "description": "draft = the attempt's gate (or the tick outcome for a no-history seed); prove = the summary outcome"},
+    "gate": {"type": ["string", "null"], "description": "the draft gate this attempt died at; null for prove and for seeds"},
+    "family": {"type": ["string", "null"], "description": "the obstruction family (classify_refill) carried on the draft record; null for prove"},
+    "detail": {"type": ["string", "null"], "description": "free-text rejection detail from the draft history row"},
+    "model": {"type": ["string", "null"], "description": "the prover model (prove summary); null for draft (not recorded per-stage today)"},
+    "tokens": {"type": ["integer", "null"], "description": "tokens for this record; prove summary carries it, draft rows do not (aggregate lives on the tick)"},
+    "arch": {"type": ["string", "null"], "description": "the routing architecture stamp (draft)"},
+    "harness": {"type": ["string", "null"], "description": "the prove harness (vibe / text-loop)"},
+    "arm": {"type": ["string", "null"], "description": "the A/B scoreboard arm (cron / decompose)"},
+    "ts": {"type": "string", "description": "ISO-8601 timestamp from the source record"},
+    "source_file": {"type": "string", "description": "basename of the jsonl this record was derived from"}
+  }
+}
