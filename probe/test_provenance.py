@@ -121,6 +121,29 @@ def test_raw_refill_and_summary_records(tmp_path):
     assert {r["target"] for r in summary} == {"cal-bk-5", "cal-bk-9"}         # every *-summary
 
 
+def test_draft_records_carry_unknowns_and_tick_outcome(tmp_path):
+    # the census reads these off the substrate: unknowns → the unknown-id family, and
+    # tick_outcome distinguishes a seeded tick (excluded) from a failed one.
+    _write(tmp_path, "refill-history.jsonl", [
+        {"issue": 88, "ts": "t", "outcome": "seeded", "history": [
+            {"attempt": 1, "gate": "formalize", "unknown_identifiers": ["MathFin.omega"]}]}])
+    r = [x for x in pv.iter_run_records(str(tmp_path)) if x["stage"] == "draft"][0]
+    assert r["unknowns"] == ["MathFin.omega"]
+    assert r["tick_outcome"] == "seeded"       # the record-level outcome, not the attempt gate
+
+
+def test_build_sqlite_serializes_unknowns_as_json(tmp_path):
+    _write(tmp_path, "refill-history.jsonl", [
+        {"issue": 5, "ts": "t", "outcome": "formalize", "history": [
+            {"attempt": 1, "gate": "formalize", "unknown_identifiers": ["A", "B"]}]}])
+    db = str(tmp_path / "p.db")
+    pv.build_sqlite(str(tmp_path), db)
+    conn = sqlite3.connect(db)
+    (val,) = conn.execute("SELECT unknowns FROM run_record WHERE stage='draft'").fetchone()
+    conn.close()
+    assert json.loads(val) == ["A", "B"]       # list round-trips as JSON text in SQLite
+
+
 def test_ab_rows_ingested_into_the_substrate(tmp_path):
     _write(tmp_path, "ab-decomposer.jsonl", [
         {"target": "cal-bk-99", "arm": "decompose", "outcome": "pass",

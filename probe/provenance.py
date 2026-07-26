@@ -30,9 +30,10 @@ _SCHEMA_PATH = os.path.join(os.path.dirname(_HERE), "schema", "run_record.v1.jso
 
 # the normalized record shape (order is the SQLite column order too)
 _FIELDS = ["record_id", "stage", "issue", "target", "attempt", "outcome", "gate",
-           "family", "detail", "model", "tokens", "arch", "harness", "arm", "ts",
-           "source_file"]
+           "family", "detail", "tick_outcome", "unknowns", "model", "tokens", "arch",
+           "harness", "arm", "ts", "source_file"]
 _INT_FIELDS = {"issue", "attempt", "tokens"}
+_JSON_FIELDS = {"unknowns"}   # list-valued → stored as JSON text in SQLite
 # the identifying tuple the content hash is taken over (arm distinguishes A/B rows for the
 # same target/ts so two arms never collide onto one id)
 _ID_KEYS = ["stage", "issue", "target", "attempt", "outcome", "gate", "arm", "ts", "source_file"]
@@ -119,20 +120,22 @@ def _draft_records(history_path: str) -> Iterator[dict]:
             continue
         issue = int(rec["issue"])
         base = {"stage": "draft", "issue": issue, "target": f"cal-bk-{issue}",
-                "family": rec.get("family"), "arch": rec.get("arch"), "model": None,
-                "tokens": None, "harness": None, "arm": None, "ts": rec.get("ts", ""),
-                "source_file": source}
+                "family": rec.get("family"), "tick_outcome": rec.get("outcome", ""),
+                "arch": rec.get("arch"), "model": None, "tokens": None, "harness": None,
+                "arm": None, "ts": rec.get("ts", ""), "source_file": source}
         hist = rec.get("history") or []
         if not hist:
             # a no-history record (a seed on attempt 1, or a pre-attempt defer) — keep the
             # tick-level outcome so the seed is not lost from the substrate
             yield _finish({**base, "attempt": int(rec.get("attempts") or 1),
-                           "outcome": rec.get("outcome", ""), "gate": None, "detail": None})
+                           "outcome": rec.get("outcome", ""), "gate": None, "detail": None,
+                           "unknowns": []})
             continue
         for row in hist:
             yield _finish({**base, "attempt": int(row.get("attempt") or 0),
                            "outcome": row.get("gate", ""), "gate": row.get("gate"),
-                           "detail": row.get("detail")})
+                           "detail": row.get("detail"),
+                           "unknowns": row.get("unknown_identifiers") or []})
 
 
 def _prove_records(runs_dir: str) -> Iterator[dict]:
@@ -145,7 +148,8 @@ def _prove_records(runs_dir: str) -> Iterator[dict]:
             yield _finish({"stage": "prove", "issue": _target_to_issue(target),
                            "target": target, "attempt": int(rec.get("rounds") or 1),
                            "outcome": rec.get("outcome", ""), "gate": None, "family": None,
-                           "detail": None, "model": rec.get("model"),
+                           "detail": None, "tick_outcome": rec.get("outcome", ""),
+                           "unknowns": [], "model": rec.get("model"),
                            "tokens": rec.get("tokens"), "arch": None,
                            "harness": rec.get("harness"), "arm": rec.get("arm"),
                            "ts": rec.get("ts", ""), "source_file": source})
@@ -163,6 +167,7 @@ def _ab_records(runs_dir: str) -> Iterator[dict]:
         yield _finish({"stage": "prove", "issue": _target_to_issue(target),
                        "target": target, "attempt": 1, "outcome": rec.get("outcome", ""),
                        "gate": None, "family": None, "detail": rec.get("note") or None,
+                       "tick_outcome": rec.get("outcome", ""), "unknowns": [],
                        "model": None, "tokens": rec.get("tokens"), "arch": None,
                        "harness": None, "arm": rec.get("arm"), "ts": rec.get("ts", ""),
                        "source_file": source})
@@ -190,7 +195,8 @@ def build_sqlite(runs_dir: str, db_path: str) -> int:
         conn.executemany(
             f"INSERT OR REPLACE INTO run_record ({','.join(_FIELDS)}) "
             f"VALUES ({','.join('?' * len(_FIELDS))})",
-            [[r.get(f) for f in _FIELDS] for r in records])
+            [[json.dumps(r.get(f) or []) if f in _JSON_FIELDS else r.get(f)
+              for f in _FIELDS] for r in records])
         conn.commit()
         return conn.execute("SELECT COUNT(*) FROM run_record").fetchone()[0]
     finally:

@@ -15,6 +15,8 @@
     "gate": {"type": ["string", "null"], "description": "the draft gate this attempt died at; null for prove and for seeds"},
     "family": {"type": ["string", "null"], "description": "the obstruction family (classify_refill) carried on the draft record; null for prove"},
     "detail": {"type": ["string", "null"], "description": "free-text rejection detail from the draft history row"},
+    "tick_outcome": {"type": ["string", "null"], "description": "the record-level (whole-tick) outcome — distinguishes a seeded tick from a failed attempt; the census excludes seeded ticks by this"},
+    "unknowns": {"type": "array", "items": {"type": "string"}, "description": "unknown identifiers the drafter guessed at this attempt (drives the unknown-id-despite-retrieval census family); [] when none; stored as JSON text in the SQLite view"},
     "model": {"type": ["string", "null"], "description": "the prover model (prove summary); null for draft (not recorded per-stage today)"},
     "tokens": {"type": ["integer", "null"], "description": "tokens for this record; prove summary carries it, draft rows do not (aggregate lives on the tick)"},
     "arch": {"type": ["string", "null"], "description": "the routing architecture stamp (draft)"},

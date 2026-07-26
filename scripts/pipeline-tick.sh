@@ -223,9 +223,9 @@ fi
 #    report rides the runs/ telemetry the persist step pushes.
 python3 - "$FOUNDRY/runs" >&2 <<'PY' || echo "[tick] obstruction triage skipped" >&2
 import sys
-from obstructions import bucket_obstructions, load_rows, render_report
+from obstructions import census, render_report
 runs = sys.argv[1]
-buckets = bucket_obstructions(*load_rows(runs))
+buckets = census(runs)   # computed off the provenance substrate (deep wiring)
 with open(runs + "/obstructions-report.md", "w", encoding="utf-8") as f:
     f.write(render_report(buckets))
 top = max(buckets.items(), key=lambda kv: kv[1]["count"])
