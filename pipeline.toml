@@ -74,6 +74,12 @@ semantic_rounds = 2
 triviality_gate = true     # splice `first | rfl | simp` over the sorry at draft time: a clean
                            # close means a definitional restatement with no content (the
                            # cal-bk-67 class, caught before prove-compute instead of at open-pr)
+gate_cache = true          # item L: content-address the adversarial gate goals (vacuity/disproof)
+                           # and substitute the cached verdict on a hit — 0 tokens, no daemon
+                           # call — across attempts + ticks (the persist step commits runs/, so
+                           # runs/gate-cache.json survives run to run). safe: a refutation is
+                           # deterministic (the statement pin blocks a reverted-goal false
+                           # positive); CACHE_GENERATION invalidates on a Mathlib/Lean pin bump.
 
 # Lemma-DAG decomposition (Phase 2 — docs/superpowers/specs/2026-07-18-decomposer-design.md).
 # The general reasoner (Magistral) SPLITS a hard target into a few named leaf lemmas + a
