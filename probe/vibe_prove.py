@@ -143,6 +143,10 @@ def _cmd_gate(args) -> int:
     for target, _root in _iter_targets(args.manifest, args.only):
         cand_path = os.path.join(run_dir, f"{args.run_tag}-{target['id']}.candidate")
         candidate = read_back(cand_path)
+        # item J: the ORIGINAL stub statement, to pin the accepted proof to what was asked
+        # (the prover is told not to touch the statement/binders; this enforces it). None
+        # if the scratch stub is gone — the pin then fails open to the kernel bar.
+        stub = read_back(os.path.join(_root, target["file"]))
         summary = {"target": target["id"], "stream": target.get("stream", ""),
                    "ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "harness": "vibe",
                    "arm": getattr(args, "arm", "cron"), "tokens": 0}
@@ -151,7 +155,7 @@ def _cmd_gate(args) -> int:
         elif "sorry" in candidate:
             summary["outcome"] = "max_rounds"      # vibe ran but didn't close it → record, move on
         else:
-            g = run_gate(candidate, target["sorry_name"], check_fn=daemon_check)
+            g = run_gate(candidate, target["sorry_name"], check_fn=daemon_check, statement=stub)
             if g["passed"]:
                 # strengthen: drop hypotheses the proof never used (elaborator
                 # warnings), re-gate; fail-open keeps the proved original. The

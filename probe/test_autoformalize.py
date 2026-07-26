@@ -1414,6 +1414,127 @@ def test_load_prior_unknowns_unions_across_records(tmp_path):
     assert u.get(9, []) == []
 
 
+# --- statement-integrity pin: _probed_signature (item J) ---------------------
+
+def test_probed_signature_captures_binders_and_conclusion():
+    text = "import Mathlib\ntheorem foo (h : p) : q := by sorry"
+    assert af._probed_signature(text, "foo") == "(h : p) : q"
+
+
+def test_probed_signature_none_when_name_absent():
+    assert af._probed_signature("theorem foo : q := by sorry", "bar") is None
+
+
+def test_probed_signature_selects_the_named_theorem_past_helpers():
+    # a helper lemma precedes the target — the pin must locate the NAMED one
+    text = ("lemma helper : True := trivial\n"
+            "theorem foo (h : p) : q := by sorry")
+    assert af._probed_signature(text, "foo") == "(h : p) : q"
+
+
+def test_probed_signature_is_whitespace_normalized():
+    a = "theorem foo (h : p) : q := by sorry"
+    b = "theorem foo    (h : p)  :   q := h"
+    assert af._probed_signature(a, "foo") == af._probed_signature(b, "foo")
+
+
+# --- cross-tick lessons-learned + diversity injection (item K) ----------------
+
+def test_load_prior_lessons_summarizes_latest_failed_record(tmp_path):
+    A = af.ROUTING_ARCH
+    p = tmp_path / "h.jsonl"
+    p.write_text(
+        f'{{"issue": 88, "outcome": "formalize", "arch": "{A}", '
+        f'"history": [{{"gate": "intent"}}, {{"gate": "formalize", "detail": "no elaborating Lean"}}]}}\n'
+        f'{{"issue": 88, "outcome": "unfaithful", "arch": "{A}", '
+        f'"history": [{{"gate": "unfaithful", "detail": "inequality direction wrong"}}]}}\n')
+    lessons = af.load_prior_lessons(str(p))
+    assert 88 in lessons
+    L = lessons[88]
+    assert L["family"] == "fidelity"                 # latest record's family
+    assert L["last_gate"] == "unfaithful"
+    assert L["last_detail"] == "inequality direction wrong"
+    assert L["gates_tried"] == ["unfaithful"]        # from the latest record's history
+    assert L["prior_ticks"] == 2                      # two failed ticks counted
+
+
+def test_load_prior_lessons_skips_wins_and_non_verdicts_and_foreign_arch(tmp_path):
+    A = af.ROUTING_ARCH
+    p = tmp_path / "h.jsonl"
+    p.write_text(
+        f'{{"issue": 1, "outcome": "seeded", "arch": "{A}", "history": []}}\n'      # a win
+        f'{{"issue": 2, "outcome": "indeterminate", "arch": "{A}", "history": [{{"gate": "indeterminate"}}]}}\n'
+        '{"issue": 3, "outcome": "depth", "arch": "routing-v0-old", "history": [{"gate": "depth"}]}\n'
+        'not-json\n')
+    lessons = af.load_prior_lessons(str(p))
+    assert lessons == {}                               # nothing substantive to learn from
+    assert af.load_prior_lessons(str(tmp_path / "absent.jsonl")) == {}
+
+
+def test_load_prior_lessons_seeded_clears_a_stale_lesson(tmp_path):
+    A = af.ROUTING_ARCH
+    p = tmp_path / "h.jsonl"
+    p.write_text(
+        f'{{"issue": 5, "outcome": "depth", "arch": "{A}", "history": [{{"gate": "depth"}}]}}\n'
+        f'{{"issue": 5, "outcome": "seeded", "arch": "{A}", "history": []}}\n')
+    assert af.load_prior_lessons(str(p)) == {}         # a later win retires the lesson
+
+
+def test_render_prior_lessons_cites_failures_and_rotates_diversity():
+    base = {"family": "fidelity", "last_gate": "unfaithful",
+            "last_detail": "inequality direction wrong",
+            "gates_tried": ["formalize", "unfaithful"]}
+    note0 = af.render_prior_lessons({**base, "prior_ticks": 3})   # 3 % 3 == 0
+    note1 = af.render_prior_lessons({**base, "prior_ticks": 1})   # 1 % 3 == 1
+    for note in (note0, note1):
+        assert "fidelity" in note
+        assert "unfaithful" in note
+        assert "inequality direction wrong" in note
+    assert note0 != note1                              # the diversity nudge rotated
+
+
+def test_intent_messages_carry_prior_lessons():
+    user = af.intent_messages(_ISSUE, "SIGS", prior_lessons="PRIOR-NOTE")[1]["content"]
+    assert "PRIOR-NOTE" in user
+
+
+def test_intent_messages_no_prior_lessons_by_default():
+    assert "PRIOR-NOTE" not in af.intent_messages(_ISSUE, "SIGS")[1]["content"]
+
+
+def test_draft_intent_threads_prior_lessons_to_chat():
+    seen = {}
+
+    def chat(msgs):
+        seen["user"] = msgs[1]["content"]
+        return ('{"statement": "s", "module_name": "M", "benchmark_id": "b"}', 7)
+    af.draft_intent(_ISSUE, "", chat_fn=chat, prior_lessons="LESSON-Z")
+    assert "LESSON-Z" in seen["user"]
+
+
+def test_refill_injects_prior_lessons_into_the_intent_prompt(monkeypatch, tmp_path):
+    # the real draft_intent runs (not the _two_stage_ok stand-in) so the cross-tick
+    # lesson threads intent → intent_messages → the drafter chat_fn.
+    monkeypatch.setattr(af, "formalize_with_repair", _good_formalize)
+    _pass_gates(monkeypatch)
+    seen = {}
+
+    def intent_fn(msgs):
+        seen["user"] = msgs[1]["content"]
+        return ('{"statement": "s", "module_name": "M", "benchmark_id": "b"}', 5)
+
+    issue = _issue(7, prior_lessons={
+        "family": "fidelity", "last_gate": "unfaithful",
+        "last_detail": "inequality direction wrong",
+        "gates_tried": ["formalize", "unfaithful"], "prior_ticks": 1})
+    res = af.refill([issue], reason_fn=intent_fn, intent_fn=intent_fn, prove_fn=_NOOP,
+                    check_fn=_ELAB_OK, context_fn=lambda i: "", queue_dir=str(tmp_path),
+                    budget=100000)
+    assert [s["issue"] for s in res["seeded"]] == [7]
+    assert "PRIOR ATTEMPTS" in seen["user"]
+    assert "fidelity" in seen["user"]
+
+
 def test_unknown_identifiers_match_live_elaborator_format():
     # the VERBATIM error from the 2026-07-17 live run — capital U + backticks.
     # the old regex (lowercase + straight quotes) never matched it, so the

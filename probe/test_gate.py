@@ -73,3 +73,55 @@ def test_gate_rejects_axiom_dirty():
     assert r["passed"] is False
     assert r["reason"] == "axiom_dirty"
     assert r["axioms_clean"] is False
+
+
+# --- statement-integrity pin (item J) ----------------------------------------
+# The kernel bar accepts whatever FILE the prover returns. A prover that (against
+# instruction) weakens the theorem to something trivially provable would pass every
+# check above. When the ORIGINAL stub `statement` is supplied, the accepted candidate
+# must still assert the SAME signature (binders + conclusion) for `sorry_name`.
+
+_STUB = "import Mathlib\ntheorem t (h : p) : q := by sorry"
+_OK = lambda c: {"success": True, "sorry_count": 0, "errors": []}
+
+
+def test_gate_statement_pin_passes_when_signature_preserved():
+    proved = "import Mathlib\ntheorem t (h : p) : q := h"   # same signature, real proof
+    r = gate.gate(proved, "t", check_fn=_OK, statement=_STUB)
+    assert r["passed"] is True
+    assert r["reason"] == "ok"
+
+
+def test_gate_statement_pin_rejects_weakened_conclusion():
+    weak = "import Mathlib\ntheorem t (h : p) : True := trivial"   # q → True
+    r = gate.gate(weak, "t", check_fn=_OK, statement=_STUB)
+    assert r["passed"] is False
+    assert r["reason"] == "statement_altered"
+
+
+def test_gate_statement_pin_rejects_dropped_binder():
+    dropped = "import Mathlib\ntheorem t : q := hq"   # (h : p) removed
+    r = gate.gate(dropped, "t", check_fn=_OK, statement=_STUB)
+    assert r["passed"] is False
+    assert r["reason"] == "statement_altered"
+
+
+def test_gate_statement_pin_rejects_rename():
+    renamed = "import Mathlib\ntheorem s (h : p) : q := h"   # not `t` anymore
+    r = gate.gate(renamed, "s", check_fn=_OK, statement=_STUB)
+    assert r["passed"] is False
+    assert r["reason"] == "statement_altered"
+
+
+def test_gate_statement_pin_is_whitespace_insensitive():
+    reflowed = "import Mathlib\ntheorem t   (h : p)  :  q := h"   # same sig, extra spaces
+    r = gate.gate(reflowed, "t", check_fn=_OK, statement=_STUB)
+    assert r["passed"] is True
+
+
+def test_gate_no_statement_pin_by_default():
+    # backward-compat: without `statement`, the raw kernel bar (no pin) is unchanged —
+    # the strengthen/trim/golf re-gates rely on this (they DELIBERATELY alter binders).
+    weak = "import Mathlib\ntheorem t (h : p) : True := trivial"
+    r = gate.gate(weak, "t", check_fn=_OK)
+    assert r["passed"] is True

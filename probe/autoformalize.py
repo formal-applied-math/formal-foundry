@@ -310,7 +310,8 @@ def _drafter_system(base: str) -> str:
 
 def intent_messages(issue: dict, context_pack: str, feedback: str | None = None,
                     route: str = "theorem",
-                    prior_unknowns: list[str] | None = None) -> list[dict]:
+                    prior_unknowns: list[str] | None = None,
+                    prior_lessons: str | None = None) -> list[dict]:
     user = f"ISSUE #{issue.get('number')}: {_issue_prose(issue)}\n"
     if context_pack:
         user += "\nAvailable declarations you may reference:\n" + context_pack
@@ -319,6 +320,8 @@ def intent_messages(issue: dict, context_pack: str, feedback: str | None = None,
         if prior_unknowns:
             user += ("\nPrior attempts guessed these MISSING declarations — define "
                      "equivalents where sensible: " + ", ".join(prior_unknowns))
+    if prior_lessons:   # item K: what earlier TICKS tried + a rotating diversity nudge
+        user += "\n\n" + prior_lessons
     if feedback:
         user += ("\n\n" + feedback
                  + "\nProduce a REVISED intent that fixes this; respond with the same JSON shape.")
@@ -561,14 +564,17 @@ def agentic_formalize(intent: dict, *, issue: dict, main_repo: str, check_fn=Non
 
 
 def draft_intent(issue: dict, context_pack: str, *, chat_fn, feedback: str | None = None,
-                 route: str = "theorem", prior_unknowns: list[str] | None = None) -> dict:
+                 route: str = "theorem", prior_unknowns: list[str] | None = None,
+                 prior_lessons: str | None = None) -> dict:
     """Stage 1: magistral SPECIFIES the intended statement (prose + objects + naming meta) from the
     issue. No Lean. `feedback` (a `render_gate_feedback` block from a rejected previous attempt)
     turns this into a REVISION round; `route="defs"` adds the new-definitions contract, with
-    `prior_unknowns` (declarations earlier drafts guessed at) as hints. Returns
+    `prior_unknowns` (declarations earlier drafts guessed at) as hints. `prior_lessons` (item K)
+    is a cross-TICK post-mortem + diversity nudge from failed prior ticks. Returns
     `{ok, intent, tokens}`."""
     content, tokens = chat_fn(intent_messages(issue, context_pack, feedback,
-                                              route=route, prior_unknowns=prior_unknowns))
+                                              route=route, prior_unknowns=prior_unknowns,
+                                              prior_lessons=prior_lessons))
     intent = parse_intent(content)
     reason = None if intent is not None else intent_reject_reason(content)
     return {"ok": intent is not None, "intent": intent, "tokens": tokens, "reason": reason}
@@ -885,6 +891,26 @@ def _probed_conclusion(text: str, name: str) -> str | None:
     return " ".join(sub[sep + 1:end].split())
 
 
+def _probed_signature(text: str, name: str) -> str | None:
+    """The whitespace-normalized SIGNATURE — binders through conclusion — of the
+    theorem/lemma named `name` in `text`, or None if it is absent or unparseable.
+    The statement-integrity pin (item J): the accepted proof must still assert THIS,
+    so a prover that (against instruction) weakened a binder or the conclusion to
+    something trivially provable is caught. Broader than `_probed_conclusion`, which
+    guards only the vacuity/disproof probes' conclusion swap."""
+    m = re.search(
+        rf"(?m)^\s*(?:@\[[^\]]*\]\s*)?(?:theorem|lemma)\s+{re.escape(name)}(?![\w'.])",
+        text)
+    if not m:
+        return None
+    sub = text[m.start():]
+    try:
+        _n, bstart, _sep, end = _locate(sub)
+    except ValueError:
+        return None
+    return " ".join(sub[bstart:end].split())
+
+
 def _try_prove(goal: str, sorry_name: str, *, chat_fn, check_fn, budget: int,
                fanout: int = _GATE_FANOUT, rounds: int = _GATE_ROUNDS,
                system_prompt=None) -> tuple[bool, int]:
@@ -1155,6 +1181,80 @@ def load_prior_unknowns(history_path: str) -> dict[int, list[str]]:
     except OSError:
         pass
     return out
+
+
+# --- cross-tick lessons + diversity injection (item K) ------------------------
+# The Nexus episode-discipline half missing here: refill-history records outcomes,
+# but each cross-TICK retry re-drafts nearly blind. load_prior_lessons compresses a
+# failed issue's latest record into a post-mortem the next tick's intent prompt cites,
+# rotating a diversity instruction so successive ticks steer AWAY from what failed.
+
+# What a fresh tick should try INSTEAD (rotated off the prior-tick count). Nexus's
+# stochastic-injection set: new approach / decompose / recombine.
+_DIVERSITY = (
+    "Try a COMPLETELY DIFFERENT formalization than the prior attempts — do not restate them.",
+    "DECOMPOSE the goal: state the core fact as its own lemma and build the target from it.",
+    "COMBINE the soundest parts of the prior attempts into one cleaner statement.",
+)
+
+# non-verdict families: nothing to LEARN from (a win, a budget cutoff, or retryable infra)
+_LESSON_SKIP = {"seeded", "budget", "infra", "infra_indeterminate"}
+
+
+def load_prior_lessons(history_path: str) -> dict[int, dict]:
+    """Issue → a compressed CROSS-TICK post-mortem from its latest current-architecture
+    refill record: `{family, last_gate, last_detail, gates_tried, prior_ticks}`. The next
+    tick's intent prompt cites it (an informed retry, not a blind one) and rotates a
+    diversity nudge off `prior_ticks` (item K). Records whose family is a non-verdict
+    (`_LESSON_SKIP` — a win / budget cutoff / retryable infra) yield no lesson and RETIRE
+    a stale one for that issue. Foreign-architecture records are ignored, like the
+    families; absent/junk-tolerant."""
+    out: dict[int, dict] = {}
+    ticks: dict[int, int] = {}
+    try:
+        with open(history_path, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(rec, dict) or rec.get("issue") is None \
+                        or rec.get("arch") != ROUTING_ARCH:
+                    continue
+                iss = int(rec["issue"])
+                fam = classify_refill(rec)
+                if fam in _LESSON_SKIP:
+                    out.pop(iss, None)        # a later win/non-verdict retires the lesson
+                    ticks.pop(iss, None)
+                    continue
+                ticks[iss] = ticks.get(iss, 0) + 1
+                hist = rec.get("history", []) or []
+                gates: list[str] = []
+                for row in hist:
+                    g = row.get("gate")
+                    if g and g not in gates:
+                        gates.append(g)
+                last = hist[-1] if hist else {}
+                out[iss] = {"family": fam, "last_gate": last.get("gate", ""),
+                            "last_detail": (last.get("detail") or "")[:200],
+                            "gates_tried": gates, "prior_ticks": ticks[iss]}
+    except OSError:
+        pass
+    return out
+
+
+def render_prior_lessons(lesson: dict) -> str:
+    """A compact PRIOR-ATTEMPTS note for the drafter's intent prompt: what failed across
+    ticks + a rotating diversity nudge (item K). Turns a blind cross-tick retry into an
+    informed one."""
+    div = _DIVERSITY[lesson.get("prior_ticks", 0) % len(_DIVERSITY)]
+    gates = ", ".join(lesson.get("gates_tried") or []) or "?"
+    parts = [f"PRIOR ATTEMPTS on this issue failed (family: {lesson.get('family', '?')}; "
+             f"gates hit: {gates})."]
+    if lesson.get("last_detail"):
+        parts.append(f"Last rejection ({lesson.get('last_gate', '?')}): {lesson['last_detail']}.")
+    parts.append("Do NOT repeat those. " + div)
+    return " ".join(parts)
 
 
 def route_for(issue: dict, *, def_count: int, family: str | None) -> str:
@@ -1566,6 +1666,11 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn, int
             break
         n = issue.get("number")
         route = issue.get("route", "theorem")
+        # item K: a cross-tick post-mortem + rotating diversity nudge from failed prior
+        # ticks (attached in main() from refill-history). Rendered once; rides every
+        # attempt's intent prompt alongside this tick's own intra-tick `feedback`.
+        _lesson = issue.get("prior_lessons")
+        lesson_note = render_prior_lessons(_lesson) if _lesson else None
         history, feedback, staged = [], None, False
         tele = {"advised_bundle": False, "lint_repaired": 0, "retrieval_backend": None}  # H11
         # A transient error on ONE issue (e.g. an HTTP 429 that exhausts retries,
@@ -1579,7 +1684,8 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn, int
                                     "detail": f"refill budget exhausted ({spent} >= {budget})"})
                     break
                 di = draft_intent(issue, ctx, chat_fn=intent_fn, feedback=feedback,
-                                  route=route, prior_unknowns=issue.get("prior_unknowns"))
+                                  route=route, prior_unknowns=issue.get("prior_unknowns"),
+                                  prior_lessons=lesson_note)
                 spent += di["tokens"]
                 if not di["ok"]:
                     fail = {"gate": "intent",
@@ -1824,11 +1930,13 @@ def main() -> int:
     hist_path = os.path.join(_foundry_root(), "runs", "refill-history.jsonl")
     families = load_refill_families(hist_path)
     prior_unknowns = load_prior_unknowns(hist_path)
+    prior_lessons = load_prior_lessons(hist_path)   # item K: cross-tick post-mortems
     for i in issues:
         i["def_count"] = count_pointer_defs(args.main_repo, i.get("pointers", []))
         i["family"] = families.get(i["number"])
         i["route"] = resolve_route(args.route, i, def_count=i["def_count"], family=i["family"])
         i["prior_unknowns"] = prior_unknowns.get(i["number"], [])
+        i["prior_lessons"] = prior_lessons.get(i["number"])
     issues = order_by_route(issues)
     print(f"[refill] routes: " + ", ".join(f"#{i['number']}→{i['route']}" for i in issues[:8]),
           file=sys.stderr)
