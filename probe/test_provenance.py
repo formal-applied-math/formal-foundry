@@ -99,3 +99,34 @@ def test_tolerates_junk_and_absent(tmp_path):
         encoding="utf-8")
     assert [r["issue"] for r in pv.iter_run_records(str(tmp_path))] == [7]
     assert pv.iter_run_records(str(tmp_path / "nope")) == []   # absent dir → empty, no raise
+
+
+# --- the shared substrate I/O the consumers wire onto -------------------------
+
+def test_read_jsonl_is_tolerant_and_absent_safe(tmp_path):
+    p = tmp_path / "x.jsonl"
+    p.write_text('{"a": 1}\n\nnot-json\n{"a": 2}\n', encoding="utf-8")
+    assert pv.read_jsonl(str(p)) == [{"a": 1}, {"a": 2}]   # blank + junk skipped
+    assert pv.read_jsonl(str(tmp_path / "absent.jsonl")) == []
+
+
+def test_raw_refill_and_summary_records(tmp_path):
+    _write(tmp_path, "refill-history.jsonl", [
+        {"issue": 5, "outcome": "depth", "history": [{"attempt": 1, "gate": "depth"}]}])
+    _write(tmp_path, "pipeline-a-summary.jsonl", [{"target": "cal-bk-5", "outcome": "pass"}])
+    _write(tmp_path, "pipeline-b-summary.jsonl", [{"target": "cal-bk-9", "outcome": "max_rounds"}])
+    refill = pv.raw_refill_records(str(tmp_path))
+    summary = pv.raw_summary_records(str(tmp_path))
+    assert len(refill) == 1 and refill[0]["history"][0]["gate"] == "depth"   # RECORD-level, intact
+    assert {r["target"] for r in summary} == {"cal-bk-5", "cal-bk-9"}         # every *-summary
+
+
+def test_ab_rows_ingested_into_the_substrate(tmp_path):
+    _write(tmp_path, "ab-decomposer.jsonl", [
+        {"target": "cal-bk-99", "arm": "decompose", "outcome": "pass",
+         "tokens": 120000, "ts": "2026-07-18T00:00:00"}])
+    recs = [r for r in pv.iter_run_records(str(tmp_path)) if r["source_file"] == "ab-decomposer.jsonl"]
+    assert len(recs) == 1
+    r = recs[0]
+    assert r["stage"] == "prove" and r["target"] == "cal-bk-99"
+    assert r["arm"] == "decompose" and r["tokens"] == 120000 and r["issue"] == 99

@@ -11,9 +11,9 @@ the human doc is docs/research/ab-decomposer.md.
 
 from __future__ import annotations
 
-import json
 import os
 
+import provenance
 from probe_lib import append_jsonl
 
 ARMS = ("cron", "decompose")
@@ -60,11 +60,7 @@ def render_scoreboard(rows) -> str:
 def update_scoreboard_md(md_path: str, runs_dir: str) -> None:
     """Rewrite the table between the SCOREBOARD markers in `md_path` from the jsonl log —
     the per-tick refresh. No-op (leaves the doc untouched) if the markers are absent."""
-    try:
-        rows = [json.loads(line) for line in open(os.path.join(runs_dir, "ab-decomposer.jsonl"))
-                if line.strip()]
-    except OSError:
-        rows = []
+    rows = provenance.read_jsonl(os.path.join(runs_dir, "ab-decomposer.jsonl"))
     text = open(md_path, encoding="utf-8").read()
     if _START not in text or _END not in text:
         return

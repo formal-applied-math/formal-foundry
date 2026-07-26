@@ -49,3 +49,20 @@ def test_render_report_has_families_and_trend():
 def test_load_rows_missing_dir_is_empty(tmp_path):
     refill, summary = load_rows(str(tmp_path))   # nothing there
     assert refill == [] and summary == []
+
+
+def test_load_rows_reads_record_level_rows_via_provenance(tmp_path):
+    # load_rows now sources its raw records from the provenance substrate, but keeps the
+    # RECORD grain (full history) that the record-level family classifier needs.
+    import json
+    (tmp_path / "refill-history.jsonl").write_text(
+        json.dumps({"issue": 53, "outcome": "formalize",
+                    "history": [{"attempt": 1, "gate": "depth"},
+                                {"attempt": 2, "gate": "formalize"}]}) + "\n", encoding="utf-8")
+    (tmp_path / "pipeline-x-summary.jsonl").write_text(
+        json.dumps({"target": "cal-bk-80", "outcome": "max_rounds"}) + "\n", encoding="utf-8")
+    refill, summary = load_rows(str(tmp_path))
+    assert len(refill) == 1 and len(refill[0]["history"]) == 2   # whole history preserved
+    b = bucket_obstructions(refill, summary)
+    assert b["depth-gate"]["count"] == 1        # depth-anywhere precedence still works
+    assert b["prover-max-rounds"]["count"] == 1

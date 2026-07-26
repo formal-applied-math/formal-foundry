@@ -11,10 +11,9 @@ Stdlib only; no Lean, no API, no network — pure aggregation over run artifacts
 
 from __future__ import annotations
 
-import glob
-import json
-import os
 from collections import defaultdict
+
+import provenance
 
 # The six standing families: draft-side (unknown-id / depth / undraftable),
 # prove-side (max-rounds), verdict (gate-fail), and infra (indeterminate).
@@ -81,30 +80,12 @@ def bucket_obstructions(refill_rows: list[dict], summary_rows: list[dict]) -> di
     return {f: {"count": b["count"], "issues": dict(b["issues"])} for f, b in buckets.items()}
 
 
-def _read_jsonl(path: str) -> list[dict]:
-    out: list[dict] = []
-    try:
-        with open(path, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    out.append(json.loads(line))
-                except json.JSONDecodeError:
-                    pass
-    except OSError:
-        pass
-    return out
-
-
 def load_rows(runs_dir: str) -> tuple[list[dict], list[dict]]:
-    """Read `refill-history.jsonl` + every `*-summary.jsonl` under `runs_dir`."""
-    refill = _read_jsonl(os.path.join(runs_dir, "refill-history.jsonl"))
-    summary: list[dict] = []
-    for p in sorted(glob.glob(os.path.join(runs_dir, "*-summary.jsonl"))):
-        summary += _read_jsonl(p)
-    return refill, summary
+    """The RAW `refill-history.jsonl` records + every `*-summary.jsonl` row, read through
+    the provenance substrate (the single jsonl reader + file discovery). Record grain is
+    preserved — the family classifier above needs each tick's whole history."""
+    return (provenance.raw_refill_records(runs_dir),
+            provenance.raw_summary_records(runs_dir))
 
 
 def _trend(cur: int, prev: int | None) -> str:

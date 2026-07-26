@@ -33,8 +33,9 @@ _FIELDS = ["record_id", "stage", "issue", "target", "attempt", "outcome", "gate"
            "family", "detail", "model", "tokens", "arch", "harness", "arm", "ts",
            "source_file"]
 _INT_FIELDS = {"issue", "attempt", "tokens"}
-# the identifying tuple the content hash is taken over
-_ID_KEYS = ["stage", "issue", "target", "attempt", "outcome", "gate", "ts", "source_file"]
+# the identifying tuple the content hash is taken over (arm distinguishes A/B rows for the
+# same target/ts so two arms never collide onto one id)
+_ID_KEYS = ["stage", "issue", "target", "attempt", "outcome", "gate", "arm", "ts", "source_file"]
 
 
 def load_schema() -> dict:
@@ -77,6 +78,33 @@ def _read_jsonl(path: str) -> Iterator[dict]:
         return
 
 
+# --- the shared substrate I/O (the single reader the consumers wire onto) ------
+
+def read_jsonl(path: str) -> list[dict]:
+    """Tolerant jsonl read (blank + junk lines skipped, absent file → []). The one reader
+    obstructions/scoreboard go through, so file-discovery and parse-tolerance live here."""
+    return list(_read_jsonl(path))
+
+
+def summary_paths(runs_dir: str) -> list[str]:
+    """Every prover `*-summary.jsonl` under `runs_dir`, sorted (the single glob)."""
+    return sorted(glob.glob(os.path.join(runs_dir, "*-summary.jsonl")))
+
+
+def raw_refill_records(runs_dir: str) -> list[dict]:
+    """The RAW `refill-history.jsonl` records (record grain, full history intact) — for
+    consumers whose classification needs the whole tick record, not the per-attempt view."""
+    return read_jsonl(os.path.join(runs_dir, "refill-history.jsonl"))
+
+
+def raw_summary_records(runs_dir: str) -> list[dict]:
+    """The RAW prover summary rows across every `*-summary.jsonl`."""
+    out: list[dict] = []
+    for p in summary_paths(runs_dir):
+        out.extend(read_jsonl(p))
+    return out
+
+
 def _target_to_issue(target: str | None) -> int | None:
     if not target:
         return None
@@ -108,7 +136,7 @@ def _draft_records(history_path: str) -> Iterator[dict]:
 
 
 def _prove_records(runs_dir: str) -> Iterator[dict]:
-    for path in sorted(glob.glob(os.path.join(runs_dir, "pipeline-*-summary.jsonl"))):
+    for path in summary_paths(runs_dir):
         source = os.path.basename(path)
         for rec in _read_jsonl(path):
             target = rec.get("target")
@@ -123,11 +151,29 @@ def _prove_records(runs_dir: str) -> Iterator[dict]:
                            "ts": rec.get("ts", ""), "source_file": source})
 
 
+def _ab_records(runs_dir: str) -> Iterator[dict]:
+    """The A/B decomposer log (`ab-decomposer.jsonl`) as prove records — the price-sheet
+    decision's arm outcomes join the one substrate (leaves/refinery_minutes stay in the
+    scoreboard's own log; they are outside the run-record shape)."""
+    source = "ab-decomposer.jsonl"
+    for rec in _read_jsonl(os.path.join(runs_dir, source)):
+        target = rec.get("target")
+        if not target:
+            continue
+        yield _finish({"stage": "prove", "issue": _target_to_issue(target),
+                       "target": target, "attempt": 1, "outcome": rec.get("outcome", ""),
+                       "gate": None, "family": None, "detail": rec.get("note") or None,
+                       "model": None, "tokens": rec.get("tokens"), "arch": None,
+                       "harness": None, "arm": rec.get("arm"), "ts": rec.get("ts", ""),
+                       "source_file": source})
+
+
 def iter_run_records(runs_dir: str) -> list[dict]:
-    """All normalized run records under `runs_dir` (draft + prove), schema-conformant and
-    content-addressed. An absent directory yields an empty list."""
+    """All normalized run records under `runs_dir` (draft + prove, prove including the A/B
+    arm log), schema-conformant and content-addressed. An absent directory yields []."""
     out: list[dict] = list(_draft_records(os.path.join(runs_dir, "refill-history.jsonl")))
     out.extend(_prove_records(runs_dir))
+    out.extend(_ab_records(runs_dir))
     return out
 
 

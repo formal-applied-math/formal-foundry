@@ -37,3 +37,15 @@ def test_update_scoreboard_md_replaces_between_markers(tmp_path):
     update_scoreboard_md(str(md), str(tmp_path))
     out = md.read_text(encoding="utf-8")
     assert "old" not in out and "footer" in out and "| cron |" in out
+
+
+def test_update_scoreboard_md_tolerates_a_junk_log_line(tmp_path):
+    # reading the log now goes through provenance.read_jsonl (tolerant) — a truncated /
+    # junk line no longer crashes the per-tick scoreboard refresh.
+    md = tmp_path / "ab-decomposer.md"
+    md.write_text("<!-- SCOREBOARD:START -->\n<!-- SCOREBOARD:END -->\n", encoding="utf-8")
+    (tmp_path / "ab-decomposer.jsonl").write_text(
+        '{"target": "a", "arm": "cron", "outcome": "pass", "ts": "t1"}\nhalf-written{\n',
+        encoding="utf-8")
+    update_scoreboard_md(str(md), str(tmp_path))          # must not raise
+    assert "| cron |" in md.read_text(encoding="utf-8")
