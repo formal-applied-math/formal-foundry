@@ -95,6 +95,10 @@ class AutoformalizeConfig:
     # `first | rfl | simp` over the sorry at draft time (the cal-bk-67 rfl class).
     semantic_rounds: int = 2
     triviality_gate: bool = True
+    # item L: content-address the adversarial gate goals (vacuity/disproof) and substitute
+    # the cached verdict on a hit, across attempts + ticks. Off by default (the census is
+    # not yet volume-bound); enable once the queue is large enough to pay back.
+    gate_cache: bool = False
 
     @staticmethod
     def load(path: str | None) -> "AutoformalizeConfig":

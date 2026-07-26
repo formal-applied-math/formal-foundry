@@ -1414,6 +1414,48 @@ def test_load_prior_unknowns_unions_across_records(tmp_path):
     assert u.get(9, []) == []
 
 
+# --- adversarial-gate goal cache (item L) ------------------------------------
+
+def test_try_prove_returns_cached_verdict_without_running(tmp_path):
+    import gate_cache as gc
+    c = gc.GateCache(str(tmp_path / "c.json"))
+    c.put("GOAL", True)                          # pre-seeded refutation
+    calls = []
+    proved, tokens = af._try_prove(
+        "GOAL", "t", chat_fn=lambda m: ("x", 5),
+        check_fn=lambda code: calls.append(code) or {"success": True, "sorry_count": 0, "errors": []},
+        budget=100, cache=c)
+    assert proved is True and tokens == 0        # substituted — no new spend
+    assert calls == []                           # the daemon/prover were never touched
+
+
+def test_try_prove_stores_verdict_on_miss(monkeypatch, tmp_path):
+    import gate_cache as gc
+    c = gc.GateCache(str(tmp_path / "c.json"))
+    monkeypatch.setattr(af, "run_target", lambda target, **k: {"outcome": "max_rounds", "tokens": 7})
+    goal = "theorem g : False := by sorry"
+    proved, tokens = af._try_prove(goal, "g", chat_fn=lambda m: ("", 0),
+                                   check_fn=lambda code: {}, budget=100, cache=c)
+    assert proved is False and tokens == 7
+    assert c.get(goal) is False                  # verdict cached
+    # a repeat now hits the cache — run_target must not run again
+    monkeypatch.setattr(af, "run_target",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("re-ran a cached goal")))
+    assert af._try_prove(goal, "g", chat_fn=lambda m: ("", 0),
+                         check_fn=lambda code: {}, budget=100, cache=c) == (False, 0)
+
+
+def test_try_prove_without_cache_is_unchanged(monkeypatch):
+    # default cache=None → the existing behaviour, no caching
+    monkeypatch.setattr(af, "run_target", lambda target, **k: {"outcome": "max_rounds", "tokens": 3})
+    assert af._try_prove("g", "g", chat_fn=lambda m: ("", 0),
+                         check_fn=lambda c: {}, budget=100) == (False, 3)
+
+
+def test_autoformalize_config_gate_cache_defaults_off():
+    assert pl.AutoformalizeConfig.load(None).gate_cache is False
+
+
 # --- statement-integrity pin: _probed_signature (item J) ---------------------
 
 def test_probed_signature_captures_binders_and_conclusion():

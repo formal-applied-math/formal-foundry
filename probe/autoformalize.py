@@ -28,6 +28,7 @@ import embed as _embed
 from house_context import build_drafter_prompt, build_system_prompt, extract_signatures
 from issues import difficulty_rank, select_issues
 from pipeline_lib import AutoformalizeConfig, DrafterConfig
+from gate_cache import GateCache
 from probe import daemon_check, mistral_chat, run_target
 from probe_lib import DEF_RE, append_jsonl, extract_lean_code, lint_violations
 
@@ -913,48 +914,58 @@ def _probed_signature(text: str, name: str) -> str | None:
 
 def _try_prove(goal: str, sorry_name: str, *, chat_fn, check_fn, budget: int,
                fanout: int = _GATE_FANOUT, rounds: int = _GATE_ROUNDS,
-               system_prompt=None) -> tuple[bool, int]:
+               system_prompt=None, cache=None) -> tuple[bool, int]:
     """Short pass@k attempt to prove `goal`. Returns `(proved, tokens)` — `proved`
     is True only on an axioms-clean success (run_target's `pass`) whose winning
     candidate still asserts the PROBED conclusion. `rounds` bounds both the sampling
-    rounds and the compiler-feedback repairs (`rounds - 1`)."""
+    rounds and the compiler-feedback repairs (`rounds - 1`). With a `cache` (item L),
+    a previously-seen goal returns its stored verdict for 0 tokens (a refutation is
+    deterministic, so substituting it is safe within a toolchain generation)."""
+    if cache is not None:
+        hit = cache.get(goal)
+        if hit is not None:
+            return hit, 0
     target = {"id": "gate", "stream": "gate", "statement": goal, "sorry_name": sorry_name}
     res = run_target(target, budget=budget, max_rounds=rounds, chat_fn=chat_fn,
                      check_fn=check_fn, log_fn=lambda r: None, system_prompt=system_prompt,
                      fanout=fanout, repair_rounds=max(0, rounds - 1))
     if res["outcome"] != "pass":
-        return False, res["tokens"]
-    # Statement-fidelity guard. run_target checks whatever FILE the prover returns,
-    # with no pin on the statement — so an adversarial prover (vacuity: prove `False`;
-    # disproof: prove `¬C`) that cannot close the probed conclusion instead REVERTS it
-    # to the provable original and "passes". That false verdict deterministically kills
-    # easy TRUE targets (caught on cal-bk-161: `0 ≤ gainToPain` reverted from `False`).
-    # Count the pass only when the winning candidate still asserts the probed conclusion.
-    want = _probed_conclusion(goal, sorry_name)
-    got = _probed_conclusion(target.get("_winning_candidate", ""), sorry_name)
-    return (want is not None and got == want), res["tokens"]
+        proved = False
+    else:
+        # Statement-fidelity guard. run_target checks whatever FILE the prover returns,
+        # with no pin on the statement — so an adversarial prover (vacuity: prove `False`;
+        # disproof: prove `¬C`) that cannot close the probed conclusion instead REVERTS it
+        # to the provable original and "passes". That false verdict deterministically kills
+        # easy TRUE targets (caught on cal-bk-161: `0 ≤ gainToPain` reverted from `False`).
+        # Count the pass only when the winning candidate still asserts the probed conclusion.
+        want = _probed_conclusion(goal, sorry_name)
+        got = _probed_conclusion(target.get("_winning_candidate", ""), sorry_name)
+        proved = (want is not None and got == want)
+    if cache is not None:
+        cache.put(goal, proved)
+    return proved, res["tokens"]
 
 
 def hypothesis_rejection(lean_text: str, sorry_name: str, *, chat_fn, check_fn,
                          budget: int, fanout: int = _GATE_FANOUT, rounds: int = _GATE_ROUNDS,
-                         system_prompt=None) -> dict:
+                         system_prompt=None, cache=None) -> dict:
     """Try to prove `⊢ False` from the stub's hypotheses. A clean proof ⇒ the
     hypotheses are contradictory ⇒ the theorem is vacuously true. Returns
     `{vacuous, tokens}`."""
     proved, tokens = _try_prove(vacuity_goal(lean_text), sorry_name, chat_fn=chat_fn,
                                 check_fn=check_fn, budget=budget, fanout=fanout, rounds=rounds,
-                                system_prompt=system_prompt)
+                                system_prompt=system_prompt, cache=cache)
     return {"vacuous": proved, "tokens": tokens}
 
 
 def disproof(lean_text: str, sorry_name: str, *, chat_fn, check_fn,
              budget: int, fanout: int = _GATE_FANOUT, rounds: int = _GATE_ROUNDS,
-             system_prompt=None) -> dict:
+             system_prompt=None, cache=None) -> dict:
     """Try to prove `⊢ ¬ Concl` under the stub's hypotheses. A clean proof ⇒ the
     statement is false as written. Returns `{false, tokens}`."""
     proved, tokens = _try_prove(disproof_goal(lean_text), sorry_name, chat_fn=chat_fn,
                                 check_fn=check_fn, budget=budget, fanout=fanout, rounds=rounds,
-                                system_prompt=system_prompt)
+                                system_prompt=system_prompt, cache=cache)
     return {"false": proved, "tokens": tokens}
 
 
@@ -1538,7 +1549,7 @@ def semantic_verdict(*, lean_text: str, stub: str, name: str, intent: dict, issu
                      deferred: list[str], reason_fn, prove_fn, check_fn, gate_budget: int,
                      depth_gate: bool = True, triviality_gate: bool = True,
                      route: str = "theorem", def_names: list[str] | None = None,
-                     system_prompt=None) -> tuple[dict | None, int]:
+                     system_prompt=None, cache=None) -> tuple[dict | None, int]:
     """Run the semantic gate battery on an ELABORATING draft, cheapest-first:
     depth (theorem route) / defs consumption+grounding (defs route) → triviality
     (structural, zero tokens) → hypothesis-rejection → disproof (kernel,
@@ -1574,12 +1585,12 @@ def semantic_verdict(*, lean_text: str, stub: str, name: str, intent: dict, issu
         if triv["trivial"]:
             return {"gate": "trivial", "detail": triv.get("verdict", "")}, tokens
     vac = hypothesis_rejection(lean_text, name, chat_fn=prove_fn, check_fn=check_fn,
-                               budget=gate_budget, system_prompt=system_prompt)
+                               budget=gate_budget, system_prompt=system_prompt, cache=cache)
     tokens += vac["tokens"]
     if vac["vacuous"]:
         return {"gate": "vacuous", "detail": "False is provable from the hypotheses"}, tokens
     dis = disproof(lean_text, name, chat_fn=prove_fn, check_fn=check_fn,
-                   budget=gate_budget, system_prompt=system_prompt)
+                   budget=gate_budget, system_prompt=system_prompt, cache=cache)
     tokens += dis["tokens"]
     if dis["false"]:
         return {"gate": "false", "detail": "the negated conclusion was proved"}, tokens
@@ -1640,7 +1651,7 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn, int
            formalize_token_budget: int = 40_000, formalize_fn=None, retrieve_fn=None,
            proactive_fn=None, depth_gate: bool = True, triviality_gate: bool = True,
            semantic_rounds: int = 2, derivable_fn=None, system_prompt=None,
-           feasibility_fn=None, log=lambda m: None) -> dict:
+           feasibility_fn=None, gate_cache=None, log=lambda m: None) -> dict:
     """Draft + gate + stage up to `max_issues` targets from `issues`.
 
     For each candidate (up to `max_attempt_issues`): intent (magistral `reason_fn`
@@ -1760,7 +1771,7 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn, int
                     check_fn=check_fn, gate_budget=gate_budget, depth_gate=depth_gate,
                     triviality_gate=triviality_gate, route=route,
                     def_names=drafted_def_names(stub) if route == "defs" else None,
-                    system_prompt=system_prompt)
+                    system_prompt=system_prompt, cache=gate_cache)
                 spent += gate_tokens
                 if fail is None:
                     paths = _write_target(queue_dir, n, lean_text, entry)
@@ -2018,6 +2029,13 @@ def main() -> int:
         except (OSError, subprocess.SubprocessError):
             return True   # can't check ⇒ fail-open (never block a good target)
 
+    # item L: the adversarial-gate goal cache (opt-in via [autoformalize].gate_cache).
+    # vacuity/disproof verdicts are content-addressed + reused across attempts and ticks.
+    gate_cache = (GateCache(os.path.join(_foundry_root(), "runs", "gate-cache.json"))
+                  if cfg.gate_cache else None)
+    if gate_cache is not None:
+        print("[refill] gate cache ON", file=sys.stderr)
+
     res = refill(issues, reason_fn=reason_fn, intent_fn=draft_intent_fn, prove_fn=prove_fn,
                  agentic_formalize_fn=agentic_fn, slot_switch_fn=slot_switch_fn, check_fn=daemon_check,
                  context_fn=context_fn, queue_dir=queue_dir, budget=budget,
@@ -2027,8 +2045,10 @@ def main() -> int:
                  depth_gate=depth_gate, triviality_gate=triviality_gate,
                  semantic_rounds=semantic_rounds, system_prompt=prove_system,
                  derivable_fn=lambda lt: derivable_hypotheses(lt, check_fn=daemon_check),
-                 feasibility_fn=feasibility_fn,
+                 feasibility_fn=feasibility_fn, gate_cache=gate_cache,
                  log=lambda m: print(f"[refill] {m}", file=sys.stderr))
+    if gate_cache is not None:
+        print(f"[refill] gate cache stats: {gate_cache.stats}", file=sys.stderr)
 
     # obstruction telemetry: one row per issue tried, so a zero-seed tick says which
     # gate ate each issue and whether feedback moved the draft between rounds
