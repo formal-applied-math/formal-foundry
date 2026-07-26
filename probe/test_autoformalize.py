@@ -1414,6 +1414,34 @@ def test_load_prior_unknowns_unions_across_records(tmp_path):
     assert u.get(9, []) == []
 
 
+# --- prose-slop screen wiring (item SP4) -------------------------------------
+
+def test_intent_system_carries_the_terse_docstring_register():
+    assert "no marketing" in af.INTENT_SYSTEM
+    assert "do not sell it" in af.INTENT_SYSTEM.lower()
+
+
+def test_refill_records_docstring_prose_slop_in_telemetry(monkeypatch, tmp_path):
+    def slop_intent(i, ctx, *, chat_fn, feedback=None, **kw):
+        return {"ok": True, "tokens": 1, "intent": {
+            "statement": "s", "objects": [], "module_name": "M", "benchmark_id": "b",
+            "docstring": "A powerful, cutting-edge tool.", "deferred": []}}
+    monkeypatch.setattr(af, "draft_intent", slop_intent)
+    monkeypatch.setattr(af, "formalize_with_repair", _good_formalize)
+    _pass_gates(monkeypatch)
+    res = af.refill([_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
+                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
+    assert res["attempted"][0]["telemetry"]["prose_slop"] >= 2   # powerful + cutting-edge
+
+
+def test_refill_clean_docstring_has_zero_prose_slop(monkeypatch, tmp_path):
+    _two_stage_ok(monkeypatch)          # _good_intent → docstring "d" (clean)
+    _pass_gates(monkeypatch)
+    res = af.refill([_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
+                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
+    assert res["attempted"][0]["telemetry"]["prose_slop"] == 0
+
+
 # --- adversarial-gate goal cache (item L) ------------------------------------
 
 def test_try_prove_returns_cached_verdict_without_running(tmp_path):

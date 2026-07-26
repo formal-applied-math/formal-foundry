@@ -30,6 +30,7 @@ from issues import difficulty_rank, select_issues
 from pipeline_lib import AutoformalizeConfig, DrafterConfig
 from gate_cache import GateCache
 from probe import daemon_check, mistral_chat, run_target
+from prose_slop import prose_slop_report
 from probe_lib import DEF_RE, append_jsonl, extract_lean_code, lint_violations
 
 # theorem/lemma decl, line-anchored so prose "theorem ..." in a docstring never
@@ -224,7 +225,10 @@ INTENT_SYSTEM = (
     '"benchmark_id": "mf-<area>-<slug>", "docstring": "<one line>", "deferred": ["<fact left out>", ...]}. '
     "`deferred` is [] when the statement covers the whole issue; when you specify a faithful SUBSET, "
     "list the omitted facts (each a short phrase) so they become follow-up issues. Never weaken or "
-    "silently drop a fact you state."
+    "silently drop a fact you state. "
+    "The `docstring` is ONE terse line stating WHAT is defined or proved — house register: no "
+    "marketing words (powerful/seamless/cutting-edge), no signpost openers (moreover/furthermore/"
+    "it is worth noting), no vacuous \"plays a role\" filler. State it; do not sell it."
 )
 
 FORMALIZE_SYSTEM = (
@@ -1683,7 +1687,8 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn, int
         _lesson = issue.get("prior_lessons")
         lesson_note = render_prior_lessons(_lesson) if _lesson else None
         history, feedback, staged = [], None, False
-        tele = {"advised_bundle": False, "lint_repaired": 0, "retrieval_backend": None}  # H11
+        tele = {"advised_bundle": False, "lint_repaired": 0, "retrieval_backend": None,
+                "prose_slop": 0}  # H11; prose_slop (SP4): AI-slop markers in the drafted docstring
         # A transient error on ONE issue (e.g. an HTTP 429 that exhausts retries,
         # a daemon hiccup, a malformed draft) must not kill the tick — log it and
         # move to the next candidate.
@@ -1706,6 +1711,10 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn, int
                     feedback = render_gate_feedback(fail["gate"], fail["detail"], None)
                     continue
                 intent = di["intent"]
+                ps = prose_slop_report(intent.get("docstring") or "")   # SP4: surface docstring slop
+                tele["prose_slop"] = ps["count"]
+                if ps["count"]:
+                    log(f"#{n}: docstring prose-slop {ps['flags']} (attempt {attempt})")
                 if route == "defs" and not (intent.get("definitions") or []):
                     fail = {"gate": "intent",
                             "detail": "defs route: the intent must name 1-3 new definitions"}
