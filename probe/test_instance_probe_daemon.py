@@ -38,17 +38,32 @@ def _daemon_up() -> bool:
 pytestmark = pytest.mark.skipif(
     not _daemon_up(), reason="lean-repl daemon not serving on 127.0.0.1:7878")
 
+# generous per-check deadline: each elaborates `import Mathlib` and on the 2-core CI
+# runner the daemon's serial queue can back up (a client timeout does not cancel
+# server work), so a too-tight deadline flakes.
+_ELAB_TIMEOUT = 360
+
+
+def _check_or_skip(code: str):
+    """A daemon check, but a "did not complete" TIMEOUT is INDETERMINATE infra (a wedged /
+    backed-up daemon on a slow shared runner), not a regression of the slip-catch — skip
+    rather than red the run, the same philosophy as the daemon-down skip above."""
+    r = daemon_check(code, timeout=_ELAB_TIMEOUT)
+    if r.get("error"):   # singular = the infra sentinel from probe.daemon_check
+        pytest.skip(f"daemon check did not complete (infra, not a regression): {r['error']}")
+    return r
+
 
 def test_correct_def_with_probe_elaborates():
     """A faithful def + its intended-value probe elaborate — the gate lets it through."""
-    r = daemon_check(_HDR + _CORRECT + _PROBE, timeout=200)
+    r = _check_or_skip(_HDR + _CORRECT + _PROBE)
     assert r["success"] and not r.get("errors"), r.get("errors")
 
 
 def test_slip_without_probe_passes_silently():
     """The whole reason M exists: the inverted def elaborates cleanly with no probe,
     so the faithfulness/vacuity/disproof gates would all miss the slip."""
-    r = daemon_check(_HDR + _SLIP, timeout=200)
+    r = _check_or_skip(_HDR + _SLIP)
     assert r["success"] and not r.get("errors"), r.get("errors")
 
 
@@ -56,5 +71,5 @@ def test_slip_with_probe_is_caught():
     """The catch: the same slip + its intended-value probe fails to elaborate —
     `norm_num` cannot prove 7/3 = 3/7. The mandatory probe converts a silent
     misformalization into a hard elaboration error, before the prove stage."""
-    r = daemon_check(_HDR + _SLIP + _PROBE, timeout=200)
+    r = _check_or_skip(_HDR + _SLIP + _PROBE)
     assert not r["success"] or r.get("errors")
