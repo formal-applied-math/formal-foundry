@@ -157,7 +157,11 @@ def main() -> int:
     d.add_argument("--main-repo", required=True)
     d.add_argument("--config", default=None)
     d.add_argument("--model", default="magistral-medium-latest")
-    d.add_argument("--reasoning-effort", default="high")
+    # magistral reasons natively and the Mistral API REJECTS an explicit reasoning_effort
+    # for it ("reasoning_effort is not enabled for this model" → HTTP 400, which errored the
+    # decompose escalation on the first hard target that reached it). Default off; "high" is
+    # only valid for a leanstral-class --model.
+    d.add_argument("--reasoning-effort", default="")
     r = sub.add_parser("recompose", parents=[common])
     r.add_argument("--queue", default=None)   # unused; kept for a uniform call shape
     args = ap.parse_args()
