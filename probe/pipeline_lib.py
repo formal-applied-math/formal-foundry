@@ -60,7 +60,7 @@ class PipelineConfig:
 class AutoformalizeConfig:
     """Config for the issue->stub refill phase (the `[autoformalize]` block).
 
-    The tick runs `refill` when the queue has no unattempted target: magistral
+    The tick runs `refill` when the queue has no unattempted target: claude
     drafts+judges+roundtrips a stub from the next ready issue, leanstral gates it.
     `enabled=false` reverts the pipeline to a hand-seeded queue.
     """
@@ -74,10 +74,8 @@ class AutoformalizeConfig:
     # no def from its `-- pointers:` MathFin modules (a Mathlib identity in domain
     # clothing). `false` disables it (rely on the kernel/judge gates + human merge).
     depth_gate: bool = True
-    formalize_rounds: int = 3   # claude completion-formalize + compiler-feedback repair rounds
-    retrieval: bool = True      # loogle-augmented repair on `unknown identifier X`
-    formalize_token_budget: int = 40_000   # early-abort a doomed formalization (a hard issue
-                                           # like #61 else burns ~77k/draw grinding all rounds)
+    formalize_rounds: int = 3   # round-count cited in the formalize-miss telemetry (agentic self-iterates)
+    retrieval: bool = True      # feed embedding-retrieved premises into the agentic drafter prompt
     # embedding premise retrieval (pin-accurate types.jsonl) with loogle fallback.
     retrieval_backend: str = "embedding"   # "embedding" | "loogle"
     retrieval_k: int = 8                    # top-k premises surfaced per query

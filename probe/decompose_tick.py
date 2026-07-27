@@ -4,14 +4,14 @@
 loop; this module owns the python/daemon/API steps around them, as two functions the shell
 calls between flips:
 
-  draft     — Magistral splits the hard target into a lemma-DAG; the skeleton gate accepts
+  draft     — Claude splits the hard target into a lemma-DAG; the skeleton gate accepts
               or rejects the split (one bounded re-decompose on failure) BEFORE any leaf
               gets proving budget; on pass, write the DAG + a per-leaf manifest.
   recompose — assemble the proved leaves + the main into one module and run the FULL gate;
               on pass write the candidate open-pr reads, else bank partial + declare remainder.
 
 `do_draft`/`do_recompose` take injected `chat_fn`/`check_fn`, so the file wiring is
-unit-testable with no API, daemon, or docker. The CLI wires the real Magistral + daemon.
+unit-testable with no API, daemon, or docker. The CLI wires the real Claude + daemon.
 """
 
 from __future__ import annotations
@@ -100,7 +100,7 @@ def do_recompose(tid, tag, runs_dir, *, check_fn) -> dict:
     return {"outcome": "fail_gate", "reason": r["reason"], **base}
 
 
-# --- CLI: wire the real Magistral + daemon around the shell's flips -----------
+# --- CLI: wire the real Claude + daemon around the shell's flips --------------
 
 def _read_target(queue_path, tid):
     q = json.load(open(queue_path))

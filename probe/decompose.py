@@ -1,10 +1,10 @@
 """Lemma-DAG decomposition (Phase 2 of the autoformalization upgrade plan).
 
-A hard target the plain draft->prove path can't close is split by the general
-reasoner (Magistral) into a DAG of named leaf lemmas plus a main theorem that
-applies them. This module is the SCHEMA layer: it validates that DAG (shape,
-size, cycles, dangling deps) BEFORE any prover budget is spent — the first of the
-Lean-side gates that make a mid-tier reasoner safe inside a verified protocol.
+A hard target the plain draft->prove path can't close is split by Claude into a DAG
+of named leaf lemmas plus a main theorem that applies them. This module is the
+SCHEMA layer: it validates that DAG (shape, size, cycles, dangling deps) BEFORE any
+prover budget is spent — the first of the Lean-side gates that keep a hard split
+honest before any leaf gets proving budget.
 
 Design of record: docs/superpowers/specs/2026-07-18-decomposer-design.md.
 Stdlib only; no Lean, no API, no network.
@@ -222,8 +222,8 @@ def dag_to_dict(dag: Dag) -> dict:
 def draft_decomposition(target: str, context_pack: str, *, chat_fn,
                         system_preamble: str = "", feedback: str | None = None,
                         max_reask: int = 1, max_leaves: int | None = None) -> dict:
-    """Stage: the general reasoner (Magistral) SPLITS a hard target into a validated
-    lemma-DAG. A malformed/invalid reply ⇒ up to `max_reask` re-ask rounds (feedback =
+    """Stage: Claude SPLITS a hard target into a validated lemma-DAG. A malformed/invalid
+    reply ⇒ up to `max_reask` re-ask rounds (feedback =
     the `DagError`), then a structured failure — never an infinite loop. `feedback` seeds
     the FIRST message (the skeleton-gate re-decompose round passes the elaboration errors
     here). Engine is the injected `chat_fn`. Returns `{ok, dag, tokens, error}`."""

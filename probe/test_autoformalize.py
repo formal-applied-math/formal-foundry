@@ -434,11 +434,10 @@ def test_autoformalize_config_depth_gate_reads_toml(tmp_path):
     assert pl.AutoformalizeConfig.load(str(toml)).depth_gate is False
 
 
-def test_autoformalize_config_two_stage_defaults():
+def test_autoformalize_config_defaults():
     cfg = pl.AutoformalizeConfig.load(None)
     assert cfg.formalize_rounds == 3
     assert cfg.retrieval is True
-    assert cfg.formalize_token_budget == 40_000            # early-abort a doomed draft
 
 
 def test_autoformalize_config_retrieval_backend_defaults():

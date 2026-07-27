@@ -2,9 +2,10 @@
 
 Turns the next `status:ready`+`type:proof` GitHub issue into a *validated* queue
 target (stub `.lean` + `.entry.json` + manifest row) so the existing prover always
-has something to prove. Two engines: a Mistral general reasoner (magistral) drafts
-the statement + judges faithfulness + roundtrips; the Leanstral leaf-prover runs
-the kernel gates (hypothesis-rejection, disproof) and the proof itself.
+has something to prove. Two engines: Claude drafts the statement, formalizes it
+agentically (`claude -p` + the lean-lsp MCP, self-validating to elaboration), and
+judges faithfulness + roundtrips; the Leanstral leaf-prover runs the kernel gates
+(hypothesis-rejection, disproof) and the proof itself.
 
 Design of record: docs/superpowers/specs/2026-07-12-issue-to-stub-autoformalizer-design.md,
 extended by 2026-07-17-semantic-repair-cascade-design.md (semantic gate rejections feed a
@@ -109,7 +110,7 @@ def disproof_goal(lean_text: str) -> str:
     return lean_text[:sep] + ": ¬ (" + concl + ") " + lean_text[end:]
 
 
-# --- magistral reply parsers -------------------------------------------------
+# --- claude reply parsers ----------------------------------------------------
 
 _JSON_FENCE_RE = re.compile(r"```json\s*\n(.*?)```", re.DOTALL)
 
@@ -144,7 +145,7 @@ def parse_verdict(reply: str) -> dict:
     return v
 
 
-# --- chat-mediated runners (magistral: judge) ---------------------------------
+# --- chat-mediated runners (claude: judge) ------------------------------------
 
 JUDGE_SYSTEM = (
     "You are a faithfulness judge for autoformalized Lean statements — a SAFETY NET "
@@ -207,12 +208,12 @@ def _assistant(content: str) -> dict:
     return {"role": "assistant", "content": content or "(no output)"}
 
 
-# --- two-stage draft: intent (magistral) + formalize (leanstral) --------------
+# --- two-stage draft: intent + agentic formalize (both claude) ----------------
 #
-# Draft failures are LEAN failures (unknown identifiers, `let`-scoping, coercions), not math
-# failures — Leanstral's home turf, magistral's weak spot. So split the draft: magistral
-# SPECIFIES the intended statement in precise prose (its strength, no Lean), Leanstral
-# FORMALIZES it into elaborating Lean (its strength). See
+# The split still stands, but both stages are Claude now: it SPECIFIES the intended
+# statement in precise prose first (no Lean), then FORMALIZES it agentically
+# (`claude -p` + the lean-lsp MCP, self-validating to elaboration). Leanstral no
+# longer drafts either stage — it only PROVES. See
 # docs/superpowers/specs/2026-07-14-leanstral-drafter-two-stage-design.md.
 
 INTENT_SYSTEM = (
@@ -336,7 +337,7 @@ def intent_messages(issue: dict, context_pack: str, feedback: str | None = None,
 
 
 def intent_reject_reason(reply: str) -> str | None:
-    """WHY a magistral intent reply is unusable, or None if it parses. The emit is
+    """WHY a Claude intent reply is unusable, or None if it parses. The emit is
     mechanical, so it needs a `statement` plus the naming meta (`module_name`,
     `benchmark_id`); this pinpoints which piece is missing so a rejected draft is
     DIAGNOSABLE in the telemetry — the old blanket "no parseable intent reply"
@@ -351,7 +352,7 @@ def intent_reject_reason(reply: str) -> str | None:
 
 
 def parse_intent(reply: str) -> dict | None:
-    """Parse a magistral intent reply into a dict, or None if `intent_reject_reason`
+    """Parse a Claude intent reply into a dict, or None if `intent_reject_reason`
     finds it unusable (missing JSON or any required field)."""
     if intent_reject_reason(reply) is not None:
         return None
@@ -365,10 +366,10 @@ def parse_intent(reply: str) -> dict | None:
 
 # --- the frontier draft engine (item I): a `claude -p` adapter ----------------
 # `claude -p --output-format json` runs a headless completion; with tools DISABLED it
-# is a pure text generator, drop-in for `mistral_chat` (returns (text, tokens)). The
-# DRAFT stage (intent + formalize) routes here when [drafter] engine="claude"; the
-# judge stays magistral and Leanstral still PROVES — the gate battery is drafter-
-# agnostic. Design: docs/superpowers/specs/2026-07-24-frontier-drafter-design.md.
+# is a pure text generator, drop-in for `mistral_chat` (returns (text, tokens)). Claude
+# is now the only drafter (intent + agentic formalize) and the judge too; Leanstral
+# still PROVES — the gate battery is drafter-agnostic either way. Design:
+# docs/superpowers/specs/2026-07-24-frontier-drafter-design.md.
 _CLAUDE_CAP_MARKERS = ("usage limit", "rate limit", "limit reached", "quota", "capacity",
                        # auth/expiry — a dead or missing subscription token degrades like a
                        # cap (on_cap fallback → mistral / defer) instead of erroring the tick
@@ -596,7 +597,7 @@ def agentic_formalize(intent: dict, *, issue: dict, main_repo: str, check_fn=Non
 def draft_intent(issue: dict, context_pack: str, *, chat_fn, feedback: str | None = None,
                  route: str = "theorem", prior_unknowns: list[str] | None = None,
                  prior_lessons: str | None = None) -> dict:
-    """Stage 1: magistral SPECIFIES the intended statement (prose + objects + naming meta) from the
+    """Stage 1: Claude SPECIFIES the intended statement (prose + objects + naming meta) from the
     issue. No Lean. `feedback` (a `render_gate_feedback` block from a rejected previous attempt)
     turns this into a REVISION round; `route="defs"` adds the new-definitions contract, with
     `prior_unknowns` (declarations earlier drafts guessed at) as hints. `prior_lessons` (item K)
@@ -634,9 +635,9 @@ def fidelity_messages(intent: dict, stub: str) -> list[dict]:
 
 
 def intent_fidelity_check(intent: dict, stub: str, *, reason_fn) -> dict:
-    """The folded roundtrip: does Leanstral's Lean faithfully render magistral's intent? Magistral
-    compares the stub against its own step-1 intended statement. Soft + lenient — reject ONLY on an
-    explicit `faithful: false`. Returns `{faithful, verdict, tokens}`."""
+    """The folded roundtrip: does Claude's own agentically-formalized Lean faithfully render the
+    intent it specified in step 1? Same model checks its own work. Soft + lenient — reject ONLY on
+    an explicit `faithful: false`. Returns `{faithful, verdict, tokens}`."""
     content, tokens = reason_fn(fidelity_messages(intent, stub))
     v = _extract_json(content) or {}
     return {"faithful": v.get("faithful") is not False,
@@ -1259,8 +1260,8 @@ def prepare_issues(raw: list[dict], *, max_difficulty: str = "medium") -> list[d
 # every semantic gate was a terminal skip, so the drafter was never told WHY a
 # clean-elaborating draft was rejected (design: 2026-07-17-semantic-repair-cascade).
 # Each gate gets a repair DIRECTION here; the block is sent to BOTH stages of the
-# next attempt (magistral may need to re-frame the statement; leanstral must stop
-# inlining what it should consume).
+# next attempt (Claude may need to re-frame the intent, or the agentic formalize
+# step must stop inlining what it should consume).
 
 _GATE_INSTRUCTIONS = {
     "intent": "Respond with ONLY one JSON object carrying statement, objects, "
@@ -1335,7 +1336,7 @@ def semantic_verdict(*, lean_text: str, stub: str, name: str, intent: dict, issu
     """Run the semantic gate battery on an ELABORATING draft, cheapest-first:
     depth (theorem route) / defs consumption+grounding (defs route) → triviality
     (structural, zero tokens) → hypothesis-rejection → disproof (kernel,
-    leanstral) → issue-faithfulness → intent-fidelity (magistral judges).
+    leanstral) → issue-faithfulness → intent-fidelity (Claude judges).
     Returns `(failure, tokens)`: failure is None when every gate passes, else
     `{gate, detail}` for `render_gate_feedback`. The battery's DIVERSITY is the
     anti-Goodhart defense of the repair loop: a re-draft that games one gate still
@@ -1430,29 +1431,27 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn, int
            agentic_formalize_fn=None, slot_switch_fn=None,
            queue_dir: str, budget: int, max_issues: int = 1,
            max_attempt_issues: int = 3, gate_budget: int = 20_000, formalize_rounds: int = 3,
-           formalize_token_budget: int = 40_000, formalize_fn=None, retrieve_fn=None,
            proactive_fn=None, depth_gate: bool = True, triviality_gate: bool = True,
-           semantic_rounds: int = 2, derivable_fn=None, system_prompt=None,
+           semantic_rounds: int = 2, system_prompt=None,
            feasibility_fn=None, gate_cache=None, log=lambda m: None) -> dict:
     """Draft + gate + stage up to `max_issues` targets from `issues`.
 
-    For each candidate (up to `max_attempt_issues`): intent (magistral `reason_fn`
-    SPECIFIES the statement) → formalize-with-repair (leanstral `formalize_fn` writes
-    elaborating Lean, compiler-repaired + retrieval-augmented) → the semantic gate
-    battery (`semantic_verdict`: depth → triviality → vacuity → disproof → judge →
-    intent-fidelity). A gate rejection is NOT terminal: it becomes a
+    For each candidate (up to `max_attempt_issues`): intent (`reason_fn`, Claude
+    SPECIFIES the statement) → agentic formalize (`agentic_formalize_fn`, Claude +
+    the lean-lsp MCP writes elaborating Lean, self-validating to elaboration — the
+    only drafter) → the semantic gate battery (`semantic_verdict`: depth →
+    triviality → vacuity → disproof → judge → intent-fidelity, leanstral proving the
+    kernel gates). A gate rejection is NOT terminal: it becomes a
     `render_gate_feedback` block and the issue is RE-DRAFTED — both stages see the
     verdict — up to `semantic_rounds` total attempts (the repair cascade; design:
     2026-07-17-semantic-repair-cascade). `semantic_rounds=1` is the old single-shot
     behavior. An issue that exhausts its rounds stays `status:ready` (never
     auto-closed). A passing target's stub + `.entry.json` are written to `queue_dir`.
-    `formalize_fn` defaults to `prove_fn` (both leanstral).
 
     Returns `{seeded, tokens, attempted}` — `attempted` is the obstruction telemetry:
     one `{issue, attempts, outcome: "seeded"|<last gate>|"error", history}` record per
     issue tried, so a zero-seed tick says exactly which gate ate each issue."""
-    formalize_fn = formalize_fn or prove_fn
-    intent_fn = intent_fn or reason_fn   # the DRAFT chat_fn ([drafter] engine); judge keeps reason_fn
+    intent_fn = intent_fn or reason_fn   # the intent DRAFT chat_fn (claude); judge keeps reason_fn
     seeded, attempted, spent = [], [], 0
     for issue in issues[:max_attempt_issues]:
         if len(seeded) >= max_issues or spent >= budget:
@@ -1706,7 +1705,6 @@ def main() -> int:
     semantic_rounds = pick(args.semantic_rounds, cfg.semantic_rounds)
     formalize_rounds = pick(args.formalize_rounds, cfg.formalize_rounds)
     retrieval = pick(args.retrieval, cfg.retrieval)
-    formalize_token_budget = cfg.formalize_token_budget
 
     queue_dir = args.queue_dir or os.path.join(_foundry_root(), "targets", "queue")
 
@@ -1774,11 +1772,13 @@ def main() -> int:
     from scout_index import default_index_dir
     index_dir = default_index_dir()
     if retrieval:
-        retrieve_fn, proactive_fn = build_retrieve_fns(
+        # only the PROACTIVE (embedding) half is used — fed to the agentic prompt as premises;
+        # the reactive retrieve_fn is gone (agentic searches live via lean_loogle).
+        _reactive, proactive_fn = build_retrieve_fns(
             backend=cfg.retrieval_backend, main_repo=args.main_repo, index_dir=index_dir,
             k=cfg.retrieval_k, embed_model=cfg.embed_model, api_key=api_key)
     else:
-        retrieve_fn, proactive_fn = None, None
+        proactive_fn = None
 
     # H12 feasibility census: does a named MathFin.* primitive exist? scout index
     # first (authoritative), then a grep of the main-repo MathFin/ sources. Fail-open
@@ -1811,11 +1811,9 @@ def main() -> int:
                  agentic_formalize_fn=agentic_fn, slot_switch_fn=slot_switch_fn, check_fn=daemon_check,
                  context_fn=context_fn, queue_dir=queue_dir, budget=budget,
                  max_issues=max_issues, max_attempt_issues=max_attempt, gate_budget=gate_budget,
-                 formalize_rounds=formalize_rounds, formalize_token_budget=formalize_token_budget,
-                 formalize_fn=claude_fn, retrieve_fn=retrieve_fn, proactive_fn=proactive_fn,
+                 formalize_rounds=formalize_rounds, proactive_fn=proactive_fn,
                  depth_gate=depth_gate, triviality_gate=triviality_gate,
                  semantic_rounds=semantic_rounds, system_prompt=prove_system,
-                 derivable_fn=lambda lt: derivable_hypotheses(lt, check_fn=daemon_check),
                  feasibility_fn=feasibility_fn, gate_cache=gate_cache,
                  log=lambda m: print(f"[refill] {m}", file=sys.stderr))
     if gate_cache is not None:
@@ -2348,7 +2346,7 @@ def emit_target_files(issue: dict, stub: str, meta: dict) -> tuple[str, dict, di
     name, binders, concl = split_statement(stub)
 
     # main-module placement: a new-object contribution creates its OWN module, so
-    # main_module must be a NEW file. Trusting magistral's free-text module_name let
+    # main_module must be a NEW file. Trusting the drafter's free-text module_name let
     # it pick an EXISTING module the target also imports as a pointer (#162:
     # module_name "RatiosExtended" == its own pointer); apply_contribution then
     # overwrote that module, deleting its theorems (AxiomAuditGen "unknown constant",
@@ -2433,9 +2431,9 @@ def emit_target_files(issue: dict, stub: str, meta: dict) -> tuple[str, dict, di
         f"Full formal proof in {main_module} (autoformalized statement, "
         "leanstral proof). Re-export from MathFin. Axioms-clean."
     )
-    # drafter-agnostic provenance: the statement drafter is not named (magistral is out of
-    # the active path, and Claude is never attributed per the repo's attribution rule); the
-    # PROVER stays credited (leanstral).
+    # drafter-agnostic provenance: the statement drafter is not named (it's Claude, and
+    # Claude is never attributed per the repo's attribution rule); the PROVER stays
+    # credited (leanstral).
     provenance = {
         "statement_source": "autoform",
         "statement_model": "autoform",

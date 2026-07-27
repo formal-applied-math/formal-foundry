@@ -1,7 +1,8 @@
 """First-pass refinery punch list shipped in an autoformalized PR (Task 2.7).
 
 The unpriced bottleneck is the HUMAN refinery (the 8-lens rewrite before merge). This is a
-Magistral review over the proven candidate that produces the MECHANICAL half of that pass —
+chat-mediated review (Claude by default) over the proven candidate that produces the
+MECHANICAL half of that pass —
 unused/gratuitous constructs, wrapper smell, docstring/register, obvious golf — as a
 checklist the human refiner starts from. It is **soft: it never gates** (a chat failure
 still opens the PR) and it deliberately does NOT touch the taste half (inspired math,
@@ -67,7 +68,7 @@ def main() -> int:
         _ = e
     if not text:
         md = "_(first-pass refinery notes skipped: empty candidate)_"
-    elif args.model.startswith("claude"):   # default: claude (magistral is retired)
+    elif args.model.startswith("claude"):   # default: claude (mistral remains selectable via --model)
         from autoformalize import claude_draft_fn   # lazy: only when a real call is made
         md = refinery_notes(text, chat_fn=lambda msgs: claude_draft_fn(msgs, model=args.model))
     elif not os.environ.get("MISTRAL_API_KEY"):

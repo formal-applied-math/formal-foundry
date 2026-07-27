@@ -45,10 +45,8 @@ max_issues = 1
 max_attempt_issues = 3
 gate_budget = 20000
 prover_model = "labs-leanstral-1-5"   # leanstral: the kernel gate battery (vacuity / disproof)
-formalize_rounds = 3       # bounded compiler-feedback rounds (retained knob)
-formalize_token_budget = 40000  # early-abort a doomed formalization (a hard issue like #61 else
-                                # burns ~77k tokens/draw grinding every round without elaborating)
-retrieval = true           # on `unknown identifier X`, feed loogle candidates back (elaboration-gated)
+formalize_rounds = 3       # round-count cited in formalize-miss telemetry (agentic self-iterates)
+retrieval = true           # feed embedding-retrieved premises into the agentic drafter prompt
 depth_gate = true          # pointers-scoped depth gate: reject a true-but-shallow stub whose
                            # TYPE consumes no def from its `-- pointers:` MathFin modules (a
                            # Mathlib identity in domain clothing — cal-bk-67 inlined the forward
