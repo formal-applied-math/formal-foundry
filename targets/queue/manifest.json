@@ -3,6 +3,54 @@
   "main_commit": "0445ae8d6fa1d2dbb05c7274ae5f4a9fb2cfb12d",
   "targets": [
     {
+      "id": "cal-bk-144",
+      "stream": "backlog",
+      "kind": "prove",
+      "sorry_name": "wienerFubini_deterministic",
+      "file": "cal-bk-144.lean",
+      "pointers": [
+        "MathFin/Foundations/WienerIntegralL2.lean"
+      ],
+      "input_hash": "15538c6eadfce0805111905fd3dd9731fa07633ff8679ed5ae2baee65f8021b4",
+      "main_module": "MathFin/FixedIncome/WienerFubiniDeterministic.lean",
+      "benchmark": "benchmarks/mathematical_finance.json",
+      "benchmark_id": "mf-foundations-wiener-fubini-deterministic",
+      "source_issue": 144,
+      "deferred": [
+        "Refactoring `FixedIncome/VasicekBondPrice.lean`'s integrated-rate step to consume this Fubini instance in place of its hand-rolled computation",
+        "Instantiating the identity to the specific Vasicek/Ornstein-Uhlenbeck kernel \u03c3(s,u) = e^{-a(s-u)} and re-deriving `vasicekBondPrice_*` from it",
+        "Coverage row, AxiomAudit entry, ledger update, and `docs/bridges.md` update recording this instance"
+      ],
+      "benchmark_entry": {
+        "id": "mf-foundations-wiener-fubini-deterministic",
+        "name": "Stochastic Fubini (Wiener) instance + Vasicek integrated-rate refactor",
+        "description": "Deterministic-kernel stochastic Fubini: the Bochner integral of `wienerIntegralLp` over a causal kernel family equals `wienerIntegralLp` of the order-swapped kernel.",
+        "domain": "mathematical_finance",
+        "code": {
+          "lean": "import MathFin.FixedIncome.WienerFubiniDeterministic\n\nopen MathFin\n\n/-- Deterministic-kernel stochastic Fubini: the Bochner integral of `wienerIntegralLp` over a causal kernel family equals `wienerIntegralLp` of the order-swapped kernel. -/\ntheorem mf_foundations_wiener_fubini_deterministic {\u03a9 : Type*} {m\u03a9 : MeasurableSpace \u03a9} {\u03bc : Measure \u03a9} [IsProbabilityMeasure \u03bc]\n    {B : \u211d\u22650 \u2192 \u03a9 \u2192 \u211d} (hB : IsPreBrownianReal B \u03bc) (T : \u211d\u22650)\n    (\u03c3 : \u211d \u2192 Lp \u211d 2 (volume.restrict (Set.Ioc (0 : \u211d) (T : \u211d))))\n    (h\u03c3_causal : \u2200 s \u2208 Set.Ioc (0 : \u211d) (T : \u211d),\n      (\u03c3 s : \u211d \u2192 \u211d) =\u1d50[volume.restrict (Set.Ioc s (T : \u211d))] 0)\n    (h\u03c3_int : Integrable \u03c3 (volume.restrict (Set.Ioc (0 : \u211d) (T : \u211d))))\n    (g : Lp \u211d 2 (volume.restrict (Set.Ioc (0 : \u211d) (T : \u211d))))\n    (hg : (g : \u211d \u2192 \u211d) =\u1d50[volume.restrict (Set.Ioc (0 : \u211d) (T : \u211d))]\n      fun u => \u222b s in Set.Ioc u (T : \u211d), (\u03c3 s : \u211d \u2192 \u211d) u \u2202volume) :\n    \u222b s in Set.Ioc (0 : \u211d) (T : \u211d),\n        WienerIntegralL2.wienerIntegralLp B hB T (\u03c3 s) \u2202volume =\n      WienerIntegralL2.wienerIntegralLp B hB T g :=\n  MathFin.wienerFubini_deterministic hB T \u03c3 h\u03c3_causal h\u03c3_int g hg\n"
+        },
+        "metadata": {
+          "chapter": 0,
+          "reference": "Stochastic Fubini (Wiener) instance + Vasicek integrated-rate refactor",
+          "difficulty": "medium",
+          "formalization_status": "full",
+          "formalization_scope": "Full formal proof in MathFin/FixedIncome/WienerFubiniDeterministic.lean (magistral-drafted statement, leanstral proof). Re-export from MathFin. Axioms-clean. Faithful SUBSET of issue #144; deferred to follow-up issues: Refactoring `FixedIncome/VasicekBondPrice.lean`'s integrated-rate step to consume this Fubini instance in place of its hand-rolled computation; Instantiating the identity to the specific Vasicek/Ornstein-Uhlenbeck kernel \u03c3(s,u) = e^{-a(s-u)} and re-deriving `vasicekBondPrice_*` from it; Coverage row, AxiomAudit entry, ledger update, and `docs/bridges.md` update recording this instance.",
+          "provenance": {
+            "statement_source": "magistral-autoform",
+            "statement_model": "magistral-medium",
+            "source": "leanstral-autoform",
+            "model": "labs-leanstral-1-5",
+            "issue": 144,
+            "deferred": [
+              "Refactoring `FixedIncome/VasicekBondPrice.lean`'s integrated-rate step to consume this Fubini instance in place of its hand-rolled computation",
+              "Instantiating the identity to the specific Vasicek/Ornstein-Uhlenbeck kernel \u03c3(s,u) = e^{-a(s-u)} and re-deriving `vasicekBondPrice_*` from it",
+              "Coverage row, AxiomAudit entry, ledger update, and `docs/bridges.md` update recording this instance"
+            ]
+          }
+        }
+      }
+    },
+    {
       "id": "cal-bk-161",
       "stream": "backlog",
       "kind": "prove",
