@@ -98,3 +98,14 @@ enabled = true
 max_leaves = 3             # tight splits first; a DAG wanting more is usually mis-shaped (raise on evidence)
 leaf_max_turns = 40        # vibe turns per leaf (leaves are individually short by design)
 max_reask = 1              # bounded re-decompose rounds on a malformed DAG or a failed skeleton gate
+
+# item I — the frontier drafter. engine="claude" routes the DRAFT stage (intent +
+# formalize) to `claude -p`; Leanstral still PROVES and the faithfulness judge is chosen
+# in main(). SAFE to leave on before/without the token: resolve_drafter_engine falls the
+# draft back to mistral whenever no Claude auth (CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_API_KEY
+# / ~/.claude login) is present — so an empty CI secret ⇒ mistral, a real token ⇒ claude.
+[drafter]
+engine = "claude"          # "mistral" | "claude"
+mode = "completion"        # "completion" (pure claude -p, no lean-lsp) | "agentic" (lean-lsp; bigger CI lift)
+on_cap = "fallback"        # subscription cap / dead token → revert that draft to mistral (vs "defer")
+claude_model = "claude-sonnet-5"

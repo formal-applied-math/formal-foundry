@@ -167,11 +167,18 @@ jobs:
           python3 -m pip show pytest >/dev/null 2>&1 || python3 -m pip install -q pytest
           cd probe && python3 -m pytest test_instance_probe_daemon.py -v
 
+      - name: Install Claude Code CLI (frontier drafter — [drafter] engine="claude")
+        if: ${{ !inputs.mtest_only }}
+        # the drafter shells `claude -p`; with CLAUDE_CODE_OAUTH_TOKEN set the tick uses
+        # Claude, else resolve_drafter_engine falls the draft back to mistral (no break).
+        run: npm install -g @anthropic-ai/claude-code
+
       - name: Run one pipeline tick (prove → on pass, open the PR)
         if: ${{ !inputs.mtest_only }}   # mtest_only dispatch validates item M then stops
         env:
           MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
           MAIN_PR_TOKEN: ${{ secrets.MAIN_PR_TOKEN }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}   # frontier drafter (item I)
           MAIN_REPO_SLUG: raphaelrrcoelho/formal-mathfin
           CI: "1"
           MAIN_REPO: ${{ github.workspace }}/main

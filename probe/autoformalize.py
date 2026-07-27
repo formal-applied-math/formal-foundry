@@ -16,6 +16,7 @@ network). Stdlib only.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import glob
 import json
 import os
@@ -368,7 +369,11 @@ def parse_intent(reply: str) -> dict | None:
 # DRAFT stage (intent + formalize) routes here when [drafter] engine="claude"; the
 # judge stays magistral and Leanstral still PROVES — the gate battery is drafter-
 # agnostic. Design: docs/superpowers/specs/2026-07-24-frontier-drafter-design.md.
-_CLAUDE_CAP_MARKERS = ("usage limit", "rate limit", "limit reached", "quota", "capacity")
+_CLAUDE_CAP_MARKERS = ("usage limit", "rate limit", "limit reached", "quota", "capacity",
+                       # auth/expiry — a dead or missing subscription token degrades like a
+                       # cap (on_cap fallback → mistral / defer) instead of erroring the tick
+                       "login expired", "please run /login", "invalid api key",
+                       "authentication", "unauthorized", "not logged in")
 
 
 class ClaudeCapError(RuntimeError):
@@ -441,6 +446,27 @@ def select_draft_fns(drafter, *, mistral_intent_fn, mistral_formalize_fn):
                 raise                               # "defer" → refill records a deferred outcome
         return draft
     return make(mistral_intent_fn), make(mistral_formalize_fn)
+
+
+def claude_auth_present(env=None) -> bool:
+    """Is Claude usable in THIS environment? A CI token (`CLAUDE_CODE_OAUTH_TOKEN` /
+    `ANTHROPIC_API_KEY`) or a local interactive login (`~/.claude/.credentials.json`).
+    Lets `engine="claude"` ship live and safe: it activates the instant the token
+    secret is added, and never breaks a tick that has no Claude auth yet."""
+    env = os.environ if env is None else env
+    if env.get("CLAUDE_CODE_OAUTH_TOKEN") or env.get("ANTHROPIC_API_KEY"):
+        return True
+    return os.path.exists(os.path.expanduser("~/.claude/.credentials.json"))
+
+
+def resolve_drafter_engine(drafter, env=None):
+    """Return `(drafter, fell_back)` — down-shift `engine="claude"` to `"mistral"` when no
+    Claude auth is present, so flipping the config on is safe BEFORE the token secret
+    exists (empty CI secret ⇒ empty env var ⇒ mistral; token present ⇒ claude). A no-op
+    for `engine="mistral"`."""
+    if getattr(drafter, "engine", "mistral") == "claude" and not claude_auth_present(env):
+        return dataclasses.replace(drafter, engine="mistral"), True
+    return drafter, False
 
 
 # --- item I phase 2: the agentic drafter (claude -p + lean-lsp MCP) ------------
@@ -1981,6 +2007,11 @@ def main() -> int:
     # BOTH draft sub-stages to the `claude -p` adapter. reason_fn stays the JUDGE and
     # prove_fn stays PROVE — the gate battery is drafter-agnostic.
     drafter = DrafterConfig.load(args.config or os.path.join(_foundry_root(), "pipeline.toml"))
+    drafter, fell_back = resolve_drafter_engine(drafter)   # safe flip: claude only when authed
+    if fell_back:
+        print("[refill] engine=claude requested but no Claude auth "
+              "(CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_API_KEY / ~/.claude login) — "
+              "using mistral this tick", file=sys.stderr)
     draft_intent_fn, draft_formalize_fn = select_draft_fns(
         drafter, mistral_intent_fn=reason_fn, mistral_formalize_fn=formalize_fn)
     print("[refill] drafter engine=" + drafter.engine + " mode=" + drafter.mode

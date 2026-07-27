@@ -292,6 +292,53 @@ def test_select_draft_fns_claude_defer_reraises_cap(monkeypatch):
     assert raised is True                                                 # defer → propagate to refill
 
 
+def test_claude_auth_present_from_token_or_key_env():
+    assert af.claude_auth_present({"CLAUDE_CODE_OAUTH_TOKEN": "t"}) is True
+    assert af.claude_auth_present({"ANTHROPIC_API_KEY": "k"}) is True
+
+
+def test_claude_auth_absent_when_no_token_and_no_login(monkeypatch):
+    monkeypatch.setattr(af.os.path, "exists", lambda p: False)   # no ~/.claude creds
+    assert af.claude_auth_present({}) is False
+
+
+def test_claude_auth_present_from_local_login(monkeypatch):
+    monkeypatch.setattr(af.os.path, "exists", lambda p: True)    # ~/.claude/.credentials.json
+    assert af.claude_auth_present({}) is True
+
+
+def test_resolve_drafter_engine_downshifts_claude_without_auth(monkeypatch):
+    monkeypatch.setattr(af.os.path, "exists", lambda p: False)
+    resolved, fell = af.resolve_drafter_engine(pl.DrafterConfig(engine="claude"), {})
+    assert resolved.engine == "mistral" and fell is True
+
+
+def test_resolve_drafter_engine_keeps_claude_with_token():
+    resolved, fell = af.resolve_drafter_engine(
+        pl.DrafterConfig(engine="claude"), {"CLAUDE_CODE_OAUTH_TOKEN": "t"})
+    assert resolved.engine == "claude" and fell is False
+
+
+def test_resolve_drafter_engine_noop_for_mistral():
+    resolved, fell = af.resolve_drafter_engine(pl.DrafterConfig(engine="mistral"), {})
+    assert resolved.engine == "mistral" and fell is False
+
+
+def test_claude_cap_markers_cover_a_dead_token(monkeypatch):
+    # an expired/invalid token must degrade like a cap (→ ClaudeCapError → on_cap fallback),
+    # not hard-error the tick
+    class _R:
+        stdout = ('{"is_error": true, "subtype": "error_during_execution", '
+                  '"result": "Login expired \\u00b7 Please run /login"}')
+        stderr = ""
+    raised = False
+    try:
+        af.claude_draft_fn([{"role": "user", "content": "x"}], run_fn=lambda a, s: _R())
+    except af.ClaudeCapError:
+        raised = True
+    assert raised is True
+
+
 def test_refill_records_deferred_on_claude_cap(monkeypatch, tmp_path):
     def capping_draft(issue, ctx, *, chat_fn, **kw):
         raise af.ClaudeCapError("5-hour usage limit reached")
