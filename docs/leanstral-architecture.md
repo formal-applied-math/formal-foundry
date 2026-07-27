@@ -3,7 +3,7 @@
 `labs-leanstral-1-5` proving theorems in a Mathlib + BrownianMotion quant-finance
 Lean 4 library, with live goal-state feedback over MCP and an axiom-clean gate.
 
-Pins: **Lean v4.31.0 · Mathlib @fabf563a · BrownianMotion @bdf5ea0c (Degenne)**
+Pins: **Lean v4.32.0 · Mathlib @81a5d257 · BrownianMotion @4d52fa77 (Degenne)**
 
 ```
 ┌────────────────────────────────────────────────────────────────┐

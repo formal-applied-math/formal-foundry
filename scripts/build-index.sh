@@ -9,7 +9,7 @@
 # + MathFin oleans are baked in), add lean_scout as an EPHEMERAL in-container
 # dependency, and extract there. This reuses the baked oleans (fast), never
 # touches the host main repo (no stray .lake — the doctrine forbids one), and
-# needs only the toolchains to match: lean_scout is pinned to 97ab10e (v4.31.0,
+# needs only the toolchains to match: lean_scout is pinned to 289c1f1 (v4.32.0,
 # our toolchain; it has no Mathlib require, so no dependency conflict).
 #
 # Memory doctrine: this loads the Lean/MathFin env — the ONE local Lean process.
@@ -20,7 +20,7 @@ set -euo pipefail
 FOUNDRY="$(cd "$(dirname "$0")/.." && pwd)"
 MAIN="${MAIN_REPO:-/home/rapha/code/automated_proofs_quantfin}"
 IMAGE="${MATHFIN_IMAGE:-ghcr.io/raphaelrrcoelho/mathfin-verify:latest}"
-REV="97ab10e8a620"                       # lean_scout on Lean v4.31.0
+REV="289c1f1f88a4"                       # lean_scout on Lean v4.32.0
 INDEX="$FOUNDRY/index"
 mkdir -p "$INDEX"
 

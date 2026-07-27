@@ -1,5 +1,5 @@
 {
-  "toolchain": "leanprover/lean4:v4.31.0",
+  "toolchain": "leanprover/lean4:v4.32.0",
   "main_commit": "0445ae8d6fa1d2dbb05c7274ae5f4a9fb2cfb12d",
   "targets": [
     {
