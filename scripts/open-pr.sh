@@ -239,7 +239,7 @@ FIDELITY_NOTES="$(python3 "$FOUNDRY/probe/fidelity_notes.py" \
   --pointers "$POINTERS_JSON" --provenance "$PROV_JSON" 2>/dev/null \
   || echo "(fidelity notes unavailable)")"
 
-# first-pass refinery punch list (Task 2.7): a soft Magistral review over the proven
+# first-pass refinery punch list (Task 2.7): a soft Claude review over the proven
 # candidate — the MECHANICAL half of the 8-lens pass (unused constructs, wrapper smell,
 # register, obvious golf) as a checklist the human refiner starts from. NEVER gates:
 # refinery_notes.py falls back to a skip line without a key or on any API error.

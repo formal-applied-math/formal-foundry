@@ -33,9 +33,9 @@ max_turns = 60
 
 # Issue -> stub autoformalizer (the self-feeding refill phase). When the queue has
 # no unattempted target, the tick drafts one from the next `status:ready`+`type:proof`
-# issue: magistral drafts+judges+roundtrips a faithful stub, leanstral runs the
+# issue: claude drafts+judges+roundtrips a faithful stub, leanstral runs the
 # kernel gates (hypothesis-rejection + disproof), the existing prover proves it.
-# `enabled = false` reverts to a hand-seeded queue. `budget` caps the magistral +
+# `enabled = false` reverts to a hand-seeded queue. `budget` caps the claude +
 # gate tokens per refill; `max_attempt_issues` bounds skip-to-next on rejects.
 # Design: docs/superpowers/specs/2026-07-12-issue-to-stub-autoformalizer-design.md.
 [autoformalize]
@@ -73,7 +73,7 @@ gate_cache = true          # item L: content-address the adversarial gate goals 
                            # positive); CACHE_GENERATION invalidates on a Mathlib/Lean pin bump.
 
 # Lemma-DAG decomposition (Phase 2 — docs/superpowers/specs/2026-07-18-decomposer-design.md).
-# The general reasoner (Magistral) SPLITS a hard target into a few named leaf lemmas + a
+# The drafter (Claude) SPLITS a hard target into a few named leaf lemmas + a
 # main theorem applying them; a Lean-side skeleton gate rejects a bad split for one
 # elaboration's cost BEFORE any leaf gets proving budget; leaves reuse the vibe prover
 # verbatim as ordinary single-sorry targets; a recomposition gate assembles the whole.

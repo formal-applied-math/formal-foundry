@@ -49,7 +49,7 @@ ACTION="$(jget "$DEC" action)"
 REASON="$(jget "$DEC" reason)"
 
 # 1b. Self-feeding refill: when the queue has no unattempted target, autoformalize
-# one from the next `status:ready`+`type:proof` issue — magistral drafts + judges +
+# one from the next `status:ready`+`type:proof` issue — claude drafts + judges +
 # roundtrips a faithful stub, leanstral runs the kernel gates — then rebuild the
 # manifest and re-plan. Needs the daemon (up) + MISTRAL_API_KEY (sourced above);
 # gated on [autoformalize].enabled. On any failure it falls through to the skip.

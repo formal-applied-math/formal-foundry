@@ -6,7 +6,7 @@
 # steps are shared and unchanged.
 #
 # Flow (one Lean process at a time throughout; daemon UP on entry):
-#   1. draft  (daemon up): Magistral splits the target; the skeleton gate accepts/rejects
+#   1. draft  (daemon up): Claude splits the target; the skeleton gate accepts/rejects
 #              the split (one bounded re-decompose) BEFORE any leaf gets proving budget.
 #   2. leaves (one flip pair): lean-lsp UP → vibe proves ALL leaves → flip back to the
 #              daemon → gate them. (Leaves are independent in the common flat split; deep
@@ -56,7 +56,7 @@ PY
 }
 
 TURNS="$(python3 -c "import pipeline_lib as p; print(p.DecomposeConfig.load('$CFG').leaf_max_turns)" 2>/dev/null || echo 40)"
-echo "[decompose] $ID → drafting a lemma-DAG (Magistral) + skeleton gate…" >&2
+echo "[decompose] $ID → drafting a lemma-DAG (Claude) + skeleton gate…" >&2
 
 # 1. draft + skeleton gate (daemon up).
 DRAFT="$(python3 decompose_tick.py draft --id "$ID" --tag "$TAG" --runs "$RUNS" \

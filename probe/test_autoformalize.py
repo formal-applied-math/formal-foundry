@@ -644,8 +644,8 @@ _STUB_162 = ("theorem upCapture_scale_invariant {S : Type*} (up : Finset S)\n"
              "    True := by sorry")
 
 
-def test_emit_new_object_module_named_for_def_not_magistral_bucket():
-    # #162 repro: magistral picked module_name "RatiosExtended" — an EXISTING module
+def test_emit_new_object_module_named_for_def_not_drafter_bucket():
+    # #162 repro: the drafter picked module_name "RatiosExtended" — an EXISTING module
     # the target also imports as a pointer (main-module == its own import). The old
     # code trusted that name and apply_contribution overwrote RatiosExtended.lean,
     # deleting its theorems -> AxiomAuditGen "unknown constant" -> PR blocked. A
@@ -662,8 +662,8 @@ def test_emit_new_object_module_named_for_def_not_magistral_bucket():
     assert "public import MathFin.Performance.RatiosExtended" in lean_text
 
 
-def test_emit_new_object_module_idempotent_when_magistral_already_canonical():
-    # #161-style regression: magistral's bucket already equals the object's canonical
+def test_emit_new_object_module_idempotent_when_drafter_already_canonical():
+    # #161-style regression: the drafter's bucket already equals the object's canonical
     # module (def gainToPain -> module GainToPain), so the collision guard never fires
     # and placement is unchanged.
     issue = {"number": 161, "area": "performance", "title": "Gain-to-pain ratio",
@@ -830,7 +830,7 @@ def test_disproof_goal_negates_conclusion():
     assert goal.count("sorry") == 1
 
 
-# --- magistral reply parsers -------------------------------------------------
+# --- drafter reply parsers -------------------------------------------------
 
 def test_parse_verdict_json_block():
     reply = '```json\n{"faithful": false, "verdict": "missing X", "issues": ["X"]}\n```'
@@ -1769,7 +1769,7 @@ def test_refill_stages_a_good_issue(monkeypatch, tmp_path):
 
 
 def test_refill_skips_when_intent_unparseable(monkeypatch, tmp_path):
-    # stage 1 (magistral) fails to produce a parseable intent → skip before formalizing.
+    # stage 1 (the intent draft) fails to produce a parseable intent → skip before formalizing.
     monkeypatch.setattr(af, "draft_intent",
                         lambda i, ctx, *, chat_fn, feedback=None, **_kw: {"ok": False, "intent": None, "tokens": 3})
     _pass_gates(monkeypatch)
@@ -1857,7 +1857,7 @@ def test_refill_skips_unfaithful_judge(monkeypatch, tmp_path):
 
 
 def test_refill_skips_intent_drift(monkeypatch, tmp_path):
-    # the folded roundtrip: leanstral's Lean does not render magistral's intent → skip.
+    # the folded roundtrip: leanstral's Lean does not render the intent → skip.
     _two_stage_ok(monkeypatch)
     monkeypatch.setattr(af, "depth_rejection", lambda lt, nm, ptr, **k: {"shallow": False, "tokens": 0})
     monkeypatch.setattr(af, "hypothesis_rejection", lambda *a, **k: {"vacuous": False, "tokens": 1})
@@ -2028,7 +2028,7 @@ def test_refill_records_error_outcome(monkeypatch, tmp_path):
     assert res["attempted"][0]["outcome"] == "error"
 
 
-# --- two-stage draft components: intent (magistral) + formalize (leanstral) ---
+# --- two-stage draft components: intent draft + agentic formalize (claude) ---
 
 def test_parse_intent_extracts_statement_and_meta():
     reply = ('reasoning...\n```json\n{"statement": "For a ZCB B ...", "objects": ["MathFin.zcb"], '
