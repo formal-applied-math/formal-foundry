@@ -292,6 +292,37 @@ def test_select_draft_fns_claude_defer_reraises_cap(monkeypatch):
     assert raised is True                                                 # defer → propagate to refill
 
 
+def test_refill_agentic_falls_back_to_completion_on_infra_error(monkeypatch, tmp_path):
+    # a lean-lsp/flip/docker failure in the agentic formalize must degrade to the completion
+    # path (so "agentic always" can't brick the cron), and the slot must return to daemon.
+    _two_stage_ok(monkeypatch)          # draft_intent + formalize_with_repair (the fallback) both good
+    _pass_gates(monkeypatch)
+    flips = []
+
+    def boom_agentic(intent, ctx, issue):
+        raise RuntimeError("lean-lsp not ready")
+
+    res = af.refill([_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
+                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000,
+                    agentic_formalize_fn=boom_agentic, slot_switch_fn=lambda s: flips.append(s))
+    assert [s["issue"] for s in res["seeded"]] == [5]      # completion fallback seeded it
+    assert flips == ["lean-lsp", "daemon"]                  # flipped out for agentic, back for gates
+
+
+def test_refill_agentic_cap_is_not_swallowed_by_fallback(monkeypatch, tmp_path):
+    # a ClaudeCapError from agentic is the outer on_cap handler's job — NOT an infra fallback
+    monkeypatch.setattr(af, "draft_intent", _good_intent)
+
+    def capping_agentic(intent, ctx, issue):
+        raise af.ClaudeCapError("usage limit reached")
+
+    res = af.refill([_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
+                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000,
+                    agentic_formalize_fn=capping_agentic, slot_switch_fn=lambda s: None)
+    assert res["seeded"] == []
+    assert res["attempted"][0]["outcome"] == "deferred"    # cap → deferred, not an infra fallback
+
+
 def test_claude_auth_present_from_token_or_key_env():
     assert af.claude_auth_present({"CLAUDE_CODE_OAUTH_TOKEN": "t"}) is True
     assert af.claude_auth_present({"ANTHROPIC_API_KEY": "k"}) is True

@@ -167,11 +167,19 @@ jobs:
           python3 -m pip show pytest >/dev/null 2>&1 || python3 -m pip install -q pytest
           cd probe && python3 -m pytest test_instance_probe_daemon.py -v
 
+      - name: Provision Node (the disk-cleanup step wipes /usr/local/lib/node_modules → breaks npm)
+        if: ${{ !inputs.mtest_only }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
       - name: Install Claude Code CLI (frontier drafter — [drafter] engine="claude")
         if: ${{ !inputs.mtest_only }}
         # the drafter shells `claude -p`; with CLAUDE_CODE_OAUTH_TOKEN set the tick uses
         # Claude, else resolve_drafter_engine falls the draft back to mistral (no break).
-        run: npm install -g @anthropic-ai/claude-code
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          claude --version
 
       - name: Run one pipeline tick (prove → on pass, open the PR)
         if: ${{ !inputs.mtest_only }}   # mtest_only dispatch validates item M then stops

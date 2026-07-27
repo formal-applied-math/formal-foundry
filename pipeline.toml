@@ -106,6 +106,9 @@ max_reask = 1              # bounded re-decompose rounds on a malformed DAG or a
 # / ~/.claude login) is present — so an empty CI secret ⇒ mistral, a real token ⇒ claude.
 [drafter]
 engine = "claude"          # "mistral" | "claude"
-mode = "completion"        # "completion" (pure claude -p, no lean-lsp) | "agentic" (lean-lsp; bigger CI lift)
+mode = "agentic"           # "agentic" (claude -p + lean-lsp, self-validates to elaboration — the strong
+                           # mode that cracked hard formalizations) | "completion" (pure claude -p).
+                           # agentic degrades to completion on any lean-lsp/flip infra failure (refill),
+                           # so "agentic always" can never brick the cron.
 on_cap = "fallback"        # subscription cap / dead token → revert that draft to mistral (vs "defer")
 claude_model = "claude-sonnet-5"

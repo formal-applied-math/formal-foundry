@@ -1764,13 +1764,27 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn, int
                         break   # doomed target — surface for the defs route / a human
 
                 proactive = proactive_fn(intent["statement"]) if proactive_fn else ""
+                fr = None
                 if agentic_formalize_fn is not None:     # item I phase 2: claude+lean-lsp session
-                    if slot_switch_fn is not None:
-                        slot_switch_fn("lean-lsp")       # agentic formalize needs the lean-lsp slot
-                    fr = agentic_formalize_fn(intent, ctx, issue)
-                    if slot_switch_fn is not None:
-                        slot_switch_fn("daemon")         # flip back — the gate battery needs the daemon
-                else:
+                    try:
+                        if slot_switch_fn is not None:
+                            slot_switch_fn("lean-lsp")   # agentic formalize needs the lean-lsp slot
+                        fr = agentic_formalize_fn(intent, ctx, issue)
+                    except ClaudeCapError:
+                        raise                             # a cap is the outer on_cap handler's call
+                    except Exception as e:  # noqa: BLE001 — agentic infra (flip/lean-lsp/docker) is
+                        # not a draft verdict: degrade to the completion formalize so "agentic always"
+                        # can never brick the cron (agentic → claude completion → mistral on cap).
+                        log(f"#{n}: agentic formalize failed ({type(e).__name__}: {e}) "
+                            "— falling back to completion")
+                        fr = None
+                    finally:
+                        if slot_switch_fn is not None:
+                            try:
+                                slot_switch_fn("daemon")  # always return to the daemon for the gates
+                            except Exception as e:  # noqa: BLE001
+                                log(f"#{n}: slot flip back to daemon failed ({e})")
+                if fr is None:                            # completion path (agentic off, or fell back)
                     fr = formalize_with_repair(intent, ctx, issue=issue, chat_fn=formalize_fn,
                                                check_fn=check_fn, emit_fn=emit_target_files,
                                                rounds=formalize_rounds, retrieve_fn=retrieve_fn,
