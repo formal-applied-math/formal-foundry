@@ -112,21 +112,21 @@ def _read_target(queue_path, tid):
 
 def _cmd_draft(args) -> int:
     from house_context import build_drafter_prompt, extract_signatures
-    from pipeline_lib import DecomposeConfig
-    from probe import daemon_check, mistral_chat
+    from pipeline_lib import DecomposeConfig, DrafterConfig
+    from probe import daemon_check
+    from autoformalize import claude_draft_fn
     cfg = DecomposeConfig.load(args.config)
+    drafter = DrafterConfig.load(args.config)      # claude splits the target (leanstral proves the leaves)
     target = _read_target(args.queue, args.id)
     qroot = os.path.dirname(os.path.abspath(args.queue))
     target_text = open(os.path.join(qroot, target["file"]), encoding="utf-8").read()
     pointers = target.get("pointers", [])
     context_pack = extract_signatures(args.main_repo, pointers) if pointers else ""
     preamble = build_drafter_prompt(args.main_repo)
-    effort = args.reasoning_effort or None
     r = do_draft(
         args.id, args.tag, args.runs, target_text=target_text, context_pack=context_pack,
         drafter_preamble=preamble, cfg_max_leaves=cfg.max_leaves, cfg_max_reask=cfg.max_reask,
-        chat_fn=lambda msgs: mistral_chat(msgs, api_key=os.environ["MISTRAL_API_KEY"],
-                                          model=args.model, reasoning_effort=effort),
+        chat_fn=lambda msgs: claude_draft_fn(msgs, model=drafter.claude_model),
         check_fn=daemon_check,
         toolchain=open(os.path.join(args.main_repo, "lean-toolchain")).read().strip(),
         meta={k: target[k] for k in ("main_module", "benchmark", "source_issue")
@@ -155,13 +155,7 @@ def main() -> int:
     d = sub.add_parser("draft", parents=[common])
     d.add_argument("--queue", required=True)
     d.add_argument("--main-repo", required=True)
-    d.add_argument("--config", default=None)
-    d.add_argument("--model", default="magistral-medium-latest")
-    # magistral reasons natively and the Mistral API REJECTS an explicit reasoning_effort
-    # for it ("reasoning_effort is not enabled for this model" → HTTP 400, which errored the
-    # decompose escalation on the first hard target that reached it). Default off; "high" is
-    # only valid for a leanstral-class --model.
-    d.add_argument("--reasoning-effort", default="")
+    d.add_argument("--config", default=None)   # the split model is [drafter].claude_model
     r = sub.add_parser("recompose", parents=[common])
     r.add_argument("--queue", default=None)   # unused; kept for a uniform call shape
     args = ap.parse_args()

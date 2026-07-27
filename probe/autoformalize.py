@@ -426,47 +426,23 @@ def claude_draft_fn(messages: list[dict], *, model: str = "", run_fn=None) -> tu
     return data.get("result", ""), tokens
 
 
-def select_draft_fns(drafter, *, mistral_intent_fn, mistral_formalize_fn):
-    """Pick the DRAFT-stage (intent_fn, formalize_fn) pair for `[drafter] engine`
-    (item I). engine="mistral" (default) keeps magistral-intent + leanstral-formalize;
-    engine="claude" routes BOTH draft sub-stages to the `claude -p` adapter. On a
-    subscription cap: on_cap="fallback" retries that call with the mistral counterpart,
-    on_cap="defer" re-raises `ClaudeCapError` for refill to requeue. The judge/fidelity
-    (reason_fn) and prove (prove_fn) are chosen elsewhere — untouched."""
-    if getattr(drafter, "engine", "mistral") != "claude":
-        return mistral_intent_fn, mistral_formalize_fn
-
-    def make(fallback):
-        def draft(msgs):
-            try:
-                return claude_draft_fn(msgs, model=drafter.claude_model)
-            except ClaudeCapError:
-                if getattr(drafter, "on_cap", "fallback") == "fallback":
-                    return fallback(msgs)          # this draft call reverts to mistral
-                raise                               # "defer" → refill records a deferred outcome
-        return draft
-    return make(mistral_intent_fn), make(mistral_formalize_fn)
+def claude_chat_fn(drafter):
+    """The `claude -p` chat fn bound to the configured model. ONE claude does every general-
+    reasoner role — intent, the faithfulness/intent-fidelity JUDGE, and the decompose split
+    (Leanstral still PROVES). A subscription cap raises `ClaudeCapError`, which refill defers."""
+    def call(msgs):
+        return claude_draft_fn(msgs, model=drafter.claude_model)
+    return call
 
 
 def claude_auth_present(env=None) -> bool:
-    """Is Claude usable in THIS environment? A CI token (`CLAUDE_CODE_OAUTH_TOKEN` /
-    `ANTHROPIC_API_KEY`) or a local interactive login (`~/.claude/.credentials.json`).
-    Lets `engine="claude"` ship live and safe: it activates the instant the token
-    secret is added, and never breaks a tick that has no Claude auth yet."""
+    """Is Claude usable here? A CI token (`CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY`) or a
+    local login (`~/.claude/.credentials.json`). Claude is the only drafter+judge, so when this
+    is False the tick warns and every draft/judge call defers — there is no fallback drafter."""
     env = os.environ if env is None else env
     if env.get("CLAUDE_CODE_OAUTH_TOKEN") or env.get("ANTHROPIC_API_KEY"):
         return True
     return os.path.exists(os.path.expanduser("~/.claude/.credentials.json"))
-
-
-def resolve_drafter_engine(drafter, env=None):
-    """Return `(drafter, fell_back)` — down-shift `engine="claude"` to `"mistral"` when no
-    Claude auth is present, so flipping the config on is safe BEFORE the token secret
-    exists (empty CI secret ⇒ empty env var ⇒ mistral; token present ⇒ claude). A no-op
-    for `engine="mistral"`."""
-    if getattr(drafter, "engine", "mistral") == "claude" and not claude_auth_present(env):
-        return dataclasses.replace(drafter, engine="mistral"), True
-    return drafter, False
 
 
 # --- item I phase 2: the agentic drafter (claude -p + lean-lsp MCP) ------------
@@ -498,10 +474,30 @@ def _agentic_formalize_args(mcp_config_path: str, *, model: str = "") -> list[st
 _AGENTIC_SCRATCH_REL = "MathFin/_AutoformAgentic.lean"
 
 
-def _agentic_formalize_prompt(intent: dict, scaffold_module: str, scratch_rel: str) -> str:
-    """The task prompt for the agentic formalize session: write the module realizing
-    `intent` to `scratch_rel`, using the given scaffold, and self-validate to elaboration
-    via the lean-lsp tools (leaving the theorem's `sorry`)."""
+# Hard-won Lean pitfalls (repurposed from the retired completion-repair heuristics): the
+# recurring elaboration traps under our pin, given to the agentic drafter UPFRONT so it does
+# not rediscover them round by round. It still fixes everything else live via lean_diagnostics.
+_AGENTIC_PITFALLS = (
+    "COMMON PITFALLS under our pin (avoid these upfront; lean_diagnostics catches the rest):\n"
+    "- Apply every MathFin/Mathlib definition to ALL its arguments (`MathFin.zcb r t T`, never "
+    "`MathFin.zcb r`) — a partial application is a `… → …` where a value is expected.\n"
+    "- `autoImplicit false` is on: do NOT write an explicit universe (`Type u`) or a `universe` "
+    "decl; use `Type*` / `Sort*`.\n"
+    "- For `ℝ≥0` add `open scoped NNReal` and write `ℝ≥0` (bare `ℝ ≥ 0` misparses as a Prop).\n"
+    "- A stuck typeclass metavariable (`?m…`): name the ambiguous implicit (`(μ := μ)`) or "
+    "`@`-apply, so instance search is not left guessing.\n"
+    "- For an unknown identifier, use lean_loogle / lean_leansearch to find the real name + "
+    "namespace before guessing; do not invent a constant."
+)
+
+
+def _agentic_formalize_prompt(intent: dict, scaffold_module: str, scratch_rel: str,
+                              premises: str = "") -> str:
+    """The task prompt for the agentic formalize session: write the module realizing `intent`
+    to `scratch_rel`, using the given scaffold, and self-validate to elaboration via the
+    lean-lsp tools (leaving the theorem's `sorry`). `premises` are embedding-retrieved
+    likely-relevant declarations (whole-corpus semantic recall, complementing the live
+    lean_loogle name search)."""
     stmt = intent.get("statement", "")
     defs = [d for d in (intent.get("definitions") or []) if isinstance(d, dict)]
     defspec = "\n".join(
@@ -510,6 +506,8 @@ def _agentic_formalize_prompt(intent: dict, scaffold_module: str, scratch_rel: s
         "Formalize the following into Lean 4 (Mathlib) and make it ELABORATE cleanly.\n\n"
         f"INTENDED STATEMENT:\n{stmt}\n\n"
         + (f"NEW DEFINITIONS TO INTRODUCE:\n{defspec}\n\n" if defspec else "")
+        + (f"LIKELY-RELEVANT PREMISES (embedding recall; verify they elaborate under our pin):\n"
+           f"{premises}\n\n" if premises else "")
         + f"Write the COMPLETE module to the file `{scratch_rel}` (relative to the project root), "
         "using EXACTLY this scaffold — replace only the body between the `open` lines and "
         "`end MathFin` with the definition(s) and the single theorem (ending `:= by sorry`), "
@@ -519,7 +517,8 @@ def _agentic_formalize_prompt(intent: dict, scaffold_module: str, scratch_rel: s
         "ITERATE — fix every elaboration error — until diagnostics report NO errors and exactly "
         "ONE `sorry` (the main theorem's). Keep the statement FAITHFUL to the intended statement; "
         "do NOT prove the theorem (leave its `sorry`); do not touch the license/module/import/"
-        "namespace scaffold lines. Reply DONE when it elaborates cleanly."
+        "namespace scaffold lines. Reply DONE when it elaborates cleanly.\n\n"
+        + _AGENTIC_PITFALLS
     )
 
 
@@ -531,7 +530,7 @@ def _extract_core_stub(lean_text: str) -> str:
 
 
 def agentic_formalize(intent: dict, *, issue: dict, main_repo: str, check_fn=None, model: str = "",
-                      run_fn=None, mcp_config_path: str | None = None,
+                      run_fn=None, mcp_config_path: str | None = None, premises: str = "",
                       scratch_rel: str = _AGENTIC_SCRATCH_REL, log=lambda m: None) -> dict:
     """Item I phase 2: ONE agentic `claude -p` session (lean-lsp MCP) drafts the module for
     `intent` to `scratch_rel` (under `main_repo`, bind-mounted into the lean-lsp container),
@@ -559,7 +558,7 @@ def agentic_formalize(intent: dict, *, issue: dict, main_repo: str, check_fn=Non
             return subprocess.run(argv, input=stdin, capture_output=True, text=True,
                                   timeout=1800, cwd=cwd)
     argv = _agentic_formalize_args(mcp_config_path, model=model)
-    prompt = _agentic_formalize_prompt(intent, scaffold, scratch_rel)
+    prompt = _agentic_formalize_prompt(intent, scaffold, scratch_rel, premises)
     try:
         res = run_fn(argv, prompt, main_repo)
     finally:
@@ -611,57 +610,6 @@ def draft_intent(issue: dict, context_pack: str, *, chat_fn, feedback: str | Non
     return {"ok": intent is not None, "intent": intent, "tokens": tokens, "reason": reason}
 
 
-def formalize_messages(intent: dict, grounding: str, revision_note: str = "") -> list[dict]:
-    objs = ", ".join(intent.get("objects") or []) or "(none named)"
-    user = (f"INTENDED STATEMENT:\n{intent['statement']}\n\n"
-            f"CONSUME THESE DECLARATIONS: {objs}\n")
-    defs = [d for d in (intent.get("definitions") or []) if isinstance(d, dict)]
-    if defs:
-        spec = "\n".join(
-            f"- {d.get('name')} : {d.get('signature', '?')} — {d.get('meaning', '')}"
-            + (f" (built from: {', '.join(d.get('built_from') or [])})"
-               if d.get("built_from") else "")
-            + (f" | instance checks: {'; '.join(d.get('examples') or [])}"
-               if d.get("examples") else "")
-            for d in defs)
-        user += ("\nNEW DEFINITIONS TO INTRODUCE (this module defines them):\n" + spec
-                 + "\nEmit ONE ```lean block: the definitions (complete — no sorry; each built "
-                 "from existing constants; lowerCamelCase names, each with a `/-- … -/` "
-                 "docstring); then for EACH definition 1-2 concrete-instance checks "
-                 "`example : <def> <explicit small inputs, e.g. ![1, 2] over Finset (Fin 2)> = "
-                 "<intended value> := by norm_num [<def>]` (use the intent's instance checks when "
-                 "given; `decide` for ℕ/Bool) so a wrong sign/normalization fails to elaborate; "
-                 "then the single theorem stated THROUGH the defs, ending `:= by sorry`.\n")
-    cor = intent.get("corollary")
-    if isinstance(cor, dict) and cor.get("statement"):
-        user += ("\nCOROLLARY TO ADD AFTER THE CORE (a sorry-free theorem proved by a term "
-                 f"applying the core): {cor.get('name', 'corollary')} — {cor['statement']}\n")
-    if grounding:
-        user += "\nAVAILABLE SIGNATURES:\n" + grounding
-    if revision_note:
-        user += "\n\n" + revision_note
-    return [{"role": "system", "content": _drafter_system(FORMALIZE_SYSTEM)},
-            {"role": "user", "content": user}]
-
-
-# the elaborator emits BOTH spellings across versions: `Unknown identifier
-# \`X\`` (capital U, backticks — the live 2026-07-17 format) and `unknown
-# constant 'X'`. The original straight-quote-only pattern silently never fired
-# in production (pinned by test_unknown_identifiers_match_live_elaborator_format).
-_UNKNOWN_RE = re.compile(r"[Uu]nknown (?:identifier|constant) [`']([^`']+)[`']")
-
-
-def _unknown_identifiers(errors) -> list[str]:
-    """The `X` in `unknown identifier 'X'` / `unknown constant 'X'` elaboration errors, deduped —
-    the names to retrieve real candidates for during repair."""
-    out, seen = [], set()
-    for e in errors:
-        for m in _UNKNOWN_RE.findall(str(e)):
-            if m not in seen:
-                seen.add(m)
-                out.append(m)
-    return out
-
 
 def loogle_candidates(name: str, *, main_repo: str, run_fn=None) -> str:
     """Loogle hits for `name` via `scripts/loogle.sh` — UNVERIFIED candidates (the public index
@@ -677,202 +625,6 @@ def loogle_candidates(name: str, *, main_repo: str, run_fn=None) -> str:
                 return ""
     return run_fn(name)
 
-
-def _repair_hint(errors) -> str:
-    """Targeted repair hints for RECURRING Leanstral formalization errors (like the `^`-not-`²`
-    hint), keyed off the elaboration error text — the generic feedback alone couldn't fix these
-    (e.g. #67 hit the same `HMul ℝ (ℝ → ℝ → ℝ)` under-application 3 rounds running). '' if none
-    match."""
-    blob = "\n".join(str(e) for e in errors)
-    hints = []
-    if re.search(r"type class\s+H(?:Mul|Add|Sub|Div|Pow).*→", blob, re.DOTALL):
-        hints.append("A term is a PARTIALLY-APPLIED function (a `… → …` where a value is "
-                     "expected): apply every MathFin/Mathlib definition to ALL its arguments "
-                     "(e.g. `MathFin.zcb r t T`, never `MathFin.zcb r`).")
-    # (the "invalid 'import' command" hint is retired — _prelint_stub now strips stub-level
-    #  imports deterministically at emit time, so that error can no longer reach the model.)
-    if "unknown universe level" in blob:  # A14 backstop (prelint rewrites the common cases)
-        hints.append("Do NOT write an explicit universe variable (`Type u`, `Sort v`) or a "
-                     "`universe` declaration — the build uses `autoImplicit false`, so `u` is "
-                     "unbound. Use the auto-generalized `Type*` / `Sort*` instead.")
-    if re.search(r"typeclass instance problem is stuck.*\?m", blob, re.DOTALL):  # A3
-        hints.append("A typeclass instance metavariable is stuck (`?m…`): name the ambiguous "
-                     "implicit explicitly at the call site (e.g. `(μ := μ)`) or `@`-apply the "
-                     "lemma, so instance search is not left guessing.")
-    if re.search(r"failed to synthesize.*\b(?:LE|LT|OfNat|Zero|One)\s+Type\b", blob, re.DOTALL):  # A11
-        hints.append("`ℝ≥0` was misparsed as `ℝ ≥ 0` (a Prop), so an order/numeral class on "
-                     "`Type` cannot be synthesized: add `open scoped NNReal` and write `ℝ≥0`.")
-    if _unknown_identifiers(errors):  # A2
-        hints.append("For an unknown identifier: grep the PINNED `.lake/packages/mathlib` source "
-                     "for the name and its namespace before re-guessing (loogle tracks a newer "
-                     "pin — an upper bound only); do not invent a constant.")
-    return ("\n" + "\n".join(hints)) if hints else ""
-
-
-def _dump_draft(issue: dict, rnd: int, lean_text: str, elab: dict) -> None:
-    """Diagnostic: when `AUTOFORM_DUMP_DRAFTS` names a dir, write each emitted draft
-    and its elaborator verdict there — failed drafts are otherwise discarded, which
-    is exactly the evidence a formalize-death root-cause needs. No-op unless set."""
-    d = os.environ.get("AUTOFORM_DUMP_DRAFTS")
-    if not d:
-        return
-    try:
-        os.makedirs(d, exist_ok=True)
-        n = issue.get("number", "x")
-        with open(os.path.join(d, f"draft-{n}-r{rnd}.lean"), "w", encoding="utf-8") as f:
-            f.write(lean_text)
-        with open(os.path.join(d, f"draft-{n}-r{rnd}.errors.json"), "w", encoding="utf-8") as f:
-            json.dump({"errors": elab.get("errors"), "sorry_count": elab.get("sorry_count"),
-                       "warnings": elab.get("warnings")}, f, indent=2, ensure_ascii=False)
-    except OSError:
-        pass
-
-
-_NOCODE_RETRIES = 2   # bounded retries for a no-code reply (a glitch, not a round)
-
-
-def formalize_with_repair(intent: dict, grounding: str, *, issue: dict, chat_fn, check_fn,
-                          emit_fn, rounds: int = 3, retrieve_fn=None,
-                          token_budget: int = 40_000, proactive_premises: str = "",
-                          revision_note: str = "", derivable_fn=None,
-                          log=lambda m: None) -> dict:
-    """Stage 2: Leanstral FORMALIZES `intent` into an elaborating stub, repairing against the
-    elaborator. On an error the compiler message is fed back to Leanstral; for `unknown identifier
-    X`, `retrieve_fn(X)` (loogle) candidates are appended. The naming meta rides from `intent`.
-    Early-aborts once cumulative tokens exceed `token_budget` so a doomed draft can't burn every
-    round (a hard issue like #61 else spends ~77k/draw). `revision_note` (a `render_gate_feedback`
-    block) rides the opening message on semantic-repair rounds — the formalizer must see the gate
-    verdict too (the #67 shallow drafts inlined `let`s even when the INTENT named `MathFin.zcb`).
-    `log` receives a one-line diagnostic per round (reply size, lean-block?, elab error) so a
-    failure is not opaque. Returns `{ok, stub, meta, lean_text, entry, tokens}`."""
-    if proactive_premises:
-        grounding = (grounding + "\n\n── LIKELY-RELEVANT PREMISES (rank by cosine; "
-                     "verify they elaborate under our pin) ──\n" + proactive_premises)
-    meta = {"module_name": intent["module_name"], "benchmark_id": intent["benchmark_id"],
-            "docstring": intent.get("docstring", ""), "deferred": intent.get("deferred", [])}
-    messages = formalize_messages(intent, grounding, revision_note)
-    tokens = 0
-    advised_bundle = False   # the ∧-advisory is ONE soft round, never a hard gate
-    lint_repaired = 0        # H11 telemetry: lint-dirty repair rounds spent
-    retrieval_backend = None  # H11 telemetry: which backend surfaced a candidate
-    unknowns: list[str] = []   # every `Unknown identifier X` guessed across rounds —
-    #                            the defs the model thinks SHOULD exist (routing evidence)
-    for i in range(max(1, rounds)):
-        if tokens >= token_budget:
-            log(f"round {i + 1}: aborted — token budget reached ({tokens} >= {token_budget})")
-            break   # doomed draft — stop before another expensive, likely-futile round
-        # Fetch a reply that carries a ```lean block. A no-code reply (leanstral at high
-        # reasoning effort returns ~21k tokens and no code roughly half the time) is a
-        # transient glitch, NOT a round: retry it a bounded number of times WITHOUT
-        # charging the token budget or consuming a productive round — one empty reply
-        # otherwise halves a 40k budget and craters the draft (seen on every #73 probe).
-        stub, content = None, None
-        for _nc in range(_NOCODE_RETRIES + 1):
-            content, tk = chat_fn(messages)
-            stub = extract_lean_code(content)
-            if stub is not None:
-                tokens += tk          # only a productive (code-bearing) reply is charged
-                break
-            log(f"round {i + 1}: no ```lean block (reply {len(content or '')}c, {tk} tok) "
-                f"— retry {_nc + 1}/{_NOCODE_RETRIES}")
-            messages += [
-                _assistant(content),
-                {"role": "user", "content":
-                 "Output exactly one ```lean block: a single "
-                 "`theorem NAME <binders> : <conclusion> := by sorry`."}]
-        if stub is None:
-            log(f"round {i + 1}: no ```lean block after {_NOCODE_RETRIES + 1} tries — giving up")
-            break
-        # the ACTUAL defs this round's stub introduces (empty on a plain theorem
-        # stub) ride the meta so emit discloses them (`-- new-defs:` header).
-        round_meta = {**meta, "definitions": drafted_def_names(stub)}
-        try:
-            lean_text, entry, _placement = emit_fn(issue, stub, round_meta)
-        except Exception as e:  # noqa: BLE001 — surface the assembly failure to the model
-            log(f"round {i + 1}: assembly failed ({e})")
-            messages += [
-                _assistant(content),
-                {"role": "user", "content":
-                 f"The theorem could not be assembled ({e}). Re-output a single "
-                 "well-formed `theorem … := by sorry`."}]
-            continue
-        elab = check_fn(lean_text)
-        _dump_draft(issue, i + 1, lean_text, elab)   # AUTOFORM_DUMP_DRAFTS: no-op unless set
-        if not elab.get("errors") and elab.get("sorry_count", 0) == 1:
-            lint = lint_violations(stub)
-            if not lint:
-                try:
-                    concl = split_statement(stub)[2]
-                except ValueError:
-                    concl = ""
-                # soft nudge, but ONLY when a round remains to land the response in.
-                # On the final round (or with the token budget spent) the advisory
-                # would `continue` into nothing and discard a perfectly good
-                # errors:[]/sorry:1 stub — the confirmed #73 defs-seed killer. In that
-                # case fall through and accept the elaborating stub as-is.
-                spare_round = i < max(1, rounds) - 1 and tokens < token_budget
-                if not advised_bundle and bundle_conclusion(concl) and spare_round:
-                    advised_bundle = True
-                    log(f"round {i + 1}: ∧-bundle conclusion — one advisory round")
-                    messages += [_assistant(content),
-                                 {"role": "user", "content": _BUNDLE_ADVISORY}]
-                    continue
-                derivable = derivable_fn(lean_text) if derivable_fn else []
-                if derivable:
-                    # hard like lint (a provable hypothesis is slop by the values
-                    # gate), bounded by the same rounds; the probe itself fails open
-                    log(f"round {i + 1}: derivable hypothesis(es) {derivable}")
-                    messages += [
-                        _assistant(content),
-                        {"role": "user", "content":
-                         "These hypotheses are PROVABLE from the earlier binders or the "
-                         "library (a bounded positivity/norm_num/simp/exact? probe closed "
-                         "them): " + ", ".join(f"`{d}`" for d in derivable)
-                         + ". REMOVE them — omitting a provable hypothesis is a correct "
-                         "refinement, not a weakening. Keep everything else identical, "
-                         "still ending `:= by sorry`."}]
-                    continue
-                log(f"round {i + 1}: elaborates ✓ ({tokens} tok total)")
-                return {"ok": True, "stub": stub, "meta": round_meta, "lean_text": lean_text,
-                        "entry": entry, "tokens": tokens, "unknowns": unknowns,
-                        "advised_bundle": advised_bundle, "lint_repaired": lint_repaired,
-                        "retrieval_backend": retrieval_backend}
-            # elaborates but the main repo's `lake lint` would reject it (the class
-            # that opened PR #123 red) — textual, so repair it here, not in review.
-            log(f"round {i + 1}: elaborates but lint-dirty ({len(lint)}); first: {lint[0][:140]}")
-            messages += [
-                _assistant(content),
-                {"role": "user", "content":
-                 "The statement elaborates but the library's CI `lake lint` rejects it:\n- "
-                 + "\n- ".join(lint)
-                 + "\nFix ONLY these: def names lowerCamelCase (theorem names stay "
-                 "snake_case); a `/-- … -/` docstring immediately above every "
-                 "def/abbrev/structure. Keep the mathematics identical, still ending "
-                 "`:= by sorry`."}]
-            lint_repaired += 1
-            continue
-        errs = elab.get("errors", [])
-        log(f"round {i + 1}: {len(errs)} elab error(s); first: {str(errs[0])[:180] if errs else '?'}")
-        feedback = ("That statement does not elaborate in Lean:\n```\n"
-                    + "\n".join(str(e) for e in errs[:8]) + "\n```\n"
-                    "Fix ONLY the statement, keep it faithful to the intended statement and still "
-                    "ending in `:= by sorry`. Use `^` for powers (never Unicode `²`); "
-                    "`Real.exp`/`Real.log`/`Real.sqrt`.")
-        feedback += _repair_hint(errs)
-        for nm in _unknown_identifiers(errs):
-            if nm not in unknowns:
-                unknowns.append(nm)
-            if retrieve_fn:
-                cand = retrieve_fn(nm)
-                if cand:
-                    retrieval_backend = getattr(retrieve_fn, "backend", "?")  # H11
-                    feedback += f"\n\nCandidates for `{nm}` (verify they elaborate under our pin):\n{cand}"
-        messages += [_assistant(content),
-                     {"role": "user", "content": feedback}]
-    return {"ok": False, "stub": None, "meta": None,
-            "lean_text": None, "entry": None, "tokens": tokens, "unknowns": unknowns,
-            "advised_bundle": advised_bundle, "lint_repaired": lint_repaired,
-            "retrieval_backend": retrieval_backend}
 
 
 def fidelity_messages(intent: dict, stub: str) -> list[dict]:
@@ -1763,36 +1515,23 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn, int
                             f"(attempt {attempt})")
                         break   # doomed target — surface for the defs route / a human
 
+                # FORMALIZE: the agentic claude + lean-lsp session (the only drafter). The tick
+                # flips the single Lean slot to lean-lsp around it and back to the daemon for the
+                # gates. An infra failure (lean-lsp/flip/docker) or a ClaudeCapError propagates to
+                # the issue-level handler (error/deferred, retryable) — there is no completion path.
                 proactive = proactive_fn(intent["statement"]) if proactive_fn else ""
-                fr = None
-                if agentic_formalize_fn is not None:     # item I phase 2: claude+lean-lsp session
-                    try:
-                        if slot_switch_fn is not None:
-                            slot_switch_fn("lean-lsp")   # agentic formalize needs the lean-lsp slot
-                        fr = agentic_formalize_fn(intent, ctx, issue)
-                    except ClaudeCapError:
-                        raise                             # a cap is the outer on_cap handler's call
-                    except Exception as e:  # noqa: BLE001 — agentic infra (flip/lean-lsp/docker) is
-                        # not a draft verdict: degrade to the completion formalize so "agentic always"
-                        # can never brick the cron (agentic → claude completion → mistral on cap).
-                        log(f"#{n}: agentic formalize failed ({type(e).__name__}: {e}) "
-                            "— falling back to completion")
-                        fr = None
-                    finally:
-                        if slot_switch_fn is not None:
-                            try:
-                                slot_switch_fn("daemon")  # always return to the daemon for the gates
-                            except Exception as e:  # noqa: BLE001
-                                log(f"#{n}: slot flip back to daemon failed ({e})")
-                if fr is None:                            # completion path (agentic off, or fell back)
-                    fr = formalize_with_repair(intent, ctx, issue=issue, chat_fn=formalize_fn,
-                                               check_fn=check_fn, emit_fn=emit_target_files,
-                                               rounds=formalize_rounds, retrieve_fn=retrieve_fn,
-                                               token_budget=formalize_token_budget,
-                                               proactive_premises=proactive,
-                                               revision_note=feedback or "",
-                                               derivable_fn=derivable_fn,
-                                               log=lambda m: log(f"#{n} formalize {m}"))
+                if agentic_formalize_fn is None:
+                    raise RuntimeError("refill requires an agentic_formalize_fn (the only drafter)")
+                try:
+                    if slot_switch_fn is not None:
+                        slot_switch_fn("lean-lsp")
+                    fr = agentic_formalize_fn(intent, ctx, issue, premises=proactive)
+                finally:
+                    if slot_switch_fn is not None:
+                        try:
+                            slot_switch_fn("daemon")
+                        except Exception as e:  # noqa: BLE001
+                            log(f"#{n}: slot flip back to daemon failed ({e})")
                 spent += fr["tokens"]
                 unknowns = fr.get("unknowns") or []
                 if fr.get("advised_bundle"):
@@ -1936,10 +1675,7 @@ def main() -> int:
     p.add_argument("--max-issues", type=int, default=None)
     p.add_argument("--max-attempt-issues", type=int, default=None)
     p.add_argument("--gate-budget", type=int, default=None)
-    p.add_argument("--intent-model", default=None, help="magistral: stage-1 intent (default: config)")
-    p.add_argument("--formalize-model", default=None, help="leanstral: stage-2 formalize (default: config)")
-    p.add_argument("--prover-model", default=None)
-    p.add_argument("--draft-max-tokens", type=int, default=None)
+    p.add_argument("--prover-model", default=None)   # leanstral: the gate battery
     p.add_argument("--formalize-rounds", type=int, default=None)
     p.add_argument("--depth-gate", dest="depth_gate", action=argparse.BooleanOptionalAction,
                    default=None, help="pointers-scoped depth gate (default: config)")
@@ -1964,13 +1700,10 @@ def main() -> int:
     max_issues = pick(args.max_issues, cfg.max_issues)
     max_attempt = pick(args.max_attempt_issues, cfg.max_attempt_issues)
     gate_budget = pick(args.gate_budget, cfg.gate_budget)
-    prover_model = pick(args.prover_model, cfg.prover_model)
-    draft_max_tokens = pick(args.draft_max_tokens, cfg.draft_max_tokens)
+    prover_model = pick(args.prover_model, cfg.prover_model)   # leanstral: the gate battery
     depth_gate = pick(args.depth_gate, cfg.depth_gate)
     triviality_gate = pick(args.triviality_gate, cfg.triviality_gate)
     semantic_rounds = pick(args.semantic_rounds, cfg.semantic_rounds)
-    intent_model = pick(args.intent_model, cfg.intent_model)
-    formalize_model = pick(args.formalize_model, cfg.formalize_model)
     formalize_rounds = pick(args.formalize_rounds, cfg.formalize_rounds)
     retrieval = pick(args.retrieval, cfg.retrieval)
     formalize_token_budget = cfg.formalize_token_budget
@@ -2004,51 +1737,35 @@ def main() -> int:
     prove_system = build_system_prompt(args.main_repo)   # the leaf-prover gate doctrine
     set_drafter_prompt(args.main_repo)   # H1: pins + statement-design reach the drafter too
 
-    def reason_fn(msgs):   # magistral: stage-1 intent + judge + intent-fidelity
-        return mistral_chat(msgs, api_key=api_key, model=intent_model,
-                            max_tokens=draft_max_tokens)
-
-    def formalize_fn(msgs):   # leanstral: stage-2 formalize
-        return mistral_chat(msgs, api_key=api_key, model=formalize_model,
-                            reasoning_effort="high")
-
-    def prove_fn(msgs):   # leanstral: kernel gates
+    def prove_fn(msgs):   # leanstral: the kernel gate battery (vacuity / disproof)
         return mistral_chat(msgs, api_key=api_key, model=prover_model,
                             reasoning_effort="high")
 
-    # item I — the DRAFT engine switch ([drafter] engine). Mistral (default) keeps
-    # magistral-intent (reason_fn) + leanstral-formalize (formalize_fn); claude routes
-    # BOTH draft sub-stages to the `claude -p` adapter. reason_fn stays the JUDGE and
-    # prove_fn stays PROVE — the gate battery is drafter-agnostic.
+    # the drafter: ONE claude does intent + agentic formalize + the faithfulness/intent-
+    # fidelity JUDGE; leanstral PROVES. no magistral, no completion mode, no fallback drafter.
     drafter = DrafterConfig.load(args.config or os.path.join(_foundry_root(), "pipeline.toml"))
-    drafter, fell_back = resolve_drafter_engine(drafter)   # safe flip: claude only when authed
-    if fell_back:
-        print("[refill] engine=claude requested but no Claude auth "
-              "(CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_API_KEY / ~/.claude login) — "
-              "using mistral this tick", file=sys.stderr)
-    draft_intent_fn, draft_formalize_fn = select_draft_fns(
-        drafter, mistral_intent_fn=reason_fn, mistral_formalize_fn=formalize_fn)
-    print("[refill] drafter engine=" + drafter.engine + " mode=" + drafter.mode
-          + (f" model={drafter.claude_model}" if drafter.engine == "claude" else ""),
+    if not claude_auth_present():
+        print("[refill] no Claude auth (CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_API_KEY / "
+              "~/.claude login) — every draft/judge defers this tick", file=sys.stderr)
+    claude_fn = claude_chat_fn(drafter)      # intent draft + judge (one claude, one model)
+    draft_intent_fn = claude_fn
+    judge_fn = claude_fn
+    print(f"[refill] drafter=claude model={drafter.claude_model} mode=agentic | judge=claude",
           file=sys.stderr)
 
-    # item I phase 2: the agentic drafter replaces the FORMALIZE stage with one claude -p
-    # session on the lean-lsp MCP (self-validates to elaboration). Requires the tick to
-    # have flipped the slot to lean-lsp; check_fn=None here defers the elaboration check to
-    # the gate battery (post-flip, on the daemon). Only when engine=claude + mode=agentic.
-    agentic_fn = None
-    slot_switch_fn = None
-    if drafter.engine == "claude" and drafter.mode == "agentic":
-        def agentic_fn(intent, ctx, issue):
-            return agentic_formalize(intent, issue=issue, main_repo=args.main_repo,
-                                     model=drafter.claude_model, check_fn=None,
-                                     log=lambda m: print(f"[agentic] {m}", file=sys.stderr))
+    # FORMALIZE is always the agentic claude -p + lean-lsp session (self-validates to
+    # elaboration); the tick flips the single Lean slot to lean-lsp around it and back to the
+    # daemon for the gates. check_fn=None defers the elaboration check to the gate battery.
+    def agentic_fn(intent, ctx, issue, premises=""):
+        return agentic_formalize(intent, issue=issue, main_repo=args.main_repo,
+                                 model=drafter.claude_model, check_fn=None, premises=premises,
+                                 log=lambda m: print(f"[agentic] {m}", file=sys.stderr))
 
-        _slot_script = os.path.join(_foundry_root(), "scripts", "slot-switch.sh")
+    _slot_script = os.path.join(_foundry_root(), "scripts", "slot-switch.sh")
 
-        def slot_switch_fn(slot):        # flip the single Lean slot around the agentic formalize
-            subprocess.run(["bash", _slot_script, slot], check=True,
-                           env={**os.environ, "MAIN_REPO": args.main_repo})
+    def slot_switch_fn(slot):        # flip the single Lean slot around the agentic formalize
+        subprocess.run(["bash", _slot_script, slot], check=True,
+                       env={**os.environ, "MAIN_REPO": args.main_repo})
 
     def context_fn(issue):
         ptrs = issue.get("pointers", [])
@@ -2090,12 +1807,12 @@ def main() -> int:
     if gate_cache is not None:
         print("[refill] gate cache ON", file=sys.stderr)
 
-    res = refill(issues, reason_fn=reason_fn, intent_fn=draft_intent_fn, prove_fn=prove_fn,
+    res = refill(issues, reason_fn=judge_fn, intent_fn=draft_intent_fn, prove_fn=prove_fn,
                  agentic_formalize_fn=agentic_fn, slot_switch_fn=slot_switch_fn, check_fn=daemon_check,
                  context_fn=context_fn, queue_dir=queue_dir, budget=budget,
                  max_issues=max_issues, max_attempt_issues=max_attempt, gate_budget=gate_budget,
                  formalize_rounds=formalize_rounds, formalize_token_budget=formalize_token_budget,
-                 formalize_fn=draft_formalize_fn, retrieve_fn=retrieve_fn, proactive_fn=proactive_fn,
+                 formalize_fn=claude_fn, retrieve_fn=retrieve_fn, proactive_fn=proactive_fn,
                  depth_gate=depth_gate, triviality_gate=triviality_gate,
                  semantic_rounds=semantic_rounds, system_prompt=prove_system,
                  derivable_fn=lambda lt: derivable_hypotheses(lt, check_fn=daemon_check),
@@ -2713,12 +2430,15 @@ def emit_target_files(issue: dict, stub: str, meta: dict) -> tuple[str, dict, di
         f"  {app}\n"
     )
     scope = (
-        f"Full formal proof in {main_module} (magistral-drafted statement, "
+        f"Full formal proof in {main_module} (autoformalized statement, "
         "leanstral proof). Re-export from MathFin. Axioms-clean."
     )
+    # drafter-agnostic provenance: the statement drafter is not named (magistral is out of
+    # the active path, and Claude is never attributed per the repo's attribution rule); the
+    # PROVER stays credited (leanstral).
     provenance = {
-        "statement_source": "magistral-autoform",
-        "statement_model": "magistral-medium",
+        "statement_source": "autoform",
+        "statement_model": "autoform",
         "source": "leanstral-autoform",
         "model": "labs-leanstral-1-5",
         "issue": n,

@@ -58,20 +58,24 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="first-pass refinery punch list (markdown) for a PR")
     ap.add_argument("--lean-file", required=True)
     ap.add_argument("--out", default=None, help="write here instead of stdout")
-    ap.add_argument("--model", default=os.environ.get("REFINERY_MODEL", "magistral-medium-latest"))
+    ap.add_argument("--model", default=os.environ.get("REFINERY_MODEL", "claude-sonnet-5"))
     args = ap.parse_args()
     try:
         text = open(args.lean_file, encoding="utf-8").read()
     except OSError as e:
         text = ""
         _ = e
-    key = os.environ.get("MISTRAL_API_KEY")
-    if not key or not text:
-        md = "_(first-pass refinery notes skipped: no MISTRAL_API_KEY or empty candidate)_"
+    if not text:
+        md = "_(first-pass refinery notes skipped: empty candidate)_"
+    elif args.model.startswith("claude"):   # default: claude (magistral is retired)
+        from autoformalize import claude_draft_fn   # lazy: only when a real call is made
+        md = refinery_notes(text, chat_fn=lambda msgs: claude_draft_fn(msgs, model=args.model))
+    elif not os.environ.get("MISTRAL_API_KEY"):
+        md = "_(first-pass refinery notes skipped: no MISTRAL_API_KEY for a mistral --model)_"
     else:
         from probe import mistral_chat   # lazy: only when a real call is made
         md = refinery_notes(text, chat_fn=lambda msgs: mistral_chat(
-            msgs, api_key=key, model=args.model))
+            msgs, api_key=os.environ["MISTRAL_API_KEY"], model=args.model))
     if args.out:
         with open(args.out, "w", encoding="utf-8") as f:
             f.write(md + "\n")

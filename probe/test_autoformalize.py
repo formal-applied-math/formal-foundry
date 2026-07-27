@@ -22,13 +22,6 @@ def test_autoformalize_config_defaults():
 
 # --- [drafter] engine switch (item I) ----------------------------------------
 
-def test_drafter_config_defaults_are_todays_behaviour():
-    d = pl.DrafterConfig.load(None)
-    assert d.engine == "mistral"       # default = magistral-intent + leanstral-formalize
-    assert d.mode == "completion"
-    assert d.on_cap == "fallback"
-    assert d.claude_model.startswith("claude-")   # a real model, not the weak CLI default
-
 
 # --- claude -p draft adapter (item I) ----------------------------------------
 
@@ -210,26 +203,6 @@ def test_agentic_formalize_skips_verify_when_check_fn_none(tmp_path):
     assert r["ok"] is True and r["entry"] is not None
 
 
-def test_refill_routes_to_agentic_formalize_fn(monkeypatch, tmp_path):
-    # engine=claude mode=agentic: refill routes the FORMALIZE stage to the agentic fn
-    calls = {"agentic": 0, "completion": 0}
-    monkeypatch.setattr(af, "draft_intent", lambda issue, ctx, *, chat_fn, **k:
-                        {"ok": True, "tokens": 1, "unknowns": [],
-                         "intent": {"statement": "s", "module_name": "M", "benchmark_id": "mf-x",
-                                    "docstring": "d"}})
-    monkeypatch.setattr(af, "formalize_with_repair",
-                        lambda *a, **k: calls.__setitem__("completion", calls["completion"] + 1)
-                        or {"ok": False, "tokens": 0})
-
-    def agentic_fn(intent, ctx, issue):
-        calls["agentic"] += 1
-        return {"ok": False, "tokens": 0}          # stop after formalize
-    af.refill([_issue(9)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
-              context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000,
-              agentic_formalize_fn=agentic_fn)
-    assert calls["agentic"] >= 1 and calls["completion"] == 0
-
-
 def test_refill_flips_slot_around_agentic_formalize(monkeypatch, tmp_path):
     # autonomous tick: lean-lsp for the agentic formalize, then flip to the daemon for the gates
     events = []
@@ -238,7 +211,7 @@ def test_refill_flips_slot_around_agentic_formalize(monkeypatch, tmp_path):
                          "intent": {"statement": "s", "module_name": "M", "benchmark_id": "mf-x",
                                     "docstring": "d"}})
 
-    def agentic_fn(intent, ctx, issue):
+    def agentic_fn(intent, ctx, issue, premises=""):
         events.append("formalize")
         return {"ok": False, "tokens": 0}          # stop after formalize (records a gate fail)
     af.refill([_issue(9)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
@@ -247,73 +220,11 @@ def test_refill_flips_slot_around_agentic_formalize(monkeypatch, tmp_path):
     assert events[:3] == ["slot:lean-lsp", "formalize", "slot:daemon"]
 
 
-def test_select_draft_fns_mistral_keeps_today():
-    mi, mf = (lambda m: ("i", 0)), (lambda m: ("f", 0))
-    i, f = af.select_draft_fns(pl.DrafterConfig(),
-                               mistral_intent_fn=mi, mistral_formalize_fn=mf)
-    assert i is mi and f is mf
-
-
-def test_select_draft_fns_claude_routes_both_to_adapter(monkeypatch):
-    calls = []
-    monkeypatch.setattr(af, "claude_draft_fn",
-                        lambda msgs, model="": calls.append(model) or ("x", 3))
-    d = pl.DrafterConfig(engine="claude", claude_model="claude-sonnet-5")
-    i, f = af.select_draft_fns(d, mistral_intent_fn=lambda m: ("i", 0),
-                               mistral_formalize_fn=lambda m: ("f", 0))
-    assert i([{"role": "user", "content": "z"}]) == ("x", 3)
-    assert f([{"role": "user", "content": "z"}]) == ("x", 3)
-    assert calls == ["claude-sonnet-5", "claude-sonnet-5"]   # both draft sub-stages route to claude
-
-
-def test_select_draft_fns_claude_falls_back_to_mistral_on_cap(monkeypatch):
-    def capping(msgs, model=""):
-        raise af.ClaudeCapError("5-hour usage limit reached")
-    monkeypatch.setattr(af, "claude_draft_fn", capping)
-    d = pl.DrafterConfig(engine="claude", on_cap="fallback")
-    i, f = af.select_draft_fns(d, mistral_intent_fn=lambda m: ("m-intent", 5),
-                               mistral_formalize_fn=lambda m: ("m-formalize", 5))
-    assert i([{"role": "user", "content": "x"}]) == ("m-intent", 5)       # intent → mistral
-    assert f([{"role": "user", "content": "x"}]) == ("m-formalize", 5)    # formalize → mistral
-
-
-def test_select_draft_fns_claude_defer_reraises_cap(monkeypatch):
-    def capping(msgs, model=""):
-        raise af.ClaudeCapError("usage limit reached")
-    monkeypatch.setattr(af, "claude_draft_fn", capping)
-    d = pl.DrafterConfig(engine="claude", on_cap="defer")
-    i, _f = af.select_draft_fns(d, mistral_intent_fn=lambda m: ("m", 0),
-                                mistral_formalize_fn=lambda m: ("m", 0))
-    try:
-        i([{"role": "user", "content": "x"}])
-        raised = False
-    except af.ClaudeCapError:
-        raised = True
-    assert raised is True                                                 # defer → propagate to refill
-
-
-def test_refill_agentic_falls_back_to_completion_on_infra_error(monkeypatch, tmp_path):
-    # a lean-lsp/flip/docker failure in the agentic formalize must degrade to the completion
-    # path (so "agentic always" can't brick the cron), and the slot must return to daemon.
-    _two_stage_ok(monkeypatch)          # draft_intent + formalize_with_repair (the fallback) both good
-    _pass_gates(monkeypatch)
-    flips = []
-
-    def boom_agentic(intent, ctx, issue):
-        raise RuntimeError("lean-lsp not ready")
-
-    res = af.refill([_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
-                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000,
-                    agentic_formalize_fn=boom_agentic, slot_switch_fn=lambda s: flips.append(s))
-    assert [s["issue"] for s in res["seeded"]] == [5]      # completion fallback seeded it
-    assert flips == ["lean-lsp", "daemon"]                  # flipped out for agentic, back for gates
-
-
 def test_refill_agentic_cap_is_not_swallowed_by_fallback(monkeypatch, tmp_path):
     # a ClaudeCapError from agentic is the outer on_cap handler's job — NOT an infra fallback
     monkeypatch.setattr(af, "draft_intent", _good_intent)
 
-    def capping_agentic(intent, ctx, issue):
+    def capping_agentic(intent, ctx, issue, premises=""):
         raise af.ClaudeCapError("usage limit reached")
 
     res = af.refill([_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
@@ -336,23 +247,6 @@ def test_claude_auth_absent_when_no_token_and_no_login(monkeypatch):
 def test_claude_auth_present_from_local_login(monkeypatch):
     monkeypatch.setattr(af.os.path, "exists", lambda p: True)    # ~/.claude/.credentials.json
     assert af.claude_auth_present({}) is True
-
-
-def test_resolve_drafter_engine_downshifts_claude_without_auth(monkeypatch):
-    monkeypatch.setattr(af.os.path, "exists", lambda p: False)
-    resolved, fell = af.resolve_drafter_engine(pl.DrafterConfig(engine="claude"), {})
-    assert resolved.engine == "mistral" and fell is True
-
-
-def test_resolve_drafter_engine_keeps_claude_with_token():
-    resolved, fell = af.resolve_drafter_engine(
-        pl.DrafterConfig(engine="claude"), {"CLAUDE_CODE_OAUTH_TOKEN": "t"})
-    assert resolved.engine == "claude" and fell is False
-
-
-def test_resolve_drafter_engine_noop_for_mistral():
-    resolved, fell = af.resolve_drafter_engine(pl.DrafterConfig(engine="mistral"), {})
-    assert resolved.engine == "mistral" and fell is False
 
 
 def test_claude_cap_markers_cover_a_dead_token(monkeypatch):
@@ -381,20 +275,6 @@ def test_refill_records_deferred_on_claude_cap(monkeypatch, tmp_path):
     assert [a["outcome"] for a in res["attempted"]] == ["deferred"]       # not "error"
 
 
-def test_drafter_config_loads_claude_block(tmp_path):
-    p = tmp_path / "pipeline.toml"
-    p.write_text('[drafter]\nengine = "claude"\nmode = "agentic"\non_cap = "defer"\n')
-    d = pl.DrafterConfig.load(str(p))
-    assert d.engine == "claude" and d.mode == "agentic" and d.on_cap == "defer"
-
-
-def test_drafter_config_ignores_unknown_keys(tmp_path):
-    p = tmp_path / "pipeline.toml"
-    p.write_text('[drafter]\nengine = "claude"\nbogus = 1\n')
-    d = pl.DrafterConfig.load(str(p))
-    assert d.engine == "claude" and d.mode == "completion"   # unknown dropped, rest defaulted
-
-
 def test_autoformalize_config_reads_toml(tmp_path):
     toml = tmp_path / "pipeline.toml"
     toml.write_text("[autoformalize]\nenabled = false\nbudget = 123456\nmax_issues = 2\n")
@@ -407,43 +287,8 @@ def test_autoformalize_config_reads_toml(tmp_path):
 
 # --- Drafter authority (H1): pins + statement-design reach the drafter --------
 
-def test_formalize_messages_inject_drafter_authority(tmp_path):
-    from test_house_context import _fake_main_repo
-    repo = _fake_main_repo(tmp_path)
-    af.set_drafter_prompt(str(repo))
-    try:
-        sys_content = af.formalize_messages({"statement": "x", "objects": []}, "")[0]["content"]
-        assert "leanprover/lean4:v4.31.0" in sys_content          # pins reached the drafter
-        assert "autoformalization model" in sys_content.lower()   # base FORMALIZE_SYSTEM kept
-        assert "Statement design" in sys_content                  # statement-design authority
-        isys = af.intent_messages({"number": 1, "title": "t", "body": "b"}, "")[0]["content"]
-        assert "leanprover/lean4:v4.31.0" in isys
-    finally:
-        af._DRAFTER_PROMPT = ""   # reset the module global (test isolation)
-
-
-def test_drafter_prompt_unset_leaves_base_system_unchanged():
-    # With no wiring, the drafter system prompts are exactly the base constants.
-    af._DRAFTER_PROMPT = ""
-    assert af.formalize_messages({"statement": "x", "objects": []}, "")[0]["content"] \
-        == af.FORMALIZE_SYSTEM
-
 
 # --- Task 1.3: deterministic repair transforms + emit pre-lint ---------------
-
-def test_repair_hint_stuck_metavar_names_the_implicit():
-    h = af._repair_hint(["typeclass instance problem is stuck\n  IsFilteredPreBrownian X ?m P"])
-    assert "explicitly" in h and "(μ :=" in h
-
-
-def test_repair_hint_nnreal_misparse():
-    h = af._repair_hint(["failed to synthesize instance of type class\n  LE Type"])
-    assert "open scoped NNReal" in h
-
-
-def test_repair_hint_unknown_identifier_suggests_pinned_grep():
-    h = af._repair_hint(["Unknown identifier `MathFin.zcb`"])
-    assert ".lake/packages/mathlib" in h
 
 
 def test_emit_prelint_reorders_omit_before_docstring():
@@ -505,11 +350,6 @@ def test_prelint_marks_defs_noncomputable():
     # a private modifier is preserved
     out3 = af._prelint_stub("private def bar (a : ℝ) : ℝ := a\ntheorem t : True := by trivial")
     assert "private noncomputable def bar" in out3
-
-
-def test_repair_hint_unknown_universe_suggests_type_star():
-    h = af._repair_hint(["line 30:55: unknown universe level `u`"])
-    assert "Type*" in h
 
 
 # --- Task 1.4: gates go INDETERMINATE (not pass) on a wedged daemon ----------
@@ -584,21 +424,6 @@ def test_retrieval_backend_is_labeled():
     assert getattr(r, "backend", None) == "loogle"
 
 
-def test_formalize_result_records_retrieval_backend_and_counters():
-    intent = {"statement": "s", "objects": [], "module_name": "M", "benchmark_id": "b"}
-    retrieve = lambda nm: "cand: MathFin.bar"   # noqa: E731
-    retrieve.backend = "loogle"
-    fr = af.formalize_with_repair(
-        intent, "", issue=_ISSUE,
-        chat_fn=lambda msgs: ("```lean\ntheorem t : MathFin.foo = 0 := by sorry\n```", 5),
-        check_fn=lambda c: {"success": False, "sorry_count": 1,
-                            "errors": ["Unknown identifier `MathFin.foo`"]},
-        emit_fn=af.emit_target_files, rounds=1, retrieve_fn=retrieve)
-    assert fr["ok"] is False
-    assert fr["retrieval_backend"] == "loogle"        # which backend surfaced candidates
-    assert fr["lint_repaired"] == 0 and fr["advised_bundle"] is False
-
-
 def test_autoformalize_config_depth_gate_default_on():
     assert pl.AutoformalizeConfig.load(None).depth_gate is True
 
@@ -611,8 +436,6 @@ def test_autoformalize_config_depth_gate_reads_toml(tmp_path):
 
 def test_autoformalize_config_two_stage_defaults():
     cfg = pl.AutoformalizeConfig.load(None)
-    assert cfg.intent_model == "magistral-medium-latest"    # strongest Magistral reasoning tier
-    assert cfg.formalize_model == "labs-leanstral-1-5"      # leanstral formalizes the Lean
     assert cfg.formalize_rounds == 3
     assert cfg.retrieval is True
     assert cfg.formalize_token_budget == 40_000            # early-abort a doomed draft
@@ -883,18 +706,6 @@ def test_normalize_deferred_cleans_and_coerces():
     assert af.normalize_deferred(["x", 3]) == ["x", "3"]         # non-str coerced
 
 
-def test_two_stage_prompts_document_subset_and_stub_contract():
-    # the honest-subsetting contract lives in the INTENT prompt (deferred facts are
-    # declared there); the stub-format contract lives in the FORMALIZE prompt.
-    intent_joined = " ".join(m["content"] for m in af.intent_messages(
-        {"number": 88, "title": "t", "body": "b", "pointers": []}, ""))
-    assert "deferred" in intent_joined     # the json field declared on a subset
-    assert "SUBSET" in intent_joined       # subsetting is explicitly allowed
-    formalize_joined = " ".join(m["content"] for m in af.formalize_messages(
-        {"statement": "s", "objects": []}, ""))
-    assert ":= by sorry" in formalize_joined   # the stub-format contract
-
-
 def test_judge_system_does_not_fault_provable_hypotheses():
     # #67 was wrongly rejected for "missing positivity hypotheses" though its zcb (Real.exp) is
     # provably positive — the judge must not fault a hypothesis provable from the consumed defs.
@@ -914,7 +725,8 @@ def test_refill_logs_rejected_statement_on_unfaithful(monkeypatch, tmp_path):
     monkeypatch.setattr(af, "intent_fidelity_check", lambda intent, s, *, reason_fn: {"faithful": True, "tokens": 1})
     logs = []
     af.refill([_issue(7)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
-              context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000, log=lambda m: logs.append(m))
+              context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000, log=lambda m: logs.append(m),
+              agentic_formalize_fn=_good_agentic, slot_switch_fn=lambda s: None)
     blob = "\n".join(logs)
     assert "unfaithful" in blob and "theorem t7" in blob   # verdict + the actual rejected statement
 
@@ -974,8 +786,8 @@ def test_emit_entry_reexport_and_provenance():
     assert entry["domain"] == "mathematical_finance"
     assert entry["metadata"]["formalization_status"] == "full"
     assert entry["metadata"]["provenance"] == {
-        "statement_source": "magistral-autoform",
-        "statement_model": "magistral-medium",
+        "statement_source": "autoform",
+        "statement_model": "autoform",
         "source": "leanstral-autoform",
         "model": "labs-leanstral-1-5",
         "issue": 67,
@@ -1315,28 +1127,6 @@ def test_draft_intent_surfaces_reject_reason():
     assert di["reason"] == "no JSON object in reply"
 
 
-def test_formalize_messages_carry_revision_note():
-    intent = {"statement": "s", "objects": ["MathFin.zcb"]}
-    user = af.formalize_messages(intent, "SIGS", revision_note="NOTE-X")[1]["content"]
-    assert "NOTE-X" in user and "SIGS" in user
-
-
-def test_formalize_with_repair_threads_revision_note():
-    intent = {"statement": "s", "objects": [], "module_name": "M", "benchmark_id": "b"}
-    seen = {}
-
-    def chat(msgs):
-        seen["user"] = msgs[1]["content"]
-        return ("```lean\ntheorem t (h : p) : q := by sorry\n```", 5)
-    fr = af.formalize_with_repair(intent, "", issue=_ISSUE, chat_fn=chat,
-                                  check_fn=lambda c: {"success": True, "sorry_count": 1,
-                                                      "errors": []},
-                                  emit_fn=af.emit_target_files, rounds=1,
-                                  revision_note="NOTE-Y")
-    assert fr["ok"] is True
-    assert "NOTE-Y" in seen["user"]
-
-
 # --- primitives-aware routing (F3+F2): measure, classify, route ---------------
 
 def test_count_pointer_defs_counts_consumable_exports(tmp_path):
@@ -1420,23 +1210,6 @@ def test_resolve_route_cli_override_beats_auto():
     assert af.resolve_route(None, iss, def_count=5, family=None) == "theorem"
 
 
-def test_dump_draft_writes_only_when_env_set(tmp_path, monkeypatch):
-    import json as _json
-    issue = {"number": 73}
-    lean = "theorem t : True := by sorry"
-    elab = {"errors": ["boom"], "sorry_count": 1, "warnings": []}
-    # unset ⇒ no-op (failed drafts are discarded unless a dir is requested)
-    monkeypatch.delenv("AUTOFORM_DUMP_DRAFTS", raising=False)
-    af._dump_draft(issue, 1, lean, elab)
-    assert not list(tmp_path.iterdir())
-    # set ⇒ writes the emitted draft + its elaborator verdict, per round
-    monkeypatch.setenv("AUTOFORM_DUMP_DRAFTS", str(tmp_path))
-    af._dump_draft(issue, 2, lean, elab)
-    assert (tmp_path / "draft-73-r2.lean").read_text() == lean
-    v = _json.loads((tmp_path / "draft-73-r2.errors.json").read_text())
-    assert v["errors"] == ["boom"] and v["sorry_count"] == 1
-
-
 def test_order_by_route_route_does_not_rank():
     # the route selects the PATH, not the priority — defs-routed issues carry
     # positive evidence and must not queue behind the whole theorem backlog.
@@ -1476,8 +1249,9 @@ def test_refill_records_carry_arch_stamp(monkeypatch, tmp_path):
     _two_stage_ok(monkeypatch)
     _pass_gates(monkeypatch)
     res = af.refill([_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
-                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
-    assert res["attempted"][0]["arch"] == af.ROUTING_ARCH
+                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000,
+                    agentic_formalize_fn=_good_agentic, slot_switch_fn=lambda s: None)
+    assert res["seeded"] and res["attempted"][0]["arch"] == af.ROUTING_ARCH
 
 
 def test_load_prior_unknowns_unions_across_records(tmp_path):
@@ -1505,10 +1279,10 @@ def test_refill_records_docstring_prose_slop_in_telemetry(monkeypatch, tmp_path)
             "statement": "s", "objects": [], "module_name": "M", "benchmark_id": "b",
             "docstring": "A powerful, cutting-edge tool.", "deferred": []}}
     monkeypatch.setattr(af, "draft_intent", slop_intent)
-    monkeypatch.setattr(af, "formalize_with_repair", _good_formalize)
     _pass_gates(monkeypatch)
     res = af.refill([_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
-                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
+                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000,
+                    agentic_formalize_fn=_good_agentic, slot_switch_fn=lambda s: None)
     assert res["attempted"][0]["telemetry"]["prose_slop"] >= 2   # powerful + cutting-edge
 
 
@@ -1516,7 +1290,8 @@ def test_refill_clean_docstring_has_zero_prose_slop(monkeypatch, tmp_path):
     _two_stage_ok(monkeypatch)          # _good_intent → docstring "d" (clean)
     _pass_gates(monkeypatch)
     res = af.refill([_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
-                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
+                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000,
+                    agentic_formalize_fn=_good_agentic, slot_switch_fn=lambda s: None)
     assert res["attempted"][0]["telemetry"]["prose_slop"] == 0
 
 
@@ -1663,7 +1438,6 @@ def test_draft_intent_threads_prior_lessons_to_chat():
 def test_refill_injects_prior_lessons_into_the_intent_prompt(monkeypatch, tmp_path):
     # the real draft_intent runs (not the _two_stage_ok stand-in) so the cross-tick
     # lesson threads intent → intent_messages → the drafter chat_fn.
-    monkeypatch.setattr(af, "formalize_with_repair", _good_formalize)
     _pass_gates(monkeypatch)
     seen = {}
 
@@ -1677,30 +1451,10 @@ def test_refill_injects_prior_lessons_into_the_intent_prompt(monkeypatch, tmp_pa
         "gates_tried": ["formalize", "unfaithful"], "prior_ticks": 1})
     res = af.refill([issue], reason_fn=intent_fn, intent_fn=intent_fn, prove_fn=_NOOP,
                     check_fn=_ELAB_OK, context_fn=lambda i: "", queue_dir=str(tmp_path),
-                    budget=100000)
+                    budget=100000, agentic_formalize_fn=_good_agentic, slot_switch_fn=lambda s: None)
     assert [s["issue"] for s in res["seeded"]] == [7]
     assert "PRIOR ATTEMPTS" in seen["user"]
     assert "fidelity" in seen["user"]
-
-
-def test_unknown_identifiers_match_live_elaborator_format():
-    # the VERBATIM error from the 2026-07-17 live run — capital U + backticks.
-    # the old regex (lowercase + straight quotes) never matched it, so the
-    # retrieval hook silently never fired in production.
-    live = "line 28:36: Unknown identifier `MathFin.vanillaPayoff`"
-    legacy = "unknown constant 'Foo.bar'"
-    assert af._unknown_identifiers([live, legacy]) == ["MathFin.vanillaPayoff", "Foo.bar"]
-
-
-def test_formalize_with_repair_returns_collected_unknowns():
-    checks = iter([{"errors": ["Unknown identifier `MathFin.vanillaPayoff`"], "sorry_count": 1},
-                   {"errors": [], "sorry_count": 1}])
-    r = af.formalize_with_repair(_INTENT, "", issue=_issue(5),
-                                 chat_fn=_script_chat([_formalize_reply(), _formalize_reply()]),
-                                 check_fn=lambda c: next(checks),
-                                 emit_fn=af.emit_target_files, rounds=2)
-    assert r["ok"] is True
-    assert r["unknowns"] == ["MathFin.vanillaPayoff"]
 
 
 # --- definitions path (F1): prompts, def extraction, defs gates ---------------
@@ -1725,16 +1479,6 @@ def test_intent_messages_defs_route_addendum_and_prior_unknowns():
 def test_intent_messages_theorem_route_has_no_defs_addendum():
     user = af.intent_messages(_ISSUE, "SIGS")[1]["content"]
     assert "NEW definitions" not in user
-
-
-def test_formalize_messages_defs_block_when_intent_names_definitions():
-    intent = {"statement": "s", "objects": [],
-              "definitions": [{"name": "knockInPayoff", "signature": "ℝ → ℝ → ℝ",
-                               "meaning": "in-part", "built_from": ["max"]}]}
-    user = af.formalize_messages(intent, "")[1]["content"]
-    assert "knockInPayoff" in user
-    assert "definitions" in user.lower()
-    assert "sorry" in user                             # only the THEOREM carries sorry
 
 
 def test_drafted_def_names_extracts_defs_not_theorem():
@@ -1906,14 +1650,14 @@ def test_refill_defs_route_requires_intent_definitions(monkeypatch, tmp_path):
     calls = {"formalize": 0}
     monkeypatch.setattr(af, "draft_intent", _good_intent)      # definitions: absent
 
-    def formalize(*a, **k):
+    def agentic(intent, ctx, issue, premises=""):
         calls["formalize"] += 1
-        return _good_formalize(*a, **k)
-    monkeypatch.setattr(af, "formalize_with_repair", formalize)
+        return _good_agentic(intent, ctx, issue, premises=premises)
     _pass_gates(monkeypatch)
     res = af.refill([_issue(5, route="defs")], reason_fn=_NOOP, prove_fn=_NOOP,
                     check_fn=_ELAB_OK, context_fn=lambda i: "", queue_dir=str(tmp_path),
-                    budget=100000, semantic_rounds=1)
+                    budget=100000, semantic_rounds=1,
+                    agentic_formalize_fn=agentic, slot_switch_fn=lambda s: None)
     assert res["seeded"] == []
     assert res["attempted"][0]["history"][0]["gate"] == "intent"
     assert calls["formalize"] == 0
@@ -1925,8 +1669,8 @@ def test_refill_defs_route_seeds_with_new_defs_header(monkeypatch, tmp_path):
         base["intent"]["definitions"] = [{"name": "knockInPayoff"}]
         return base
 
-    def formalize(intent_, g, *, issue, emit_fn, **kw):
-        lean_text, entry, _ = emit_fn(issue, _DEFS_STUB,
+    def agentic(intent_, ctx, issue, premises=""):
+        lean_text, entry, _ = af.emit_target_files(issue, _DEFS_STUB,
                                       {"module_name": intent_["module_name"],
                                        "benchmark_id": intent_["benchmark_id"],
                                        "docstring": "d",
@@ -1934,14 +1678,13 @@ def test_refill_defs_route_seeds_with_new_defs_header(monkeypatch, tmp_path):
         return {"ok": True, "stub": _DEFS_STUB, "meta": {}, "lean_text": lean_text,
                 "entry": entry, "tokens": 10}
     monkeypatch.setattr(af, "draft_intent", intent)
-    monkeypatch.setattr(af, "formalize_with_repair", formalize)
     _pass_gates(monkeypatch)
     monkeypatch.setattr(af, "defs_rejection",
                         lambda lt, nm, dn, **k: {"failed": False, "gate": None,
                                                  "verdict": "", "tokens": 0})
     res = af.refill([_issue(6, route="defs")], reason_fn=_NOOP, prove_fn=_NOOP,
                     check_fn=_ELAB_OK, context_fn=lambda i: "", queue_dir=str(tmp_path),
-                    budget=100000)
+                    budget=100000, agentic_formalize_fn=agentic, slot_switch_fn=lambda s: None)
     assert [s["issue"] for s in res["seeded"]] == [6]
     staged = (tmp_path / "cal-bk-6.lean").read_text()
     assert "-- new-defs:" in staged
@@ -1949,21 +1692,21 @@ def test_refill_defs_route_seeds_with_new_defs_header(monkeypatch, tmp_path):
 
 
 def test_refill_history_rows_carry_unknowns_and_family(monkeypatch, tmp_path):
-    def formalize(intent, g, **kw):
+    def agentic(intent, ctx, issue, premises=""):
         stub = "theorem t5 (h : p) : q := by sorry"
-        lean_text, entry, _ = kw["emit_fn"]({"number": 5, "area": "fixed-income",
+        lean_text, entry, _ = af.emit_target_files({"number": 5, "area": "fixed-income",
                                              "pointers": []}, stub,
                                             {"module_name": "T5", "benchmark_id": "b"})
         return {"ok": True, "stub": stub, "meta": {}, "lean_text": lean_text,
                 "entry": entry, "tokens": 10, "unknowns": ["MathFin.wanted"]}
     monkeypatch.setattr(af, "draft_intent", _good_intent)
-    monkeypatch.setattr(af, "formalize_with_repair", formalize)
     _pass_gates(monkeypatch)
     monkeypatch.setattr(af, "depth_rejection",
                         lambda lt, nm, ptr, **k: {"shallow": True, "verdict": "v", "tokens": 0})
     res = af.refill([_issue(5, pointers=["MathFin/A.lean"])], reason_fn=_NOOP, prove_fn=_NOOP,
                     check_fn=_ELAB_OK, context_fn=lambda i: "", queue_dir=str(tmp_path),
-                    budget=100000, semantic_rounds=1)
+                    budget=100000, semantic_rounds=1,
+                    agentic_formalize_fn=agentic, slot_switch_fn=lambda s: None)
     rec = res["attempted"][0]
     assert rec["family"] == "needs_primitives"
     assert rec["history"][0]["unknown_identifiers"] == ["MathFin.wanted"]
@@ -1986,23 +1729,19 @@ def _good_intent(i, ctx, *, chat_fn, feedback=None, **_kw):
         "benchmark_id": f"mf-fi-t{n}", "docstring": "d", "deferred": []}}
 
 
-def _good_formalize(intent, grounding, *, issue, chat_fn, check_fn, emit_fn, rounds,
-                    retrieve_fn=None, token_budget=None, proactive_premises=None,
-                    revision_note="", log=None, **_kw):
-    """Stand-in for formalize_with_repair — emits a real lean_text/entry from the intent
-    meta. `**_kw` absorbs future kwargs (the derivable_fn lesson, twice now)."""
+def _good_agentic(intent, ctx, issue, premises=""):
+    """Stand-in for agentic_formalize_fn — emits a real lean_text/entry from the intent meta."""
     n = issue["number"]
     stub = f"theorem t{n} (h : p) : q := by sorry"
     meta = {"module_name": intent["module_name"], "benchmark_id": intent["benchmark_id"],
             "docstring": "d", "deferred": []}
-    lean_text, entry, _ = emit_fn(issue, stub, meta)
+    lean_text, entry, _ = af.emit_target_files(issue, stub, meta)
     return {"ok": True, "stub": stub, "meta": meta, "lean_text": lean_text,
             "entry": entry, "tokens": 10}
 
 
 def _two_stage_ok(monkeypatch):
     monkeypatch.setattr(af, "draft_intent", _good_intent)
-    monkeypatch.setattr(af, "formalize_with_repair", _good_formalize)
 
 
 def _pass_gates(monkeypatch):
@@ -2023,7 +1762,8 @@ def test_refill_stages_a_good_issue(monkeypatch, tmp_path):
     _two_stage_ok(monkeypatch)
     _pass_gates(monkeypatch)
     res = af.refill([_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
-                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
+                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000,
+                    agentic_formalize_fn=_good_agentic, slot_switch_fn=lambda s: None)
     assert [s["issue"] for s in res["seeded"]] == [5]
     assert (tmp_path / "cal-bk-5.lean").exists()
     assert (tmp_path / "cal-bk-5.entry.json").exists()
@@ -2040,14 +1780,15 @@ def test_refill_skips_when_intent_unparseable(monkeypatch, tmp_path):
 
 
 def test_refill_skips_when_formalization_fails(monkeypatch, tmp_path):
-    # stage 2 (leanstral) cannot produce an elaborating statement → skip.
+    # the agentic formalize cannot produce an elaborating statement → skip.
     monkeypatch.setattr(af, "draft_intent", _good_intent)
-    monkeypatch.setattr(af, "formalize_with_repair",
-                        lambda *a, **k: {"ok": False, "stub": None, "meta": None,
-                                         "lean_text": None, "entry": None, "tokens": 20})
     _pass_gates(monkeypatch)
     res = af.refill([_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
-                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
+                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000,
+                    agentic_formalize_fn=lambda intent, ctx, issue, premises="":
+                        {"ok": False, "stub": None, "meta": None,
+                         "lean_text": None, "entry": None, "tokens": 20},
+                    slot_switch_fn=lambda s: None)
     assert res["seeded"] == []
     assert not (tmp_path / "cal-bk-5.lean").exists()
 
@@ -2060,7 +1801,8 @@ def test_refill_skips_shallow_statement(monkeypatch, tmp_path):
     monkeypatch.setattr(af, "depth_rejection",
                         lambda lt, nm, ptr, **k: {"shallow": True, "verdict": "no domain def", "tokens": 0})
     res = af.refill([_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
-                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
+                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000,
+                    agentic_formalize_fn=_good_agentic, slot_switch_fn=lambda s: None)
     assert res["seeded"] == []
     assert not (tmp_path / "cal-bk-5.lean").exists()
 
@@ -2076,7 +1818,8 @@ def test_refill_depth_gate_can_be_disabled(monkeypatch, tmp_path):
         return {"shallow": True, "verdict": "would reject", "tokens": 0}
     monkeypatch.setattr(af, "depth_rejection", dep)
     res = af.refill([_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
-                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000, depth_gate=False)
+                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000, depth_gate=False,
+                    agentic_formalize_fn=_good_agentic, slot_switch_fn=lambda s: None)
     assert [s["issue"] for s in res["seeded"]] == [5]
     assert calls["n"] == 0
 
@@ -2092,7 +1835,8 @@ def test_refill_skips_vacuous_then_stages_next(monkeypatch, tmp_path):
     monkeypatch.setattr(af, "hypothesis_rejection",
                         lambda lt, nm, **k: {"vacuous": "theorem t1 " in lt, "tokens": 1})
     res = af.refill([_issue(1), _issue(2)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
-                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
+                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000,
+                    agentic_formalize_fn=_good_agentic, slot_switch_fn=lambda s: None)
     assert [s["issue"] for s in res["seeded"]] == [2]
     assert not (tmp_path / "cal-bk-1.lean").exists()
     assert (tmp_path / "cal-bk-2.lean").exists()
@@ -2107,7 +1851,8 @@ def test_refill_skips_unfaithful_judge(monkeypatch, tmp_path):
                         lambda i, s, chat_fn, deferred=None: {"faithful": False, "verdict": "weaker", "tokens": 1})
     monkeypatch.setattr(af, "intent_fidelity_check", lambda intent, s, *, reason_fn: {"faithful": True, "tokens": 1})
     res = af.refill([_issue(7)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
-                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
+                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000,
+                    agentic_formalize_fn=_good_agentic, slot_switch_fn=lambda s: None)
     assert res["seeded"] == []
     assert not (tmp_path / "cal-bk-7.lean").exists()
 
@@ -2122,7 +1867,8 @@ def test_refill_skips_intent_drift(monkeypatch, tmp_path):
     monkeypatch.setattr(af, "intent_fidelity_check",
                         lambda intent, s, *, reason_fn: {"faithful": False, "verdict": "dropped hyp", "tokens": 1})
     res = af.refill([_issue(7)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
-                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
+                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000,
+                    agentic_formalize_fn=_good_agentic, slot_switch_fn=lambda s: None)
     assert res["seeded"] == []
 
 
@@ -2134,41 +1880,12 @@ def test_refill_skips_issue_on_step_exception(monkeypatch, tmp_path):
             raise RuntimeError("HTTP 429 from Mistral API")
         return _good_intent(i, ctx, chat_fn=chat_fn)
     monkeypatch.setattr(af, "draft_intent", boom)
-    monkeypatch.setattr(af, "formalize_with_repair", _good_formalize)
     _pass_gates(monkeypatch)
     res = af.refill([_issue(1), _issue(2)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
-                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
+                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000,
+                    agentic_formalize_fn=_good_agentic, slot_switch_fn=lambda s: None)
     assert [s["issue"] for s in res["seeded"]] == [2]
     assert (tmp_path / "cal-bk-2.lean").exists()
-
-
-def test_refill_wires_intent_formalize_prove_fns(monkeypatch, tmp_path):
-    seen = {}
-    monkeypatch.setattr(
-        af, "draft_intent",
-        lambda i, ctx, *, chat_fn, feedback=None, **_kw:
-        seen.update(intent=chat_fn) or _good_intent(i, ctx, chat_fn=chat_fn))
-    monkeypatch.setattr(
-        af, "formalize_with_repair",
-        lambda intent, g, *, issue, chat_fn, check_fn, emit_fn, rounds, retrieve_fn=None,
-        token_budget=None, proactive_premises=None, revision_note="", log=None, **_kw:
-        seen.update(formalize=chat_fn) or _good_formalize(intent, g, issue=issue, chat_fn=chat_fn,
-                                                          check_fn=check_fn, emit_fn=emit_fn, rounds=rounds))
-    monkeypatch.setattr(af, "depth_rejection", lambda lt, nm, ptr, **k: {"shallow": False, "tokens": 0})
-    monkeypatch.setattr(af, "hypothesis_rejection",
-                        lambda lt, nm, **k: seen.update(gate=k["chat_fn"]) or {"vacuous": False, "tokens": 1})
-    monkeypatch.setattr(af, "disproof", lambda *a, **k: {"false": False, "tokens": 1})
-    monkeypatch.setattr(af, "judge_faithfulness",
-                        lambda i, s, chat_fn, deferred=None: seen.update(judge=chat_fn) or {"faithful": True, "tokens": 1})
-    monkeypatch.setattr(af, "intent_fidelity_check", lambda intent, s, *, reason_fn: {"faithful": True, "tokens": 1})
-    R = lambda m: ("R", 0)
-    P = lambda m: ("P", 0)
-    F = lambda m: ("F", 0)
-    af.refill([_issue(9)], reason_fn=R, prove_fn=P, formalize_fn=F, check_fn=_ELAB_OK,
-              context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
-    assert seen["intent"] is R and seen["judge"] is R    # magistral: intent + judge
-    assert seen["formalize"] is F                        # leanstral: formalize
-    assert seen["gate"] is P                             # leanstral: kernel gates
 
 
 # --- semantic repair cascade (bounded feedback re-draft loop) -----------------
@@ -2196,22 +1913,14 @@ def test_semantic_verdict_cheapest_first_short_circuits(monkeypatch):
 
 def test_refill_repairs_shallow_draft_with_feedback(monkeypatch, tmp_path):
     # attempt 1 is depth-rejected; the re-draft (attempt 2) must carry the depth
-    # feedback into BOTH stages, then seed. This is the observed #53/#66 failure.
-    seen = {"intent_feedback": [], "revision_notes": []}
+    # feedback into the intent stage, then seed. This is the observed #53/#66 failure.
+    seen = {"intent_feedback": []}
 
     def intent(i, ctx, *, chat_fn, feedback=None, **_kw):
         seen["intent_feedback"].append(feedback)
         return _good_intent(i, ctx, chat_fn=chat_fn)
 
-    def formalize(intent_, g, *, issue, chat_fn, check_fn, emit_fn, rounds,
-                  retrieve_fn=None, token_budget=None, proactive_premises=None,
-                  revision_note="", log=None, **_kw):
-        seen["revision_notes"].append(revision_note)
-        return _good_formalize(intent_, g, issue=issue, chat_fn=chat_fn,
-                               check_fn=check_fn, emit_fn=emit_fn, rounds=rounds)
-
     monkeypatch.setattr(af, "draft_intent", intent)
-    monkeypatch.setattr(af, "formalize_with_repair", formalize)
     _pass_gates(monkeypatch)
     calls = {"n": 0}
 
@@ -2221,14 +1930,13 @@ def test_refill_repairs_shallow_draft_with_feedback(monkeypatch, tmp_path):
     monkeypatch.setattr(af, "depth_rejection", dep)
     res = af.refill([_issue(5, pointers=["MathFin/FixedIncome/ZCB.lean"])],
                     reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
-                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
+                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000,
+                    agentic_formalize_fn=_good_agentic, slot_switch_fn=lambda s: None)
     assert [s["issue"] for s in res["seeded"]] == [5]
     assert seen["intent_feedback"][0] is None                       # round 1: fresh
     assert "depth" in seen["intent_feedback"][1]                    # round 2: the verdict
     assert "EXPRESSED THROUGH" in seen["intent_feedback"][1]        # the repair direction
     assert "theorem t5" in seen["intent_feedback"][1]               # rejected stub included
-    assert seen["revision_notes"][0] == ""                          # round 1: no note
-    assert seen["revision_notes"][1] == seen["intent_feedback"][1]  # both stages see it
 
 
 def test_refill_repairs_trivial_draft_with_feedback(monkeypatch, tmp_path):
@@ -2241,7 +1949,8 @@ def test_refill_repairs_trivial_draft_with_feedback(monkeypatch, tmp_path):
         return {"trivial": calls["n"] == 1, "verdict": "closed by rfl", "tokens": 0}
     monkeypatch.setattr(af, "triviality_rejection", triv)
     res = af.refill([_issue(6)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
-                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
+                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000,
+                    agentic_formalize_fn=_good_agentic, slot_switch_fn=lambda s: None)
     assert [s["issue"] for s in res["seeded"]] == [6]
     assert calls["n"] == 2
 
@@ -2253,7 +1962,8 @@ def test_refill_exhausts_semantic_rounds_and_records_obstruction(monkeypatch, tm
                         lambda lt, nm, ptr, **k: {"shallow": True, "verdict": "v", "tokens": 0})
     res = af.refill([_issue(5, pointers=["MathFin/A.lean"])], reason_fn=_NOOP, prove_fn=_NOOP,
                     check_fn=_ELAB_OK, context_fn=lambda i: "", queue_dir=str(tmp_path),
-                    budget=100000, semantic_rounds=2)
+                    budget=100000, semantic_rounds=2,
+                    agentic_formalize_fn=_good_agentic, slot_switch_fn=lambda s: None)
     assert res["seeded"] == []
     rec = res["attempted"][0]
     assert rec["issue"] == 5 and rec["outcome"] == "depth" and rec["attempts"] == 2
@@ -2267,13 +1977,13 @@ def test_refill_semantic_rounds_one_is_single_shot(monkeypatch, tmp_path):
         calls["n"] += 1
         return _good_intent(i, ctx, chat_fn=chat_fn)
     monkeypatch.setattr(af, "draft_intent", intent)
-    monkeypatch.setattr(af, "formalize_with_repair", _good_formalize)
     _pass_gates(monkeypatch)
     monkeypatch.setattr(af, "depth_rejection",
                         lambda lt, nm, ptr, **k: {"shallow": True, "verdict": "v", "tokens": 0})
     res = af.refill([_issue(5, pointers=["MathFin/A.lean"])], reason_fn=_NOOP, prove_fn=_NOOP,
                     check_fn=_ELAB_OK, context_fn=lambda i: "", queue_dir=str(tmp_path),
-                    budget=100000, semantic_rounds=1)
+                    budget=100000, semantic_rounds=1,
+                    agentic_formalize_fn=_good_agentic, slot_switch_fn=lambda s: None)
     assert res["seeded"] == []
     assert calls["n"] == 1                              # the old single-shot behavior
 
@@ -2282,7 +1992,8 @@ def test_refill_attempted_records_success(monkeypatch, tmp_path):
     _two_stage_ok(monkeypatch)
     _pass_gates(monkeypatch)
     res = af.refill([_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
-                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
+                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000,
+                    agentic_formalize_fn=_good_agentic, slot_switch_fn=lambda s: None)
     rec = res["attempted"][0]
     assert rec["issue"] == 5 and rec["outcome"] == "seeded" and rec["attempts"] == 1
     assert rec["history"] == []
@@ -2297,13 +2008,13 @@ def test_refill_budget_stops_semantic_loop(monkeypatch, tmp_path):
         calls["n"] += 1
         return _good_intent(i, ctx, chat_fn=chat_fn)
     monkeypatch.setattr(af, "draft_intent", intent)
-    monkeypatch.setattr(af, "formalize_with_repair", _good_formalize)
     _pass_gates(monkeypatch)
     monkeypatch.setattr(af, "depth_rejection",
                         lambda lt, nm, ptr, **k: {"shallow": True, "verdict": "v", "tokens": 0})
     res = af.refill([_issue(5, pointers=["MathFin/A.lean"])], reason_fn=_NOOP, prove_fn=_NOOP,
                     check_fn=_ELAB_OK, context_fn=lambda i: "", queue_dir=str(tmp_path),
-                    budget=8, semantic_rounds=3)
+                    budget=8, semantic_rounds=3,
+                    agentic_formalize_fn=_good_agentic, slot_switch_fn=lambda s: None)
     assert calls["n"] == 1
     assert res["attempted"][0]["history"][-1]["gate"] == "budget"
 
@@ -2354,84 +2065,6 @@ def test_draft_intent_not_ok_when_unparseable():
 
 _INTENT = {"statement": "P1 = P2*(1+d)", "objects": ["MathFin.zcb"], "module_name": "FRA",
            "benchmark_id": "mf-fi-fra", "docstring": "d", "deferred": []}
-
-
-def _formalize_reply(concl="x = x", name="foo"):
-    return f"```lean\ntheorem {name} (x : ℝ) : {concl} := by sorry\n```"
-
-
-def test_formalize_messages_carry_intent_objects_and_grounding():
-    msgs = af.formalize_messages(_INTENT, "SIGS")
-    joined = " ".join(m["content"] for m in msgs)
-    assert "P1 = P2*(1+d)" in joined and "MathFin.zcb" in joined and "SIGS" in joined
-    assert ":= by sorry" in joined
-
-
-def test_formalize_with_repair_succeeds_first_round():
-    r = af.formalize_with_repair(_INTENT, "", issue=_issue(5), chat_fn=_script_chat([_formalize_reply()]),
-                                 check_fn=_ELAB_OK, emit_fn=af.emit_target_files, rounds=3)
-    assert r["ok"] is True and "theorem foo" in r["lean_text"] and r["tokens"] == 10
-
-
-def test_formalize_with_repair_repairs_on_elaboration_error():
-    replies = [_formalize_reply(concl="x ²"), _formalize_reply(concl="x = x")]
-    checks = iter([{"success": False, "errors": ["unexpected token '²'"], "sorry_count": 1},
-                   {"success": True, "errors": [], "sorry_count": 1}])
-    r = af.formalize_with_repair(_INTENT, "", issue=_issue(5), chat_fn=_script_chat(replies),
-                                 check_fn=lambda c: next(checks), emit_fn=af.emit_target_files, rounds=3)
-    assert r["ok"] is True and "x = x" in r["lean_text"]
-
-
-def test_formalize_with_repair_repairs_lint_violations():
-    # elaborates on round 1 but lint-dirty (snake_case def, missing docstring) —
-    # the loop must feed the lint report back and accept the clean round 2
-    dirty = ("```lean\ndef par_swap_rate (x : ℝ) : ℝ := x\n"
-             "theorem foo (x : ℝ) : x = x := by sorry\n```")
-    clean = ("```lean\n/-- Par rate. -/\ndef parSwapRate (x : ℝ) : ℝ := x\n"
-             "theorem foo (x : ℝ) : x = x := by sorry\n```")
-    seen = []
-
-    def chat(msgs):
-        seen.append(msgs)
-        return ([dirty, clean][len(seen) - 1], 10)
-    r = af.formalize_with_repair(_INTENT, "", issue=_issue(5), chat_fn=chat,
-                                 check_fn=_ELAB_OK, emit_fn=af.emit_target_files, rounds=3)
-    assert r["ok"] is True and "parSwapRate" in r["lean_text"]
-    fb = " ".join(m["content"] for m in seen[1])
-    assert "lake lint" in fb and "lowerCamelCase" in fb and "parSwapRate" in fb
-
-
-def test_formalize_with_repair_gives_up_on_persistent_lint_dirt():
-    dirty = ("```lean\ndef par_swap_rate (x : ℝ) : ℝ := x\n"
-             "theorem foo (x : ℝ) : x = x := by sorry\n```")
-    r = af.formalize_with_repair(_INTENT, "", issue=_issue(5),
-                                 chat_fn=_script_chat([dirty, dirty]),
-                                 check_fn=_ELAB_OK, emit_fn=af.emit_target_files, rounds=2)
-    assert r["ok"] is False
-
-
-def test_formalize_contract_demands_lint_cleanliness():
-    # the drafter is TOLD the lint bar (right-first-time), the gate enforces it
-    assert "docstring" in af.FORMALIZE_SYSTEM and "lowerCamelCase" in af.FORMALIZE_SYSTEM
-    intent = {**_INTENT, "definitions": [{"name": "annuity", "signature": "ℝ", "meaning": "m"}]}
-    joined = " ".join(m["content"] for m in af.formalize_messages(intent, ""))
-    assert "/--" in joined and "lowerCamelCase" in joined
-
-
-def test_formalize_with_repair_injects_loogle_on_unknown_identifier():
-    replies = [_formalize_reply(concl="Foo.bar x"), _formalize_reply(concl="x = x")]
-    seen = []
-
-    def chat(msgs):
-        seen.append(msgs)
-        return (replies[len(seen) - 1], 10)
-    checks = iter([{"success": False, "errors": ["unknown identifier 'Foo.bar'"], "sorry_count": 1},
-                   {"success": True, "errors": [], "sorry_count": 1}])
-    r = af.formalize_with_repair(_INTENT, "", issue=_issue(5), chat_fn=chat,
-                                 check_fn=lambda c: next(checks), emit_fn=af.emit_target_files,
-                                 rounds=3, retrieve_fn=lambda nm: f"CANDIDATES:{nm}=real.bar")
-    assert r["ok"] is True
-    assert "CANDIDATES:Foo.bar" in " ".join(m["content"] for m in seen[1])   # loogle fed back
 
 
 def test_assistant_turn_substitutes_placeholder_for_empty():
@@ -2611,25 +2244,6 @@ def test_derivable_hypotheses_fails_open_on_foreign_or_unlocatable_errors():
     assert af.derivable_hypotheses(_DER_MOD, check_fn=unlocatable) == []
 
 
-def test_formalize_with_repair_feeds_back_derivable_hypotheses():
-    calls = {"n": 0}
-
-    def fake_der(lean_text):
-        calls["n"] += 1
-        return ["hP"] if calls["n"] == 1 else []
-    seen = []
-
-    def chat(msgs):
-        seen.append(msgs)
-        return (_formalize_reply(), 10)
-    r = af.formalize_with_repair(_INTENT, "", issue=_issue(5), chat_fn=chat,
-                                 check_fn=_ELAB_OK, emit_fn=af.emit_target_files,
-                                 rounds=3, derivable_fn=fake_der)
-    assert r["ok"] is True and len(seen) == 2
-    fb = " ".join(m["content"] for m in seen[1])
-    assert "hP" in fb and "provable" in fb
-
-
 # --- ∧-bundle advisory + core/corollary stub shape -----------------------------
 
 
@@ -2639,84 +2253,12 @@ def test_bundle_conclusion_detects_top_level_and_only():
     assert af.bundle_conclusion(" x = y ") is False
 
 
-def test_formalize_with_repair_advises_once_on_bundle_then_accepts():
-    bundle = "```lean\ntheorem foo (x : ℝ) : x = x ∧ 0 ≤ x * x := by sorry\n```"
-    seen = []
-
-    def chat(msgs):
-        seen.append(msgs)
-        return (bundle, 10)
-    r = af.formalize_with_repair(_INTENT, "", issue=_issue(5), chat_fn=chat,
-                                 check_fn=_ELAB_OK, emit_fn=af.emit_target_files, rounds=3)
-    assert r["ok"] is True and len(seen) == 2   # one advisory round, then accepted as-is
-    fb = " ".join(m["content"] for m in seen[1])
-    assert "∧" in fb and "corollar" in fb.lower()
-
-
-def test_formalize_with_repair_accepts_bundle_on_last_round():
-    # regression (#73 defs seed): a ∧-bundle stub that ELABORATES on the FINAL
-    # round must be ACCEPTED, not discarded by the soft advisory (which has no
-    # round left to land in). Before the fix this dropped a good errors:[]/sorry:1
-    # stub and reported "no elaborating Lean after N rounds".
-    r = af.formalize_with_repair(_INTENT, "", issue=_issue(5),
-                                 chat_fn=_script_chat([_formalize_reply(concl="x = y ∧ y = x")]),
-                                 check_fn=_ELAB_OK, emit_fn=af.emit_target_files, rounds=1)
-    assert r["ok"] is True and "∧" in r["lean_text"]
-
-
-def test_formalize_with_repair_retries_no_code_without_consuming_a_round():
-    # a no-code reply (leanstral at high reasoning effort returns ~21k tokens and no
-    # ```lean block ~half the time) is a transient glitch, NOT a round: with rounds=1,
-    # two no-code replies then a good stub must still succeed — the no-code replies
-    # neither consume the productive round nor charge the token budget.
-    replies = iter(["(reasoning, no code block)", "(still no code)",
-                    _formalize_reply(concl="x = x")])
-
-    def chat(_msgs):
-        return (next(replies), 10)
-    r = af.formalize_with_repair(_INTENT, "", issue=_issue(5), chat_fn=chat,
-                                 check_fn=_ELAB_OK, emit_fn=af.emit_target_files, rounds=1)
-    assert r["ok"] is True and "x = x" in r["lean_text"]
-    assert r["tokens"] == 10          # only the productive reply is charged
-
-
-def test_formalize_with_repair_gives_up_after_persistent_no_code():
-    # all replies lack a ```lean block — the no-code retries are BOUNDED (no hang),
-    # then it gives up with ok=False.
-    calls = {"n": 0}
-
-    def chat(_msgs):
-        calls["n"] += 1
-        return ("no code here at all", 10)
-    r = af.formalize_with_repair(_INTENT, "", issue=_issue(5), chat_fn=chat,
-                                 check_fn=_ELAB_OK, emit_fn=af.emit_target_files, rounds=2)
-    assert r["ok"] is False
-    assert calls["n"] <= 4            # bounded retries, not an infinite loop
-
-
-def test_formalize_accepts_core_plus_sorry_free_corollary():
-    two = ("```lean\n/-- core. -/\ntheorem coreThm (x : ℝ) (hx : x ≠ 0) : x / x = 1 "
-           ":= by sorry\n\n/-- issue-shaped. -/\ntheorem corThm (x : ℝ) (hx : x ≠ 0) :"
-           " x / x = 1 := coreThm x hx\n```")
-    r = af.formalize_with_repair(_INTENT, "", issue=_issue(5), chat_fn=_script_chat([two]),
-                                 check_fn=_ELAB_OK, emit_fn=af.emit_target_files, rounds=3)
-    assert r["ok"] is True and "corThm" in r["lean_text"]
-
-
 def test_rebuild_snippet_refuses_foreign_application():
     # the snippet re-exports a DIFFERENT theorem than the stripped core (the
     # corollary shape) — rebuilding it against the core would corrupt it
     snip = ("import M\n\ntheorem mf_x (a : ℝ) (h : 0 ≤ a) : a ≥ 0 :=\n"
             "  MathFin.otherThm a h\n")
     assert af._rebuild_snippet(snip, _STRONG_MOD, "premium_ge_mean") is None
-
-
-def test_contracts_carry_corollary_shape():
-    assert "corollar" in af.FORMALIZE_SYSTEM.lower()
-    assert "corollary" in af.INTENT_DEFS_ADDENDUM.lower()
-    intent = {**_INTENT, "corollary": {"name": "mf_shape", "statement": "the zcb case"}}
-    joined = " ".join(m["content"] for m in af.formalize_messages(intent, ""))
-    assert "mf_shape" in joined and "the zcb case" in joined
 
 
 # --- post-gate proof golf -------------------------------------------------------
@@ -2761,100 +2303,6 @@ def test_golf_candidate_fails_open_on_regate_failure_or_no_lean():
                            chat_fn=lambda m: (f"```lean\n{_GOLFED.replace('hx', 'sorry')}\n```", 10),
                            regate_fn=lambda c: {"passed": True})
     assert r3["golfed"] is False   # a golf that reintroduces sorry is never accepted
-
-
-def test_formalize_with_repair_guards_empty_assistant_content():
-    # a free-tier EMPTY reply must not become an empty-content assistant message on the
-    # next round (Mistral 400: "Assistant message must have either content or tool_calls").
-    seen = []
-    replies = ["", _formalize_reply(concl="x = x")]
-
-    def chat(msgs):
-        seen.append(list(msgs))
-        return (replies[len(seen) - 1], 5)
-    r = af.formalize_with_repair(_INTENT, "", issue=_issue(5), chat_fn=chat,
-                                 check_fn=lambda c: {"success": True, "errors": [], "sorry_count": 1},
-                                 emit_fn=af.emit_target_files, rounds=3)
-    assert r["ok"] is True
-    assert all(not (m["role"] == "assistant" and not m["content"]) for m in seen[1])   # 2nd call clean
-
-
-def test_formalize_with_repair_logs_each_round():
-    # instrumentation: each round emits a one-line diagnostic (why a draft fails is not opaque).
-    logs = []
-    replies = [_formalize_reply(concl="x ²"), _formalize_reply(concl="x = x")]
-    checks = iter([{"success": False, "errors": ["unexpected token '²'"], "sorry_count": 1},
-                   {"success": True, "errors": [], "sorry_count": 1}])
-    af.formalize_with_repair(_INTENT, "", issue=_issue(5), chat_fn=_script_chat(replies),
-                             check_fn=lambda c: next(checks), emit_fn=af.emit_target_files,
-                             rounds=3, log=lambda m: logs.append(m))
-    assert any("round 1" in m and "elab error" in m for m in logs)   # first round: the error
-    assert any("elaborates" in m for m in logs)                      # second round: success
-
-
-def test_formalize_with_repair_aborts_at_token_budget():
-    # a doomed draft must not burn every round (#61 spent 77k tokens failing) — stop once
-    # the cumulative token budget is exceeded, even if rounds remain.
-    calls = {"n": 0}
-
-    def chat(msgs):
-        calls["n"] += 1
-        return (_formalize_reply(concl="x ²"), 30)   # never elaborates; 30 tokens/round
-    r = af.formalize_with_repair(_INTENT, "", issue=_issue(5), chat_fn=chat,
-                                 check_fn=lambda c: {"success": False, "errors": ["bad"], "sorry_count": 1},
-                                 emit_fn=af.emit_target_files, rounds=10, token_budget=50)
-    assert r["ok"] is False
-    assert calls["n"] == 2       # r1: 0<50 spend→30; r2: 30<50 spend→60; r3: 60>=50 break
-
-
-def test_formalize_with_repair_gives_up_after_rounds():
-    r = af.formalize_with_repair(_INTENT, "", issue=_issue(5),
-                                 chat_fn=_script_chat([_formalize_reply("bad ²"), _formalize_reply("worse ²")]),
-                                 check_fn=lambda c: {"success": False, "errors": ["e"], "sorry_count": 1},
-                                 emit_fn=af.emit_target_files, rounds=2)
-    assert r["ok"] is False
-
-
-def test_repair_hint_partial_application():
-    # #67's real CI failure: `… * MathFin.zcb r` (a ℝ→ℝ→ℝ function) instead of `… * zcb r t T`.
-    errs = ["line 29:13: failed to synthesize instance of type class\n  HMul ℝ (ℝ → ℝ → ℝ) ?m.33"]
-    h = af._repair_hint(errs)
-    assert "PARTIALLY-APPLIED" in h and "all its arguments" in h.lower()
-
-
-def test_import_error_handled_by_prelint_not_hint():
-    # the mid-file-import error is now PREVENTED deterministically by _prelint_stub (it
-    # strips stub-level imports), so no repair hint is emitted for it — the error can no
-    # longer reach the model. Superseded the old soft-hint approach it kept ignoring.
-    errs = ["line 26:0: invalid 'import' command, it must be used in the beginning of the file"]
-    assert af._repair_hint(errs) == ""
-    assert "import" not in af._prelint_stub("import Mathlib\ntheorem t : True := by sorry")
-
-
-def test_repair_hint_empty_for_generic_error():
-    assert af._repair_hint(["line 5: unsolved goals"]) == ""
-
-
-def test_formalize_with_repair_appends_targeted_hint_on_partial_application():
-    # the HMul-function hint must reach the repair prompt (generic feedback couldn't fix #67).
-    seen = []
-    replies = [_formalize_reply(concl="x * (fun a b => a)"), _formalize_reply(concl="x = x")]
-
-    def chat(msgs):
-        seen.append(list(msgs))
-        return (replies[len(seen) - 1], 10)
-    checks = iter([{"success": False, "sorry_count": 1,
-                    "errors": ["line 29:13: failed to synthesize instance of type class\n  HMul ℝ (ℝ → ℝ → ℝ) ?m"]},
-                   {"success": True, "errors": [], "sorry_count": 1}])
-    af.formalize_with_repair(_INTENT, "", issue=_issue(5), chat_fn=chat,
-                             check_fn=lambda c: next(checks), emit_fn=af.emit_target_files, rounds=3)
-    assert "PARTIALLY-APPLIED" in " ".join(m["content"] for m in seen[1])   # 2nd call got the hint
-
-
-def test_unknown_identifiers_extracted_and_deduped():
-    errs = ["line 3: unknown identifier 'Foo.bar'", "line 5: unknown constant 'Baz'",
-            "again unknown identifier 'Foo.bar'", "unrelated error"]
-    assert af._unknown_identifiers(errs) == ["Foo.bar", "Baz"]
 
 
 def test_loogle_candidates_uses_injected_runner():
@@ -2918,23 +2366,6 @@ def test_prepare_issues_filters_and_enriches():
     assert out[0]["area"] == "fixed-income"
     assert out[0]["pointers"] == ["MathFin/FixedIncome/ZCB.lean"]
     assert out[0]["body"].startswith("## Task")
-
-
-def test_formalize_injects_proactive_premises_into_first_message():
-    captured = {}
-
-    def chat(msgs):
-        captured["msgs"] = msgs
-        return ("```lean\ntheorem t : True := by sorry\n```", 10)
-
-    intent = {"module_name": "M", "benchmark_id": "b", "statement": "True", "docstring": ""}
-    af.formalize_with_repair(
-        intent, "GROUNDING", issue={"number": 1, "name": "n", "domain": "d"},
-        chat_fn=chat, check_fn=lambda t: {"errors": [], "sorry_count": 1},
-        emit_fn=lambda i, s, m: ("LEAN", {"id": "x"}, None),
-        rounds=1, proactive_premises="MathFin.zcb : ℝ → ℝ")
-    blob = "\n".join(m["content"] for m in captured["msgs"])
-    assert "MathFin.zcb : ℝ → ℝ" in blob
 
 
 # --- build_retrieve_fns (backend selection + fails-open fallback) -----------

@@ -69,18 +69,12 @@ class AutoformalizeConfig:
     max_issues: int = 1
     max_attempt_issues: int = 3
     gate_budget: int = 20_000
-    prover_model: str = "labs-leanstral-1-5"
-    draft_max_tokens: int = 16_000   # reasoning headroom (magistral emits a think trace)
+    prover_model: str = "labs-leanstral-1-5"   # leanstral: the kernel gate battery
     # pointers-scoped depth gate: reject a true-but-shallow stub whose TYPE consumes
     # no def from its `-- pointers:` MathFin modules (a Mathlib identity in domain
     # clothing). `false` disables it (rely on the kernel/judge gates + human merge).
     depth_gate: bool = True
-    # two-stage draft: magistral SPECIFIES the intended statement (its strength), leanstral
-    # FORMALIZES it into elaborating Lean (its strength). intent_model is the strongest
-    # Magistral reasoning tier (Medium 1.2); formalize_model is the Lean prover.
-    intent_model: str = "magistral-medium-latest"
-    formalize_model: str = "labs-leanstral-1-5"
-    formalize_rounds: int = 3   # leanstral formalize + compiler-feedback repair rounds
+    formalize_rounds: int = 3   # claude completion-formalize + compiler-feedback repair rounds
     retrieval: bool = True      # loogle-augmented repair on `unknown identifier X`
     formalize_token_budget: int = 40_000   # early-abort a doomed formalization (a hard issue
                                            # like #61 else burns ~77k/draw grinding all rounds)
@@ -135,16 +129,10 @@ class DecomposeConfig:
 
 @dataclasses.dataclass(frozen=True)
 class DrafterConfig:
-    """Config for the DRAFT-stage engine (the `[drafter]` block, item I). `engine`
-    picks who drafts intent+formalize: "mistral" (default) is today's magistral-intent
-    + leanstral-formalize; "claude" routes both draft sub-stages to a `claude -p`
-    adapter. Leanstral still PROVES and the judge stays magistral either way — the gate
-    battery is drafter-agnostic (the SP1-SP3 payoff). `mode`/`on_cap` matter only for
-    engine="claude". Default = today's cron, byte-identical until flipped.
-    Design: docs/superpowers/specs/2026-07-24-frontier-drafter-design.md."""
-    engine: str = "mistral"       # "mistral" | "claude"
-    mode: str = "completion"      # "completion" | "agentic" (claude only; agentic = phase 2)
-    on_cap: str = "fallback"      # on a subscription cap: "fallback" (mistral this tick) | "defer" (requeue)
+    """Config for the DRAFT stage (the `[drafter]` block). Claude drafts the intent,
+    formalizes agentically (`claude -p` + lean-lsp, self-validating to elaboration), and
+    JUDGES; Leanstral PROVES. The only knob is which Claude model drafts. A subscription cap
+    defers the target (there is no fallback drafter — Claude is the only one)."""
     claude_model: str = "claude-sonnet-5"   # `claude -p --model`; the CLI default (fable) is too weak to draft
 
     @staticmethod

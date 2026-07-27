@@ -44,15 +44,8 @@ budget = 400000
 max_issues = 1
 max_attempt_issues = 3
 gate_budget = 20000
-prover_model = "labs-leanstral-1-5"
-draft_max_tokens = 16000   # reasoning headroom — magistral emits a think trace before the code
-# two-stage draft: magistral SPECIFIES the intended statement in prose (its strength),
-# leanstral FORMALIZES it into elaborating Lean (its strength). draft failures were Lean
-# failures (unknown identifiers, let-scoping, coercions), so the Lean writing moves to the
-# Lean model. intent_model is the strongest Magistral reasoning tier (Medium 1.2 / 2509).
-intent_model = "magistral-medium-latest"
-formalize_model = "labs-leanstral-1-5"
-formalize_rounds = 3       # leanstral formalize + compiler-feedback repair rounds
+prover_model = "labs-leanstral-1-5"   # leanstral: the kernel gate battery (vacuity / disproof)
+formalize_rounds = 3       # bounded compiler-feedback rounds (retained knob)
 formalize_token_budget = 40000  # early-abort a doomed formalization (a hard issue like #61 else
                                 # burns ~77k tokens/draw grinding every round without elaborating)
 retrieval = true           # on `unknown identifier X`, feed loogle candidates back (elaboration-gated)
@@ -99,16 +92,9 @@ max_leaves = 3             # tight splits first; a DAG wanting more is usually m
 leaf_max_turns = 40        # vibe turns per leaf (leaves are individually short by design)
 max_reask = 1              # bounded re-decompose rounds on a malformed DAG or a failed skeleton gate
 
-# item I — the frontier drafter. engine="claude" routes the DRAFT stage (intent +
-# formalize) to `claude -p`; Leanstral still PROVES and the faithfulness judge is chosen
-# in main(). SAFE to leave on before/without the token: resolve_drafter_engine falls the
-# draft back to mistral whenever no Claude auth (CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_API_KEY
-# / ~/.claude login) is present — so an empty CI secret ⇒ mistral, a real token ⇒ claude.
+# the drafter: Claude drafts the intent, formalizes agentically (claude -p + lean-lsp,
+# self-validating to elaboration), and judges; Leanstral PROVES. No magistral, no completion
+# path. Needs CLAUDE_CODE_OAUTH_TOKEN (or ANTHROPIC_API_KEY / a local ~/.claude login); with
+# no auth the drafts defer. The only knob is which Claude model drafts.
 [drafter]
-engine = "claude"          # "mistral" | "claude"
-mode = "agentic"           # "agentic" (claude -p + lean-lsp, self-validates to elaboration — the strong
-                           # mode that cracked hard formalizations) | "completion" (pure claude -p).
-                           # agentic degrades to completion on any lean-lsp/flip infra failure (refill),
-                           # so "agentic always" can never brick the cron.
-on_cap = "fallback"        # subscription cap / dead token → revert that draft to mistral (vs "defer")
 claude_model = "claude-sonnet-5"
