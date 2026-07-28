@@ -13,8 +13,16 @@ rev (`289c1f1…`), never `@main`.
 
 ## Build the index
 
-The daemon must be **down** (one Lean process on this box) — `build-index.sh`
-guards this. From the foundry root:
+**On CI (preferred).** `.github/workflows/build-index.yml` runs the same script
+against the same pinned image on a runner, on every pin-following change and on
+demand, and uploads the result as the `lean-scout-index` artifact. Download it
+and unzip into `index/` at the foundry root. That run is also the live answer to
+the toolchain-compat question below — if lean_scout stops building against the
+library's Mathlib, the run goes red at the pin bump rather than the next time
+somebody wants an index.
+
+**Locally**, if you want it now: the daemon must be **down** (one Lean process
+on this box) — `build-index.sh` guards this. From the foundry root:
 
 ```bash
 scripts/build-index.sh          # → index/{types,tactics,const_dep}.jsonl + index/PIN
