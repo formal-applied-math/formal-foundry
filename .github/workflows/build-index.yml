@@ -107,9 +107,7 @@ jobs:
         env:
           MAIN_REPO: ${{ github.workspace }}/main
           SCOUT_TACTICS: ${{ inputs.tactics && '1' || '0' }}
-          # A hosted runner is 4-core; the script's local default (cpuset 0-3,
-          # 6 GB) is the 10 GB-box cap and fits here unchanged.
-          VERIFY_CPUSET: "0-3"
+          VERIFY_CPUSET: "0-1"   # 2-core runner (local default 0-3 → docker exit 125)
         run: bash scripts/build-index.sh
 
       - name: Summarise
