@@ -215,7 +215,11 @@ jobs:
           for i in 1 2 3; do
             git push && exit 0
             echo "::warning::persist push rejected (attempt $i) — rebasing onto main and retrying"
-            git pull --rebase || true
+            # --autostash: the tick leaves tracked files modified beyond the staged
+            # state/runs/queue (scout index, caches, scratch), which otherwise make
+            # `pull --rebase` abort with "cannot pull with rebase: You have unstaged
+            # changes" — so a commit landing on main mid-run could never be rebased onto.
+            git pull --rebase --autostash || true
           done
           echo "::error::persist push FAILED — this run's state/telemetry is NOT on main (recover from the pipeline-runs artifact)"
           exit 1
