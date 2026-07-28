@@ -1542,6 +1542,29 @@ def test_semantic_verdict_defs_route_swaps_depth_for_defs_gate(monkeypatch):
     assert fail == {"gate": "ungrounded", "detail": "w"}
 
 
+def test_semantic_verdict_fidelity_gate_off_skips_intent_fidelity(monkeypatch):
+    # fidelity_gate=False bypasses the intent-fidelity judge entirely: a draft that
+    # would fail fidelity but passes every other gate is accepted, and the judge is
+    # never invoked (the A/B lever for the least-differentiated gate — its rubric is
+    # a near-twin of judge_faithfulness, which still runs).
+    called = []
+    monkeypatch.setattr(af, "depth_rejection", lambda *a, **k: {"shallow": False, "tokens": 0})
+    monkeypatch.setattr(af, "triviality_rejection", lambda *a, **k: {"trivial": False, "tokens": 0})
+    monkeypatch.setattr(af, "hypothesis_rejection", lambda *a, **k: {"vacuous": False, "tokens": 0})
+    monkeypatch.setattr(af, "disproof", lambda *a, **k: {"false": False, "tokens": 0})
+    monkeypatch.setattr(af, "judge_faithfulness",
+                        lambda i, s, chat_fn, deferred=None: {"faithful": True, "tokens": 0})
+    monkeypatch.setattr(af, "intent_fidelity_check", lambda intent, s, *, reason_fn:
+                        called.append(1) or {"faithful": False, "verdict": "drift", "tokens": 0})
+    common = dict(lean_text="lt", stub="s", name="t", intent={}, issue={"pointers": []},
+                  deferred=[], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK, gate_budget=100)
+    fail_on, _ = af.semantic_verdict(**common)                 # ON (default): drift is caught
+    assert fail_on == {"gate": "drift", "detail": "drift"} and called == [1]
+    called.clear()
+    fail_off, _ = af.semantic_verdict(fidelity_gate=False, **common)   # OFF: judge skipped, draft passes
+    assert fail_off is None and called == []
+
+
 def test_render_gate_feedback_covers_defs_gates():
     assert "drafted def" in af.render_gate_feedback("newdef_depth", "", None)
     assert "wrapper" in af.render_gate_feedback("ungrounded", "", None)
