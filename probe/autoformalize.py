@@ -37,413 +37,14 @@ from probe_lib import DEF_RE, append_jsonl, extract_lean_code, lint_violations
 
 # theorem/lemma decl, line-anchored so prose "theorem ..." in a docstring never
 # matches. Captures the declaration name.
-_DECL_RE = re.compile(
-    r"^\s*(?:@\[[^\]]*\]\s*)?(?:theorem|lemma)\s+([A-Za-z0-9_'.]+)",
-    re.MULTILINE,
-)
-_OPEN, _CLOSE = "([{", ")]}"
+
+from af_parse import *  # noqa: F401,F403 — re-export the extracted parse
+from af_prompts import *  # noqa: F401,F403 — re-export the extracted prompts
+from af_routing import *  # noqa: F401,F403 — re-export the extracted routing
+from af_drafting import *  # noqa: F401,F403 — re-export the extracted drafting
+from af_gates import *  # noqa: F401,F403 — re-export the extracted gates
 
 
-def _locate(text: str) -> tuple[str, int, int, int]:
-    """Locate the theorem/lemma header: return `(name, bstart, sep, end)` — the
-    decl name, the index where binders start (just after the name), the index of
-    the type-separator `:`, and the index of the proof `:=`. The separator is the
-    first `:` at bracket-depth 0 that is not part of `:=` (so a `∀ x : ℝ, …` colon
-    in the conclusion, which comes later, and a `(x : T)` binder colon at depth > 0
-    are both skipped). Raises on a malformed header."""
-    m = _DECL_RE.search(text)
-    if not m:
-        raise ValueError("no theorem/lemma declaration found")
-    name, n = m.group(1), len(text)
-
-    depth, sep = 0, -1
-    j = m.end()
-    while j < n:
-        c = text[j]
-        if c in _OPEN:
-            depth += 1
-        elif c in _CLOSE:
-            depth -= 1
-        elif c == ":" and depth == 0 and not (j + 1 < n and text[j + 1] == "="):
-            sep = j
-            break
-        j += 1
-    if sep == -1:
-        raise ValueError("no type separator ':' found")
-
-    depth, end = 0, n
-    j = sep + 1
-    while j < n:
-        c = text[j]
-        if c in _OPEN:
-            depth += 1
-        elif c in _CLOSE:
-            depth -= 1
-        elif c == ":" and depth == 0 and j + 1 < n and text[j + 1] == "=":
-            end = j
-            break
-        j += 1
-    return name, m.end(), sep, end
-
-
-def split_statement(stub: str) -> tuple[str, str, str]:
-    """Split a Lean theorem stub into `(name, binders, concl)`. Robust to a full
-    module scaffold around the theorem (finds the line-anchored decl)."""
-    name, bstart, sep, end = _locate(stub)
-    return name, stub[bstart:sep], stub[sep + 1:end]
-
-
-def vacuity_goal(lean_text: str) -> str:
-    """The hypothesis-rejection probe: the stub with its conclusion replaced by
-    `False`, keeping imports + binders. A clean proof means the hypotheses are
-    contradictory (the theorem is vacuously true) — retire the target."""
-    _n, _b, sep, end = _locate(lean_text)
-    return lean_text[:sep] + ": False " + lean_text[end:]
-
-
-def disproof_goal(lean_text: str) -> str:
-    """The disproof probe: the stub with its conclusion `C` replaced by `¬ (C)`,
-    keeping imports + binders. A clean proof means the statement is false as
-    written — retire the target."""
-    _n, _b, sep, end = _locate(lean_text)
-    concl = lean_text[sep + 1:end].strip()
-    return lean_text[:sep] + ": ¬ (" + concl + ") " + lean_text[end:]
-
-
-# --- claude reply parsers ----------------------------------------------------
-
-_JSON_FENCE_RE = re.compile(r"```json\s*\n(.*?)```", re.DOTALL)
-
-
-def _extract_json(text: str) -> dict | None:
-    """First a ```json fenced object, else the first `{…}` span; None if neither
-    parses."""
-    candidates = []
-    m = _JSON_FENCE_RE.search(text)
-    if m:
-        candidates.append(m.group(1))
-    i, j = text.find("{"), text.rfind("}")
-    if i != -1 and j > i:
-        candidates.append(text[i:j + 1])
-    for c in candidates:
-        try:
-            obj = json.loads(c)
-            if isinstance(obj, dict):
-                return obj
-        except ValueError:
-            continue
-    return None
-
-
-def parse_verdict(reply: str) -> dict:
-    """Parse a judge/roundtrip reply's JSON verdict. Fails CLOSED: an unparseable
-    reply (or one lacking `faithful`) is treated as NOT faithful, so an unverified
-    statement is never shipped."""
-    v = _extract_json(reply)
-    if not isinstance(v, dict) or "faithful" not in v:
-        return {"faithful": False, "verdict": "unparseable judge reply", "issues": []}
-    return v
-
-
-# --- chat-mediated runners (claude: judge) ------------------------------------
-
-JUDGE_SYSTEM = (
-    "You are a faithfulness judge for autoformalized Lean statements — a SAFETY NET "
-    "that catches GROSS failures, not a maximal-formality checker (a human makes the "
-    "final call at merge). Given an issue's prose and a candidate Lean theorem, mark it "
-    "faithful UNLESS it has a gross failure IN WHAT IT STATES: a fact it states is wrong, "
-    "vacuous, or materially weaker than asked, a hypothesis or an inequality direction "
-    "is wrong, or it silently drops part of a fact it claims to state. A candidate MAY "
-    "faithfully formalize a SUBSET of a multi-part issue: when the drafter has DECLARED "
-    "the omitted facts (they are listed below as 'declared deferred'), covering fewer "
-    "facts than the issue lists is NOT a gross failure — judge the theorem as stated "
-    "against the subset it claims, and let the deferred facts become follow-up issues. "
-    "Only an UNDECLARED missing fact — a silent gap, absent from the deferred list — "
-    "counts against faithfulness. ACCEPT reasonable abstractions: a real parameter standing for "
-    "E[X], Var[X], a price, or a discount factor is fine (no measure-theoretic "
-    "construction required), and a named quantity's definition MAY be inlined into its "
-    "stated property (e.g. `(1+θ)*μ ≥ μ` faithfully renders 'the premium π = (1+θ)·μ "
-    "satisfies π ≥ μ'). Do NOT fault a statement for omitting a hypothesis that is PROVABLE "
-    "from the definitions it consumes: a zero-coupon-bond price built from `Real.exp` is "
-    "automatically positive, so an explicit `0 < P` positivity hypothesis is unnecessary — its "
-    "absence is not a gap. (A genuinely-needed side condition, like a denominator `≠ 0` that is "
-    "NOT provable from the consumed defs, is still required.) "
-    "Respond with ONLY a JSON object: "
-    '{"faithful": true|false, "verdict": "<one line>", "issues": ["<gross gap>", ...]}.'
-)
-
-def _issue_prose(issue: dict) -> str:
-    return f"{issue.get('title', '')}\n{issue.get('body', '')}"
-
-
-def judge_messages(issue: dict, stub: str, deferred: list[str] | None = None) -> list[dict]:
-    declared = ""
-    if deferred:
-        bullets = "\n".join(f"- {d}" for d in deferred)
-        declared = ("\n\nDECLARED DEFERRED (the drafter intentionally left these for "
-                    "follow-up issues; do NOT fail the subset for omitting them):\n"
-                    f"{bullets}")
-    return [{"role": "system", "content": JUDGE_SYSTEM},
-            {"role": "user",
-             "content": f"ISSUE:\n{_issue_prose(issue)}\n\nCANDIDATE:\n```lean\n{stub}\n```{declared}"}]
-
-
-def judge_faithfulness(issue: dict, stub: str, *, chat_fn,
-                       deferred: list[str] | None = None) -> dict:
-    """Semantic judge: does the stub say what the issue asks? A declared-subset
-    (`deferred` — the facts the drafter intentionally left for follow-up issues) is
-    judged against the subset it claims, not dinged for the omission. Returns the
-    verdict dict plus `tokens`."""
-    content, tokens = chat_fn(judge_messages(issue, stub, deferred))
-    v = parse_verdict(content)
-    v["tokens"] = tokens
-    return v
-
-
-def _assistant(content: str) -> dict:
-    """An assistant turn safe to re-send. Mistral 400s on an empty-content assistant message
-    ("Assistant message must have either content or tool_calls, but not none") — which a
-    free-tier empty reply produces once threaded into a repair round — so substitute a
-    placeholder (caught #61 in the 2026-07-15 forced tick)."""
-    return {"role": "assistant", "content": content or "(no output)"}
-
-
-# --- two-stage draft: intent + agentic formalize (both claude) ----------------
-#
-# The split still stands, but both stages are Claude now: it SPECIFIES the intended
-# statement in precise prose first (no Lean), then FORMALIZES it agentically
-# (`claude -p` + the lean-lsp MCP, self-validating to elaboration). Leanstral no
-# longer drafts either stage — it only PROVES. See
-# docs/superpowers/specs/2026-07-14-leanstral-drafter-two-stage-design.md.
-
-INTENT_SYSTEM = (
-    "You are a mathematical-finance specifier for MathFin (a Lean 4 library on Mathlib). "
-    "Given a GitHub issue (Task + Pointers), produce a PRECISE natural-language statement of the "
-    "ONE theorem to formalize — every hypothesis and the full conclusion, unambiguous enough that "
-    "a Lean expert could formalize it without seeing the issue. Do NOT write Lean. Name the exact "
-    "MathFin/Mathlib objects it should be built from (e.g. `MathFin.zcb`), drawn from the "
-    "declarations shown. Respond with ONLY a JSON object: "
-    '{"statement": "<precise prose>", "objects": ["MathFin.zcb", ...], "module_name": "<CamelCase>", '
-    '"benchmark_id": "mf-<area>-<slug>", "docstring": "<one line>", "deferred": ["<fact left out>", ...]}. '
-    "`deferred` is [] when the statement covers the whole issue; when you specify a faithful SUBSET, "
-    "list the omitted facts (each a short phrase) so they become follow-up issues. Never weaken or "
-    "silently drop a fact you state. "
-    "The `docstring` is ONE terse line stating WHAT is defined or proved — house register: no "
-    "marketing words (powerful/seamless/cutting-edge), no signpost openers (moreover/furthermore/"
-    "it is worth noting), no vacuous \"plays a role\" filler. State it; do not sell it."
-)
-
-FORMALIZE_SYSTEM = (
-    "You are an autoformalization model for MathFin (Lean 4 on Mathlib). Given a precise INTENDED "
-    "STATEMENT in prose plus the available declarations, produce ONE Lean 4 theorem that formalizes "
-    "it EXACTLY, ending in `:= by sorry` (state only — no proof). Requirements:\n"
-    "- Output exactly one ```lean block: a single `theorem NAME <binders> : <conclusion> := by sorry`.\n"
-    "- CONSUME the named MathFin/Mathlib declarations rather than reproving or inlining them (e.g. use "
-    "`MathFin.zcb r t T`, do not re-derive the bond price).\n"
-    "- ASCII-parseable operators: `^` for powers (write `σ^2`, never the Unicode superscript `σ²`); "
-    "`*` for products; `Real.exp`/`Real.log`/`Real.sqrt`.\n"
-    "- Render every hypothesis and the full conclusion of the intended statement — do not weaken, "
-    "drop a hypothesis, or flip an inequality.\n"
-    "- Lint-clean for the library's CI: every `def`/`abbrev`/`structure` carries a `/-- … -/` "
-    "docstring immediately above it, and definition names are lowerCamelCase (theorem names "
-    "stay snake_case).\n"
-    "- State at the NATURAL level of generality: when the fact is algebra over given quantities, "
-    "do not hard-wire a concrete model or curve the claim does not require. Prefer the structural "
-    "hypothesis that says exactly what is needed — `s.Nonempty` rather than a member-witness "
-    "`x ∈ s`, `A ≠ 0` rather than assuming positivity of a quantity that is already provably "
-    "positive from its definition.\n"
-    "- Definitions bind their arguments in the signature (`def f (x : ℝ) : ℝ := …`), never a "
-    "lambda against a `∀` ascription; write anonymous functions with `↦`.\n"
-    "- Exactly ONE `sorry` — the CORE theorem, first. You MAY add corollaries AFTER it "
-    "(the issue-shaped instantiation of a general core, or per-fact projections of an "
-    "`∧`-bundle) as additional theorems proved by sorry-free TERMS applying the core."
-)
-
-FIDELITY_SYSTEM = (
-    "You are given an INTENDED STATEMENT in prose and a candidate Lean 4 theorem meant to formalize "
-    "it. Decide whether the Lean faithfully renders the intent: same hypotheses, same conclusion, "
-    "nothing weakened, dropped, or flipped. This is a SAFETY NET for gross formalization failures, "
-    "not a maximal-formality check (a human makes the final call at merge); accept reasonable "
-    "abstractions. A hypothesis the intent lists as an ASSUMPTION but that becomes PROVABLE once "
-    "the Lean realizes the quantity with a concrete definition is faithfully OMITTED, not dropped: "
-    "e.g. the intent assumes `0 < P` for a discount factor, but the Lean uses `MathFin.zcb` (a "
-    "`Real.exp`, automatically positive), so leaving out `0 < P` is a correct refinement, not a "
-    "weakening. (A side condition NOT provable from the concrete defs is still required.) "
-    "Respond with ONLY a JSON object: "
-    '{"faithful": true|false, "verdict": "<one line>", "issues": ["<gross divergence>", ...]}.'
-)
-
-
-# the defs-route addendum (F1): the issue's primitives don't exist yet, so the
-# intent must also SPECIFY the 1-3 definitions the module introduces.
-INTENT_DEFS_ADDENDUM = (
-    "\n\nTHIS ISSUE NEEDS NEW DEFINITIONS: the library does not yet provide the primitives "
-    "the statement should be expressed through. In the same JSON, also emit "
-    '"definitions": [{"name": "<camelCase>", "signature": "<Lean type>", '
-    '"meaning": "<one line>", "built_from": ["<existing Mathlib/MathFin constants>"]}, ...] '
-    "— 1 to 3 definitions, each buildable from EXISTING constants (never a free-floating "
-    "wrapper), and specify the statement so the theorem is EXPRESSED THROUGH these new "
-    "definitions. When the natural shape is a GENERAL core plus the issue-shaped "
-    'instantiation, also emit "corollary": {"name": "<snake_case>", "statement": '
-    '"<one line>"} — the core carries the proof, the corollary applies it.'
-    ' For EACH definition also emit "examples": ["<def> <explicit small inputs> = '
-    '<intended value>", ...] — 1-2 concrete instance checks whose value you compute by '
-    "hand from the issue's semantics; the formalizer turns each into an "
-    "`example … := by norm_num`, so a wrong sign or normalization is caught before proving."
-)
-
-
-# --- Drafter authority wiring (H1) -------------------------------------------
-# The drafter (intent + formalize) wrote statements with no pins and no house
-# statement-design rules — hence hallucinated constants and depth-gate deaths.
-# `set_drafter_prompt` wires the pins + statement-design preamble in once at
-# pipeline start (patterns.md read live); '' until wired, so the base system
-# prompts are unchanged for callers that never wire it.
-_DRAFTER_PROMPT: str = ""
-
-
-def set_drafter_prompt(main_repo: str) -> None:
-    """Wire the live drafter authority (pins + the statement-design section of
-    patterns.md) into the intent/formalize system prompts. Call once at pipeline
-    start; reads patterns.md live, not at import time."""
-    global _DRAFTER_PROMPT
-    _DRAFTER_PROMPT = build_drafter_prompt(main_repo)
-
-
-def _drafter_system(base: str) -> str:
-    """Prepend the wired drafter authority to a base drafter system prompt."""
-    return (_DRAFTER_PROMPT + "\n" + base) if _DRAFTER_PROMPT else base
-
-
-def intent_messages(issue: dict, context_pack: str, feedback: str | None = None,
-                    route: str = "theorem",
-                    prior_unknowns: list[str] | None = None,
-                    prior_lessons: str | None = None) -> list[dict]:
-    user = f"ISSUE #{issue.get('number')}: {_issue_prose(issue)}\n"
-    if context_pack:
-        user += "\nAvailable declarations you may reference:\n" + context_pack
-    if route == "defs":
-        user += INTENT_DEFS_ADDENDUM
-        if prior_unknowns:
-            user += ("\nPrior attempts guessed these MISSING declarations — define "
-                     "equivalents where sensible: " + ", ".join(prior_unknowns))
-    if prior_lessons:   # item K: what earlier TICKS tried + a rotating diversity nudge
-        user += "\n\n" + prior_lessons
-    if feedback:
-        user += ("\n\n" + feedback
-                 + "\nProduce a REVISED intent that fixes this; respond with the same JSON shape.")
-    return [{"role": "system", "content": _drafter_system(INTENT_SYSTEM)},
-            {"role": "user", "content": user}]
-
-
-def intent_reject_reason(reply: str) -> str | None:
-    """WHY a Claude intent reply is unusable, or None if it parses. The emit is
-    mechanical, so it needs a `statement` plus the naming meta (`module_name`,
-    `benchmark_id`); this pinpoints which piece is missing so a rejected draft is
-    DIAGNOSABLE in the telemetry — the old blanket "no parseable intent reply"
-    fired identically for no-JSON and each missing field (#109 r1; #66/#88/#73)."""
-    v = _extract_json(reply)
-    if not isinstance(v, dict):
-        return "no JSON object in reply"
-    for field in ("statement", "module_name", "benchmark_id"):
-        if not v.get(field):
-            return f"JSON missing '{field}'"
-    return None
-
-
-def parse_intent(reply: str) -> dict | None:
-    """Parse a Claude intent reply into a dict, or None if `intent_reject_reason`
-    finds it unusable (missing JSON or any required field)."""
-    if intent_reject_reason(reply) is not None:
-        return None
-    v = _extract_json(reply)
-    v.setdefault("objects", [])
-    v.setdefault("docstring", "")
-    v.setdefault("deferred", [])
-    v.setdefault("definitions", [])
-    return v
-
-
-# --- the frontier draft engine (item I): a `claude -p` adapter ----------------
-# `claude -p --output-format json` runs a headless completion; with tools DISABLED it
-# is a pure text generator, drop-in for `mistral_chat` (returns (text, tokens)). Claude
-# is now the only drafter (intent + agentic formalize) and the judge too; Leanstral
-# still PROVES — the gate battery is drafter-agnostic either way. Design:
-# docs/superpowers/specs/2026-07-24-frontier-drafter-design.md.
-_CLAUDE_CAP_MARKERS = ("usage limit", "rate limit", "limit reached", "quota", "capacity",
-                       # auth/expiry — a dead or missing subscription token degrades like a
-                       # cap (on_cap fallback → mistral / defer) instead of erroring the tick
-                       "login expired", "please run /login", "invalid api key",
-                       "authentication", "unauthorized", "not logged in")
-
-
-class ClaudeCapError(RuntimeError):
-    """The claude.ai subscription hit a usage cap for this window. Per `[drafter]
-    on_cap`, the tick defers the target (requeue, no obstruction) or falls back to the
-    mistral drafter — distinct from a real draft failure."""
-
-
-def _claude_draft_args(messages: list[dict], *, model: str = "") -> tuple[list[str], str]:
-    """Build the `claude -p` argv + stdin from chat `messages`. System messages become
-    `--append-system-prompt`; the user content is the stdin prompt (avoids arg-length
-    limits on big context packs). Tools DISABLED (`--allowedTools ""`) → a pure
-    completion, no file/bash/agentic side effects. Returns (argv, stdin)."""
-    system = "\n\n".join(m["content"] for m in messages if m.get("role") == "system")
-    user = "\n\n".join(m["content"] for m in messages if m.get("role") != "system")
-    argv = ["claude", "-p", "--output-format", "json", "--allowedTools", ""]
-    if model:
-        argv += ["--model", model]
-    if system:
-        argv += ["--append-system-prompt", system]
-    return argv, user
-
-
-def claude_draft_fn(messages: list[dict], *, model: str = "", run_fn=None) -> tuple[str, int]:
-    """A `claude -p` adapter shaped like `mistral_chat`: returns (text, tokens). Used for
-    the DRAFT stage under [drafter] engine="claude". `run_fn(argv, stdin)` is injectable
-    for tests (defaults to `subprocess.run`). Raises `ClaudeCapError` on a subscription
-    cap so the tick can defer / fall back."""
-    if run_fn is None:
-        def run_fn(argv, stdin):
-            return subprocess.run(argv, input=stdin, capture_output=True,
-                                  text=True, timeout=600)
-    argv, stdin = _claude_draft_args(messages, model=model)
-    res = run_fn(argv, stdin)
-    out = (getattr(res, "stdout", "") or "").strip()
-    try:
-        data = json.loads(out)
-    except (ValueError, TypeError):
-        err = (getattr(res, "stderr", "") or out or "")[:400]
-        if any(m in err.lower() for m in _CLAUDE_CAP_MARKERS):
-            raise ClaudeCapError(err)
-        raise RuntimeError(f"claude -p produced no JSON: {err}")
-    if data.get("is_error") or data.get("subtype") != "success":
-        msg = str(data.get("result") or data.get("subtype") or "")
-        if any(m in msg.lower() for m in _CLAUDE_CAP_MARKERS):
-            raise ClaudeCapError(msg)
-        raise RuntimeError(f"claude -p error: {msg[:400]}")
-    usage = data.get("usage") or {}
-    tokens = int(usage.get("input_tokens", 0) or 0) + int(usage.get("output_tokens", 0) or 0)
-    return data.get("result", ""), tokens
-
-
-def claude_chat_fn(drafter):
-    """The `claude -p` chat fn bound to the configured model. ONE claude does every general-
-    reasoner role — intent, the faithfulness/intent-fidelity JUDGE, and the decompose split
-    (Leanstral still PROVES). A subscription cap raises `ClaudeCapError`, which refill defers."""
-    def call(msgs):
-        return claude_draft_fn(msgs, model=drafter.claude_model)
-    return call
-
-
-def claude_auth_present(env=None) -> bool:
-    """Is Claude usable here? A CI token (`CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY`) or a
-    local login (`~/.claude/.credentials.json`). Claude is the only drafter+judge, so when this
-    is False the tick warns and every draft/judge call defers — there is no fallback drafter."""
-    env = os.environ if env is None else env
-    if env.get("CLAUDE_CODE_OAUTH_TOKEN") or env.get("ANTHROPIC_API_KEY"):
-        return True
-    return os.path.exists(os.path.expanduser("~/.claude/.credentials.json"))
 
 
 # --- item I phase 2: the agentic drafter (claude -p + lean-lsp MCP) ------------
@@ -461,6 +62,8 @@ def _lean_lsp_mcp_config(container: str = "mathfin-lean-lsp", project: str = "/a
         "args": ["exec", "-i", container, "lean-lsp-mcp", "--lean-project-path", project]}}}
 
 
+
+
 def _agentic_formalize_args(mcp_config_path: str, *, model: str = "") -> list[str]:
     """`claude -p` argv for the agentic formalize session: the lean-lsp MCP (strict — no
     other MCP) plus the tools to draft a stub file and self-validate it against Lean."""
@@ -472,24 +75,11 @@ def _agentic_formalize_args(mcp_config_path: str, *, model: str = "") -> list[st
     return argv
 
 
+
+
 _AGENTIC_SCRATCH_REL = "MathFin/_AutoformAgentic.lean"
 
 
-# Hard-won Lean pitfalls (repurposed from the retired completion-repair heuristics): the
-# recurring elaboration traps under our pin, given to the agentic drafter UPFRONT so it does
-# not rediscover them round by round. It still fixes everything else live via lean_diagnostics.
-_AGENTIC_PITFALLS = (
-    "COMMON PITFALLS under our pin (avoid these upfront; lean_diagnostics catches the rest):\n"
-    "- Apply every MathFin/Mathlib definition to ALL its arguments (`MathFin.zcb r t T`, never "
-    "`MathFin.zcb r`) — a partial application is a `… → …` where a value is expected.\n"
-    "- `autoImplicit false` is on: do NOT write an explicit universe (`Type u`) or a `universe` "
-    "decl; use `Type*` / `Sort*`.\n"
-    "- For `ℝ≥0` add `open scoped NNReal` and write `ℝ≥0` (bare `ℝ ≥ 0` misparses as a Prop).\n"
-    "- A stuck typeclass metavariable (`?m…`): name the ambiguous implicit (`(μ := μ)`) or "
-    "`@`-apply, so instance search is not left guessing.\n"
-    "- For an unknown identifier, use lean_loogle / lean_leansearch to find the real name + "
-    "namespace before guessing; do not invent a constant."
-)
 
 
 def _agentic_formalize_prompt(intent: dict, scaffold_module: str, scratch_rel: str,
@@ -523,11 +113,15 @@ def _agentic_formalize_prompt(intent: dict, scaffold_module: str, scratch_rel: s
     )
 
 
+
+
 def _extract_core_stub(lean_text: str) -> str:
     """The body an emit-scaffolded module wraps: the text between the `open scoped …` line
     and `end MathFin` (the defs + theorem + examples). '' if the markers are absent."""
     m = re.search(r"open scoped NNReal ENNReal\n+(.*?)\n+end MathFin", lean_text, re.DOTALL)
     return m.group(1).strip() if m else ""
+
+
 
 
 def agentic_formalize(intent: dict, *, issue: dict, main_repo: str, check_fn=None, model: str = "",
@@ -594,54 +188,6 @@ def agentic_formalize(intent: dict, *, issue: dict, main_repo: str, check_fn=Non
             "tokens": tokens, "reason": ""}
 
 
-def draft_intent(issue: dict, context_pack: str, *, chat_fn, feedback: str | None = None,
-                 route: str = "theorem", prior_unknowns: list[str] | None = None,
-                 prior_lessons: str | None = None) -> dict:
-    """Stage 1: Claude SPECIFIES the intended statement (prose + objects + naming meta) from the
-    issue. No Lean. `feedback` (a `render_gate_feedback` block from a rejected previous attempt)
-    turns this into a REVISION round; `route="defs"` adds the new-definitions contract, with
-    `prior_unknowns` (declarations earlier drafts guessed at) as hints. `prior_lessons` (item K)
-    is a cross-TICK post-mortem + diversity nudge from failed prior ticks. Returns
-    `{ok, intent, tokens}`."""
-    content, tokens = chat_fn(intent_messages(issue, context_pack, feedback,
-                                              route=route, prior_unknowns=prior_unknowns,
-                                              prior_lessons=prior_lessons))
-    intent = parse_intent(content)
-    reason = None if intent is not None else intent_reject_reason(content)
-    return {"ok": intent is not None, "intent": intent, "tokens": tokens, "reason": reason}
-
-
-
-def loogle_candidates(name: str, *, main_repo: str, run_fn=None) -> str:
-    """Loogle hits for `name` via `scripts/loogle.sh` — UNVERIFIED candidates (the public index
-    tracks a newer Mathlib than our pin; the elaborator gates bad ones). Returns candidate text or
-    ''. `run_fn` injectable for tests."""
-    if run_fn is None:
-        def run_fn(nm):
-            try:
-                out = subprocess.run([os.path.join(main_repo, "scripts", "loogle.sh"), nm],
-                                     capture_output=True, text=True, timeout=20)
-                return out.stdout.strip()
-            except (OSError, subprocess.SubprocessError):
-                return ""
-    return run_fn(name)
-
-
-
-def fidelity_messages(intent: dict, stub: str) -> list[dict]:
-    return [{"role": "system", "content": FIDELITY_SYSTEM},
-            {"role": "user",
-             "content": f"INTENDED STATEMENT:\n{intent['statement']}\n\nLEAN:\n```lean\n{stub}\n```"}]
-
-
-def intent_fidelity_check(intent: dict, stub: str, *, reason_fn) -> dict:
-    """The folded roundtrip: does Claude's own agentically-formalized Lean faithfully render the
-    intent it specified in step 1? Same model checks its own work. Soft + lenient — reject ONLY on
-    an explicit `faithful: false`. Returns `{faithful, verdict, tokens}`."""
-    content, tokens = reason_fn(fidelity_messages(intent, stub))
-    v = _extract_json(content) or {}
-    return {"faithful": v.get("faithful") is not False,
-            "verdict": v.get("verdict", ""), "tokens": tokens}
 
 
 # --- kernel-grade faithfulness gates (labs-leanstral via run_target) ----------
@@ -654,45 +200,11 @@ def intent_fidelity_check(intent: dict, stub: str, *, reason_fn) -> dict:
 # one is left to the semantic judge + the human merge. Default to pass@1 / single
 # round (1 check per gate); tunable per-call for a deeper sweep.
 _GATE_FANOUT = 1
+
+
 _GATE_ROUNDS = 1
 
 
-def _probed_conclusion(text: str, name: str) -> str | None:
-    """The whitespace-normalized conclusion of the theorem/lemma named `name` in
-    `text`, or None if it is absent or unparseable. Used to verify an adversarial
-    gate proof kept the PROBED conclusion (`False` / `¬…`) rather than reverting to
-    the provable original."""
-    m = re.search(
-        rf"(?m)^\s*(?:@\[[^\]]*\]\s*)?(?:theorem|lemma)\s+{re.escape(name)}(?![\w'.])",
-        text)
-    if not m:
-        return None
-    sub = text[m.start():]
-    try:
-        _n, _b, sep, end = _locate(sub)
-    except ValueError:
-        return None
-    return " ".join(sub[sep + 1:end].split())
-
-
-def _probed_signature(text: str, name: str) -> str | None:
-    """The whitespace-normalized SIGNATURE — binders through conclusion — of the
-    theorem/lemma named `name` in `text`, or None if it is absent or unparseable.
-    The statement-integrity pin (item J): the accepted proof must still assert THIS,
-    so a prover that (against instruction) weakened a binder or the conclusion to
-    something trivially provable is caught. Broader than `_probed_conclusion`, which
-    guards only the vacuity/disproof probes' conclusion swap."""
-    m = re.search(
-        rf"(?m)^\s*(?:@\[[^\]]*\]\s*)?(?:theorem|lemma)\s+{re.escape(name)}(?![\w'.])",
-        text)
-    if not m:
-        return None
-    sub = text[m.start():]
-    try:
-        _n, bstart, _sep, end = _locate(sub)
-    except ValueError:
-        return None
-    return " ".join(sub[bstart:end].split())
 
 
 def _try_prove(goal: str, sorry_name: str, *, chat_fn, check_fn, budget: int,
@@ -729,6 +241,8 @@ def _try_prove(goal: str, sorry_name: str, *, chat_fn, check_fn, budget: int,
     return proved, res["tokens"]
 
 
+
+
 def hypothesis_rejection(lean_text: str, sorry_name: str, *, chat_fn, check_fn,
                          budget: int, fanout: int = _GATE_FANOUT, rounds: int = _GATE_ROUNDS,
                          system_prompt=None, cache=None) -> dict:
@@ -739,6 +253,8 @@ def hypothesis_rejection(lean_text: str, sorry_name: str, *, chat_fn, check_fn,
                                 check_fn=check_fn, budget=budget, fanout=fanout, rounds=rounds,
                                 system_prompt=system_prompt, cache=cache)
     return {"vacuous": proved, "tokens": tokens}
+
+
 
 
 def disproof(lean_text: str, sorry_name: str, *, chat_fn, check_fn,
@@ -752,482 +268,13 @@ def disproof(lean_text: str, sorry_name: str, *, chat_fn, check_fn,
     return {"false": proved, "tokens": tokens}
 
 
-# --- pointers-scoped depth gate (option B) -----------------------------------
-#
-# The kernel gates catch a FALSE or vacuous statement; they do NOT catch a
-# TRUE-but-shallow one — a Mathlib identity in domain clothing (cal-bk-53 reduced to
-# `integral_add_compl`; cal-bk-67 inlined the forward-rate formula as `let`s over raw
-# reals instead of consuming `MathFin.zcb`). The depth gate is a structural,
-# ELABORATOR-grounded check (not an LLM judge, per the rigorous-vs-soft rule): elaborate
-# the stub, then a `run_cmd` meta block inspects the theorem's TYPE and requires it to
-# USE at least one constant DEFINED in one of the issue's `-- pointers:` MathFin modules.
-# If none, the meta throwErrors — surfacing as a daemon error the gate keys on by its
-# `depth-gate:` marker. With no pointers there is nothing to scope to, so it falls back
-# to requiring any `MathFin.*` constant (namespace fallback).
-
-_DEPTH_MARKER = "depth-gate:"
-
-
-def _mod_name(pointer: str) -> str:
-    """`MathFin/FixedIncome/ZCB.lean` -> the Lean module name `MathFin.FixedIncome.ZCB`."""
-    stem = pointer[:-5] if pointer.endswith(".lean") else pointer
-    return stem.replace("/", ".")
-
-
-def depth_probe(lean_text: str, name: str, pointers: list[str]) -> str:
-    """The stub + a `run_cmd` meta block that FAILS elaboration unless the theorem's
-    TYPE uses a constant DEFINED in one of its pointer modules (pointers-scoped).
-    `name` is the decl name (under `namespace MathFin`); `pointers` are repo-relative
-    `MathFin/…/X.lean` paths (assumed non-empty — `depth_rejection` skips otherwise)."""
-    mods = [_mod_name(p) for p in pointers if p.endswith(".lean")]
-    ptr_list = ", ".join(f"`{m}" for m in mods)
-    meta = (
-        "\nopen Lean in\n"
-        "run_cmd do\n"
-        "  let env ← getEnv\n"
-        f"  let some ci := env.find? `MathFin.{name}\n"
-        f'    | throwError "{_DEPTH_MARKER} declaration {name} not found"\n'
-        "  let mods := env.header.moduleNames\n"
-        f"  let ptr : List Name := [{ptr_list}]\n"
-        "  let used := ci.type.getUsedConstants\n"
-        "  let hit := used.any fun c =>\n"
-        "    match env.getModuleIdxFor? c with\n"
-        "    | some i => ptr.contains mods[i.toNat]!\n"
-        "    | none => false\n"
-        "  unless hit do\n"
-        f'    throwError "{_DEPTH_MARKER} statement type consumes no def from pointer modules {{ptr}}"\n'
-    )
-    return lean_text.rstrip() + "\n" + meta
-
-
-def depth_rejection(lean_text: str, name: str, pointers: list[str], *, check_fn) -> dict:
-    """Elaborate the depth probe via `check_fn` (the daemon). `shallow=True` iff the meta
-    block reported a `depth-gate:` error (the type consumes no pointer-module def). With
-    NO pointers the gate is inapplicable — it SKIPS (a missing Pointers section is a
-    metadata gap, not a shallowness verdict; the stub carries no MathFin import to consume
-    anyway). Fails OPEN too: a daemon-communication error is NOT a depth verdict, so an
-    infra hiccup never rejects a good target (like the prover gates). No prover call ⇒
-    `tokens=0`."""
-    mods = [p for p in pointers if p.endswith(".lean")]
-    if not mods:
-        return {"shallow": False, "tokens": 0, "verdict": "no pointers — depth gate skipped"}
-    res = check_fn(depth_probe(lean_text, name, mods))
-    if res.get("error"):   # H5: wedged daemon is NOT a depth verdict — retryable, never a pass
-        return {"shallow": False, "indeterminate": True, "tokens": 0,
-                "verdict": "indeterminate: " + str(res["error"])[:120]}
-    depth_errs = [str(e) for e in (res.get("errors") or []) if _DEPTH_MARKER in str(e)]
-    return {"shallow": bool(depth_errs), "tokens": 0, "verdict": "; ".join(depth_errs[:2])}
-
-
-# --- triviality gate (the #67 class) ------------------------------------------
-#
-# The depth gate checks WHAT the type consumes; it does not check whether the
-# statement SAYS anything: cal-bk-67's type referenced `zcb` through `let`-bound
-# definitions and still proved by `rfl`. This gate catches that class at DRAFT
-# time (open-pr's rfl guard stays as defense in depth, but by then the prove
-# compute is already spent): splice the stub's `sorry` into `first | rfl | simp`
-# and elaborate — a clean close means the statement is a definitional/simp
-# restatement with no mathematical content. The boundary is deliberate: bare
-# `rfl` + goal-only `simp` (no `simp_all`, no `grind`), so easy-but-REAL content
-# is not over-filtered. Zero prover tokens; fail-open like the depth gate.
-
-_TRIV_TACTIC = "by first | rfl | simp"
-_SORRY_RE = re.compile(r":=\s*(?:by\s+)?sorry\b")
-
-
-def triviality_goal(lean_text: str) -> str | None:
-    """The stub with its `sorry` proof spliced to `first | rfl | simp`. None when
-    no `:= [by] sorry` is present to splice (malformed stub — fail open)."""
-    new, n = _SORRY_RE.subn(":= " + _TRIV_TACTIC, lean_text, count=1)
-    return new if n else None
-
-
-def triviality_rejection(lean_text: str, *, check_fn) -> dict:
-    """Elaborate the triviality goal via `check_fn` (the daemon). `trivial=True`
-    iff the splice closes CLEAN (no errors, no sorry left) — the statement holds
-    definitionally / by the vanilla simp set alone. The tactic FAILING (the
-    healthy case) and daemon errors both leave errors non-empty ⇒ not a verdict.
-    No prover call ⇒ `tokens=0`."""
-    goal = triviality_goal(lean_text)
-    if goal is None:
-        return {"trivial": False, "tokens": 0, "verdict": "no sorry to splice — skipped"}
-    res = check_fn(goal)
-    if res.get("error"):   # H5: wedged daemon is NOT a triviality verdict — retryable
-        return {"trivial": False, "indeterminate": True, "tokens": 0,
-                "verdict": "indeterminate: " + str(res["error"])[:120]}
-    trivial = not res.get("errors") and res.get("sorry_count", 0) == 0
-    verdict = ("closed by `first | rfl | simp` — definitionally/simp-trivial, no content"
-               if trivial else "")
-    return {"trivial": trivial, "tokens": 0, "verdict": verdict}
-
-
-# --- primitives-aware routing (F3+F2 of the composed design) ------------------
-#
-# One measured property routes every issue: does the library already have the
-# primitives its statement needs? Static measurement (pointer modules export
-# consumables) + runtime evidence (a prior depth-exhausted attempt) pick between
-# the theorem-stub path and the definitions path. Design:
-# docs/superpowers/specs/2026-07-17-primitives-aware-routing-design.md.
-
-# Evidence is ARCHITECTURE-SCOPED (R: "don't optimize the current architecture
-# for past architecture failures"): every attempted-record is stamped with
-# ROUTING_ARCH and the routing loaders trust ONLY current-architecture records.
-# Bumping this constant on an architecture change makes the pipeline run from
-# zero evidence automatically, while within-version memory (don't re-buy the
-# same failure every tick) keeps working. Unstamped/foreign records stay in the
-# file as human-readable telemetry; they just don't steer.
-ROUTING_ARCH = "routing-v1-2026-07-17"
-
-def count_pointer_defs(main_repo: str, pointers: list[str]) -> int:
-    """Consumable exports (`def`/`abbrev`/`structure`, via the shared
-    `probe_lib.DEF_RE`) in the issue's pointer modules — the routing measurement.
-    0 ⇒ a theorem-only stub's TYPE has nothing to consume ⇒ the definitions path.
-    Missing files count 0 (fail toward defs)."""
-    n = 0
-    for p in pointers:
-        if not p.endswith(".lean"):
-            continue
-        try:
-            with open(os.path.join(main_repo, p), encoding="utf-8") as f:
-                n += len(DEF_RE.findall(f.read()))
-        except OSError:
-            continue
-    return n
-
-
-def classify_refill(rec: dict) -> str:
-    """Obstruction family for a refill `attempted` record — the drafter's triage
-    analogue. Computed at write time (rides the record in refill-history.jsonl)
-    and at read time for records written before the field existed. Routing
-    evidence takes precedence over trailing noise: a depth rejection ANYWHERE in
-    the history classifies the issue even when a later attempt died on a flaky
-    intent parse (the first CI run's #66: ['depth', 'intent'])."""
-    out = rec.get("outcome", "")
-    if out == "seeded":
-        return "seeded"
-    gates = {h.get("gate") for h in rec.get("history", []) or []}
-    if out in ("depth", "blocked_on_infra") or gates & {"depth", "blocked_on_infra"}:
-        return "needs_primitives"
-    if out in ("newdef_depth", "ungrounded") or gates & {"newdef_depth", "ungrounded"}:
-        return "defs_rejected"
-    if out == "trivial":
-        return "trivial_restatement"
-    if out in ("unfaithful", "drift"):
-        return "fidelity"
-    if out in ("intent", "formalize"):
-        return "undraftable"
-    if out in ("vacuous", "false"):
-        return "statement_wrong"
-    if out == "budget":
-        return "budget"
-    if out == "indeterminate" or "indeterminate" in gates:
-        return "infra_indeterminate"   # H5: wedged daemon, retryable — not a real verdict
-    return "infra"
-
-
-def load_refill_families(history_path: str) -> dict[int, str]:
-    """Issue number → family of its LATEST current-architecture refill-history
-    record. Records stamped with a different (or no) ROUTING_ARCH are ignored —
-    a past architecture's failures never steer this one. Tolerant of junk lines
-    and of the file being absent."""
-    fams: dict[int, str] = {}
-    try:
-        with open(history_path, encoding="utf-8") as f:
-            for line in f:
-                try:
-                    rec = json.loads(line)
-                except ValueError:
-                    continue
-                if not isinstance(rec, dict) or rec.get("arch") != ROUTING_ARCH:
-                    continue
-                if rec.get("issue") is not None:
-                    # always RE-classify (the stored family is telemetry, not
-                    # authority) so classifier fixes apply to existing records:
-                    # the first CI run stored #66 as undraftable although its
-                    # history carries depth evidence.
-                    fams[int(rec["issue"])] = classify_refill(rec)
-    except OSError:
-        pass
-    return fams
-
-
-def load_prior_unknowns(history_path: str) -> dict[int, list[str]]:
-    """Issue → union (first-seen order) of `unknown_identifiers` across its
-    current-architecture refill-history rows — the missing declarations earlier
-    drafts guessed at; they become defs-route hints ("define equivalents where
-    sensible"). Foreign-architecture records are ignored, like the families."""
-    out: dict[int, list[str]] = {}
-    try:
-        with open(history_path, encoding="utf-8") as f:
-            for line in f:
-                try:
-                    rec = json.loads(line)
-                except ValueError:
-                    continue
-                if not isinstance(rec, dict) or rec.get("issue") is None \
-                        or rec.get("arch") != ROUTING_ARCH:
-                    continue
-                bucket = out.setdefault(int(rec["issue"]), [])
-                for row in rec.get("history", []) or []:
-                    for u in row.get("unknown_identifiers", []) or []:
-                        if u not in bucket:
-                            bucket.append(u)
-    except OSError:
-        pass
-    return out
-
-
-# --- cross-tick lessons + diversity injection (item K) ------------------------
-# The Nexus episode-discipline half missing here: refill-history records outcomes,
-# but each cross-TICK retry re-drafts nearly blind. load_prior_lessons compresses a
-# failed issue's latest record into a post-mortem the next tick's intent prompt cites,
-# rotating a diversity instruction so successive ticks steer AWAY from what failed.
-
-# What a fresh tick should try INSTEAD (rotated off the prior-tick count). Nexus's
-# stochastic-injection set: new approach / decompose / recombine.
-_DIVERSITY = (
-    "Try a COMPLETELY DIFFERENT formalization than the prior attempts — do not restate them.",
-    "DECOMPOSE the goal: state the core fact as its own lemma and build the target from it.",
-    "COMBINE the soundest parts of the prior attempts into one cleaner statement.",
-)
-
-# non-verdict families: nothing to LEARN from (a win, a budget cutoff, or retryable infra)
-_LESSON_SKIP = {"seeded", "budget", "infra", "infra_indeterminate"}
-
-
-def load_prior_lessons(history_path: str) -> dict[int, dict]:
-    """Issue → a compressed CROSS-TICK post-mortem from its latest current-architecture
-    refill record: `{family, last_gate, last_detail, gates_tried, prior_ticks}`. The next
-    tick's intent prompt cites it (an informed retry, not a blind one) and rotates a
-    diversity nudge off `prior_ticks` (item K). Records whose family is a non-verdict
-    (`_LESSON_SKIP` — a win / budget cutoff / retryable infra) yield no lesson and RETIRE
-    a stale one for that issue. Foreign-architecture records are ignored, like the
-    families; absent/junk-tolerant."""
-    out: dict[int, dict] = {}
-    ticks: dict[int, int] = {}
-    try:
-        with open(history_path, encoding="utf-8") as f:
-            for line in f:
-                try:
-                    rec = json.loads(line)
-                except ValueError:
-                    continue
-                if not isinstance(rec, dict) or rec.get("issue") is None \
-                        or rec.get("arch") != ROUTING_ARCH:
-                    continue
-                iss = int(rec["issue"])
-                fam = classify_refill(rec)
-                if fam in _LESSON_SKIP:
-                    out.pop(iss, None)        # a later win/non-verdict retires the lesson
-                    ticks.pop(iss, None)
-                    continue
-                ticks[iss] = ticks.get(iss, 0) + 1
-                hist = rec.get("history", []) or []
-                gates: list[str] = []
-                for row in hist:
-                    g = row.get("gate")
-                    if g and g not in gates:
-                        gates.append(g)
-                last = hist[-1] if hist else {}
-                out[iss] = {"family": fam, "last_gate": last.get("gate", ""),
-                            "last_detail": (last.get("detail") or "")[:200],
-                            "gates_tried": gates, "prior_ticks": ticks[iss]}
-    except OSError:
-        pass
-    return out
-
-
-def render_prior_lessons(lesson: dict) -> str:
-    """A compact PRIOR-ATTEMPTS note for the drafter's intent prompt: what failed across
-    ticks + a rotating diversity nudge (item K). Turns a blind cross-tick retry into an
-    informed one."""
-    div = _DIVERSITY[lesson.get("prior_ticks", 0) % len(_DIVERSITY)]
-    gates = ", ".join(lesson.get("gates_tried") or []) or "?"
-    parts = [f"PRIOR ATTEMPTS on this issue failed (family: {lesson.get('family', '?')}; "
-             f"gates hit: {gates})."]
-    if lesson.get("last_detail"):
-        parts.append(f"Last rejection ({lesson.get('last_gate', '?')}): {lesson['last_detail']}.")
-    parts.append("Do NOT repeat those. " + div)
-    return " ".join(parts)
-
-
-def route_for(issue: dict, *, def_count: int, family: str | None) -> str:
-    """`theorem` (statement can consume existing pointer defs) or `defs` (the
-    library lacks the primitives — draft definitions + the theorem). Runtime
-    evidence beats static measurement: #53 measures consumable via chooserPrice,
-    but its faithful statement can't use it, so its depth-exhaustion routes it."""
-    if family == "needs_primitives":
-        return "defs"
-    if def_count == 0:
-        return "defs"
-    return "theorem"
-
-
-def resolve_route(cli_route: str | None, issue: dict, *, def_count: int,
-                  family: str | None) -> str:
-    """An explicit `--route` overrides the automatic `route_for` classifier
-    (operator + test affordance); `None` falls back to the classifier. Lets a
-    def-rich-pointer target whose faithful statement needs a NEW primitive (the
-    #73 Omega-ratio class) be driven straight to defs, skipping the wasted
-    theorem tick the static `def_count` heuristic otherwise forces."""
-    return cli_route or route_for(issue, def_count=def_count, family=family)
-
-
-# families that failed for non-primitives reasons under the CURRENT architecture:
-# fresh issues attempt first; these lemons go to the back of their route group
-# (the first CI run burned ~100k tokens re-attempting #61's empty-reply furnace
-# at position 2 while def-rich #108 sat unattempted at position 6).
-_DEMOTED_FAMILIES = {"undraftable", "fidelity", "statement_wrong", "trivial_restatement"}
-
-
-def order_by_route(issues: list[dict]) -> list[dict]:
-    """Attempt order: fresh issues before current-arch lemons, easier difficulty
-    first, then MORE pointer consumables (a def-richer context gives the drafter
-    more to consume), then issue number. The ROUTE deliberately does NOT rank:
-    it selects the PATH, not the priority — a needs_primitives issue carries
-    positive evidence + hints (run 2 would otherwise have parked the evidenced
-    defs backlog behind ~45 untested theorem issues for ~15 ticks). Stable ties."""
-    def key(i: dict):
-        return (1 if i.get("family") in _DEMOTED_FAMILIES else 0,
-                difficulty_rank(i.get("difficulty")),
-                -int(i.get("def_count", 0) or 0),
-                i.get("number", 0))
-    return sorted(issues, key=key)
-
-
-# --- definitions-path gates (F1) -----------------------------------------------
-#
-# On the defs route the drafter introduces 1-3 defs + one theorem; the pointer
-# depth gate is replaced by ONE daemon probe with two verdicts:
-#   newdef_depth — the theorem's TYPE must use ≥1 drafted def (else the defs are
-#                  decoration and the statement is still raw);
-#   ungrounded   — every drafted def's VALUE must use ≥1 IMPORTED constant
-#                  (`getModuleIdxFor?.isSome`) — an identity/self-referential
-#                  wrapper fails; honest defs over real structure pass.
-# Wrapping real content in honest defs is exactly what we WANT (knockInPayoff
-# over indicator integrals); design quality stays with R's merge review.
-
-_DEFS_MARKER = "defs-gate:"
-
-
-def drafted_def_names(stub: str) -> list[str]:
-    """Names of the `def`/`abbrev`/`structure` declarations the stub introduces,
-    in order (the theorem is not one of them)."""
-    return DEF_RE.findall(stub)
-
-
-def defs_probe(lean_text: str, thm_name: str, def_names: list[str]) -> str:
-    """The stub + a `run_cmd` meta block that FAILS elaboration unless (a) the
-    theorem's type uses ≥1 drafted def (newdef_depth) and (b) every drafted def's
-    value uses ≥1 imported constant (ungrounded)."""
-    names = ", ".join(f"`MathFin.{d}" for d in def_names)
-    meta = (
-        "\nopen Lean in\n"
-        "run_cmd do\n"
-        "  let env ← getEnv\n"
-        f"  let some thm := env.find? `MathFin.{thm_name}\n"
-        f'    | throwError "{_DEFS_MARKER} theorem {thm_name} not found"\n'
-        f"  let newDefs : List Name := [{names}]\n"
-        "  let used := thm.type.getUsedConstants\n"
-        "  unless newDefs.any (fun d => used.contains d) do\n"
-        f'    throwError "{_DEFS_MARKER} newdef_depth: the theorem\'s type uses none of '
-        'the drafted defs {newDefs}"\n'
-        "  for d in newDefs do\n"
-        "    let some ci := env.find? d\n"
-        f'      | throwError "{_DEFS_MARKER} drafted def {{d}} not found"\n'
-        "    let some v := ci.value?\n"
-        f'      | throwError "{_DEFS_MARKER} ungrounded: {{d}} has no value"\n'
-        # grounding checks the BODY under the lambda binders: on the whole value,
-        # a binder type like `(x : ℝ)` already contributes `Real`, so the identity
-        # wrapper `def idw (x : ℝ) : ℝ := x` passed (caught by the 2026-07-17 live
-        # 3-case validation). Peeling lambdas leaves the computational content.
-        "    let mut body := v\n"
-        "    while body.isLambda do\n"
-        "      body := body.bindingBody!\n"
-        "    let ext := body.getUsedConstants.filter (fun c => (env.getModuleIdxFor? c).isSome)\n"
-        "    unless ext.size > 0 do\n"
-        f'      throwError "{_DEFS_MARKER} ungrounded: {{d}} is a free-floating wrapper '
-        '(its body uses no imported constant)"\n'
-    )
-    return lean_text.rstrip() + "\n" + meta
-
-
-def defs_rejection(lean_text: str, thm_name: str, def_names: list[str], *, check_fn) -> dict:
-    """Elaborate the defs probe via `check_fn` (the daemon). Returns
-    `{failed, gate: "newdef_depth"|"ungrounded"|None, verdict, tokens}`. No defs
-    drafted ⇒ instant `newdef_depth` fail (no daemon call — the route's contract
-    was ignored). Fails OPEN on unmarked errors, like the other structural gates."""
-    if not def_names:
-        return {"failed": True, "gate": "newdef_depth", "tokens": 0,
-                "verdict": "no definitions drafted — the defs route requires 1-3 new defs"}
-    res = check_fn(defs_probe(lean_text, thm_name, def_names))
-    if res.get("error"):   # H5: wedged daemon is NOT a defs verdict — retryable
-        return {"failed": False, "gate": None, "indeterminate": True, "tokens": 0,
-                "verdict": "indeterminate: " + str(res["error"])[:120]}
-    errs = [str(e) for e in (res.get("errors") or []) if _DEFS_MARKER in str(e)]
-    if not errs:
-        return {"failed": False, "gate": None, "verdict": "", "tokens": 0}
-    gate = "ungrounded" if "ungrounded" in errs[0] else "newdef_depth"
-    return {"failed": True, "gate": gate, "verdict": errs[0], "tokens": 0}
-
-
-# item M — the instance-probe gate. `newdef_depth`/`ungrounded` prove a def is
-# USED and GROUNDED, but not that it COMPUTES the intended quantity: a sign flip,
-# a normalization slip, or sup-vs-max reads as a plausible def the faithfulness
-# judge and the vacuity/disproof probes all pass (the #73 maxDD `∀c` class). The
-# fix, transplanted from Nexus's OEIS anti-misformalization guard: every new def
-# must ship ≥1 concrete-instance `example` evaluating it on explicit small inputs
-# against its intended value, proved by a norm_num/decide-class tactic. Those
-# examples elaborate as ordinary stub content, so a slipped def makes its own
-# intended-value example FAIL to elaborate — caught before the prove stage. This
-# gate enforces the examples are PRESENT and real (not skipped, not faked, not a
-# `x = x` tautology); the daemon check the battery already ran does the catching.
-_INSTANCE_PROBE_TACTIC_RE = re.compile(r"\b(norm_num1?|decide|simp)\b")
-
-
-def _example_blocks(lean_text: str) -> list[str]:
-    """Each top-level `example … := …` block in the stub, up to the next decl."""
-    return re.findall(
-        r"(?ms)^[ \t]*example\b.*?"
-        r"(?=^[ \t]*(?:example|theorem|lemma|def|noncomputable|abbrev|structure|end|/-|@\[)\b|\Z)",
-        lean_text)
-
-
-def _example_probes_def(block: str, def_name: str) -> bool:
-    """True iff `block` is a CONCRETE-VALUE probe of `def_name`: an equation whose
-    LHS applies the def and whose RHS is a concrete value (a numeral, NOT the def
-    again), closed by a norm_num/decide/simp-class tactic (never sorry/admit)."""
-    if ":=" not in block:
-        return False
-    stmt, proof = block.split(":=", 1)            # the first := ends the type
-    if def_name not in stmt or "=" not in stmt:
-        return False
-    if re.search(r"\b(sorry|admit)\b", proof) or not _INSTANCE_PROBE_TACTIC_RE.search(proof):
-        return False
-    rhs = stmt.rsplit("=", 1)[1]                   # the asserted value
-    return def_name not in rhs and re.search(r"\d", rhs) is not None
-
-
-def instance_probe_rejection(lean_text: str, def_names: list[str]) -> dict:
-    """Item M gate: reject unless every drafted def has ≥1 concrete-value `example`
-    probing it. Pure-parse (presence + shape); the elaboration that turns a slipped
-    def into a hard error was already run by the battery's daemon check. Returns
-    `{failed, gate: "instance_probe"|None, verdict, tokens: 0}`."""
-    if not def_names:                              # theorem route — nothing to probe
-        return {"failed": False, "gate": None, "verdict": "", "tokens": 0}
-    blocks = _example_blocks(lean_text)
-    missing = [d for d in def_names
-               if not any(_example_probes_def(b, d) for b in blocks)]
-    if missing:
-        return {"failed": True, "gate": "instance_probe", "tokens": 0,
-                "verdict": ("no concrete-instance example for " + ", ".join(missing)
-                            + " — add `example : <def> <small inputs> = <value> := by norm_num`")}
-    return {"failed": False, "gate": None, "verdict": "", "tokens": 0}
 
 
 # --- issue preparation --------------------------------------------------------
 
 _POINTER_RE = re.compile(r"MathFin/[\w/]+\.lean")
+
+
 
 
 def extract_pointers(body: str) -> list[str]:
@@ -1242,6 +289,8 @@ def extract_pointers(body: str) -> list[str]:
     return out
 
 
+
+
 def prepare_issues(raw: list[dict], *, max_difficulty: str = "medium") -> list[dict]:
     """Filter+order the raw `gh issue list` output to the tractable
     `status:ready`+`type:proof` queue (via `issues.select_issues`) and enrich each
@@ -1254,83 +303,12 @@ def prepare_issues(raw: list[dict], *, max_difficulty: str = "medium") -> list[d
     return out
 
 
-# --- semantic-gate feedback (the repair cascade's re-draft signal) ------------
-#
-# The only repaired failure class used to be compilation (formalize_with_repair);
-# every semantic gate was a terminal skip, so the drafter was never told WHY a
-# clean-elaborating draft was rejected (design: 2026-07-17-semantic-repair-cascade).
-# Each gate gets a repair DIRECTION here; the block is sent to BOTH stages of the
-# next attempt (Claude may need to re-frame the intent, or the agentic formalize
-# step must stop inlining what it should consume).
-
-_GATE_INSTRUCTIONS = {
-    "intent": "Respond with ONLY one JSON object carrying statement, objects, "
-              "module_name, benchmark_id, docstring, deferred — no prose around it.",
-    "formalize": "The intended statement could not be rendered into elaborating Lean "
-                 "after all repair rounds. Re-specify it using ONLY objects from the "
-                 "declarations shown (name each exactly); prefer fewer, concrete "
-                 "objects over prose-only quantities.",
-    "depth": "The statement's TYPE consumes no definition from the issue's pointer "
-             "modules — it restates the mathematics over raw reals (e.g. via `let` or "
-             "inlined formulas). Re-state the theorem so its TYPE is EXPRESSED THROUGH "
-             "the named MathFin declarations, fully applied (e.g. `MathFin.zcb r 0 T`); "
-             "never re-derive or inline their formulas.",
-    "trivial": "The statement is closed by `rfl`/`simp` alone — a definitional "
-               "restatement with no mathematical content. State the SUBSTANTIVE fact "
-               "the issue asks for: an identity or inequality between INDEPENDENTLY "
-               "defined quantities, not a definition unfolded into itself.",
-    "instance_probe": "A new definition ships no concrete-instance check. For EACH new "
-                      "def add 1-2 `example : <def> <explicit small inputs, e.g. ![1, 2] "
-                      "over Finset (Fin 2)> = <intended value> := by norm_num [<def>]` (or "
-                      "`decide`), the value taken from the issue's semantics — a wrong "
-                      "sign/normalization then fails to elaborate.",
-    "vacuous": "The hypotheses are mutually contradictory (`False` is provable from "
-               "them), so the theorem is vacuously true. Fix the hypothesis set — "
-               "check inequality directions and degenerate parameter values.",
-    "false": "The NEGATION of the conclusion was PROVED under the hypotheses — the "
-             "statement is false AS WRITTEN. First suspect the RENDERING: a flipped "
-             "inequality or sign, swapped arguments, or a missing hypothesis — fix "
-             "that, and do NOT weaken a claim that is genuinely true. But if a "
-             "specific conjunct is FALSE as the ISSUE itself states it (a real "
-             "counterexample exists — e.g. an invariance written for all `c` that "
-             "holds only for `c > 0`), stop fighting it: DROP that conjunct from the "
-             "conclusion, add a one-line `CORRECTION: …` to `deferred` naming what the "
-             "issue got wrong and the fix, and prove the TRUE remainder through the "
-             "same definitions.",
-    "unfaithful": "A faithfulness judge found the statement diverges grossly from "
-                  "the issue. Address each listed divergence without weakening any "
-                  "fact you state.",
-    "drift": "The Lean does not faithfully render the intended statement. Re-render "
-             "every hypothesis and the full conclusion exactly.",
-    "newdef_depth": "The theorem's TYPE must be stated THROUGH the drafted definitions — "
-                    "apply each drafted def in the hypotheses/conclusion, never restate "
-                    "their formulas inline; and the module must actually contain the "
-                    "1-3 definitions.",
-    "ungrounded": "A drafted definition is a free-floating wrapper: its body must be "
-                  "BUILT FROM existing Mathlib/MathFin constants (an integral, Real.exp, "
-                  "max, an existing MathFin price), not a bare variable or a "
-                  "self-referential shell.",
-}
-
-
-def render_gate_feedback(gate: str, detail: str, stub: str | None) -> str:
-    """The re-draft feedback block for a semantic-gate rejection: the rejected stub
-    (when one exists), the gate's own verdict, and the gate-specific revision
-    instruction."""
-    txt = f"PREVIOUS ATTEMPT — rejected by the `{gate}` gate"
-    if detail:
-        txt += f": {detail}"
-    txt += "\n"
-    if stub:
-        txt += f"```lean\n{stub.strip()}\n```\n"
-    txt += "REVISE: " + _GATE_INSTRUCTIONS.get(
-        gate, "Fix the reported failure without weakening any fact.")
-    return txt
 
 
 def semantic_verdict(*, lean_text: str, stub: str, name: str, intent: dict, issue: dict,
                      deferred: list[str], reason_fn, prove_fn, check_fn, gate_budget: int,
                      depth_gate: bool = True, triviality_gate: bool = True,
+                     fidelity_gate: bool = True,
                      route: str = "theorem", def_names: list[str] | None = None,
                      system_prompt=None, cache=None) -> tuple[dict | None, int]:
     """Run the semantic gate battery on an ELABORATING draft, cheapest-first:
@@ -1384,11 +362,14 @@ def semantic_verdict(*, lean_text: str, stub: str, name: str, intent: dict, issu
         if j.get("issues"):
             detail += "; issues: " + "; ".join(str(x) for x in j["issues"][:4])
         return {"gate": "unfaithful", "detail": detail}, tokens
-    fid = intent_fidelity_check(intent, stub, reason_fn=reason_fn)
-    tokens += fid["tokens"]
-    if not fid.get("faithful"):
-        return {"gate": "drift", "detail": fid.get("verdict", "")}, tokens
+    if fidelity_gate:
+        fid = intent_fidelity_check(intent, stub, reason_fn=reason_fn)
+        tokens += fid["tokens"]
+        if not fid.get("faithful"):
+            return {"gate": "drift", "detail": fid.get("verdict", "")}, tokens
     return None, tokens
+
+
 
 
 # --- the refill orchestrator --------------------------------------------------
@@ -1405,6 +386,8 @@ def _write_target(queue_dir: str, n: int, lean_text: str, entry: dict) -> list[s
         json.dump(entry, f, indent=2, ensure_ascii=False)
         f.write("\n")
     return [stub_path, entry_path]
+
+
 
 
 def route_feasibility(intent: dict, pointers: list[str], *, lookup_fn) -> dict:
@@ -1427,11 +410,14 @@ def route_feasibility(intent: dict, pointers: list[str], *, lookup_fn) -> dict:
     return {"feasible": False, "missing": missing, "note": note}
 
 
+
+
 def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn, intent_fn=None,
            agentic_formalize_fn=None, slot_switch_fn=None,
            queue_dir: str, budget: int, max_issues: int = 1,
            max_attempt_issues: int = 3, gate_budget: int = 20_000, formalize_rounds: int = 3,
            proactive_fn=None, depth_gate: bool = True, triviality_gate: bool = True,
+           fidelity_gate: bool = True,
            semantic_rounds: int = 2, system_prompt=None,
            feasibility_fn=None, gate_cache=None, log=lambda m: None) -> dict:
     """Draft + gate + stage up to `max_issues` targets from `issues`.
@@ -1556,7 +542,7 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn, int
                     lean_text=lean_text, stub=stub, name=name, intent=intent, issue=issue,
                     deferred=deferred, reason_fn=reason_fn, prove_fn=prove_fn,
                     check_fn=check_fn, gate_budget=gate_budget, depth_gate=depth_gate,
-                    triviality_gate=triviality_gate, route=route,
+                    triviality_gate=triviality_gate, fidelity_gate=fidelity_gate, route=route,
                     def_names=drafted_def_names(stub) if route == "defs" else None,
                     system_prompt=system_prompt, cache=gate_cache)
                 spent += gate_tokens
@@ -1610,6 +596,8 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn, int
     return {"seeded": seeded, "tokens": spent, "attempted": attempted}
 
 
+
+
 # --- CLI (the refill entrypoint pipeline-tick.sh calls) -----------------------
 
 def _fetch_issues(slug: str) -> list[dict]:
@@ -1618,6 +606,8 @@ def _fetch_issues(slug: str) -> list[dict]:
          "--json", "number,title,labels,body"],
         capture_output=True, text=True, check=True).stdout
     return json.loads(out)
+
+
 
 
 def _already_seeded(queue_dir: str) -> set[int]:
@@ -1630,8 +620,12 @@ def _already_seeded(queue_dir: str) -> set[int]:
     return nums
 
 
+
+
 def _foundry_root() -> str:
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
 
 
 def build_retrieve_fns(*, backend, main_repo, index_dir, k, embed_model, api_key):
@@ -1655,6 +649,8 @@ def build_retrieve_fns(*, backend, main_repo, index_dir, k, embed_model, api_key
         pass
     proactive = lambda stmt: idx.retrieve(stmt, k, embed_fn)  # noqa: E731
     return reactive, proactive
+
+
 
 
 def main() -> int:
@@ -1681,6 +677,9 @@ def main() -> int:
     p.add_argument("--triviality-gate", dest="triviality_gate",
                    action=argparse.BooleanOptionalAction, default=None,
                    help="rfl/simp triviality gate (default: config)")
+    p.add_argument("--fidelity-gate", dest="fidelity_gate",
+                   action=argparse.BooleanOptionalAction, default=None,
+                   help="intent-fidelity judge gate (default: config)")
     p.add_argument("--semantic-rounds", type=int, default=None,
                    help="total draft attempts per issue incl. feedback re-drafts (default: config)")
     p.add_argument("--retrieval", dest="retrieval", action=argparse.BooleanOptionalAction,
@@ -1702,6 +701,7 @@ def main() -> int:
     prover_model = pick(args.prover_model, cfg.prover_model)   # leanstral: the gate battery
     depth_gate = pick(args.depth_gate, cfg.depth_gate)
     triviality_gate = pick(args.triviality_gate, cfg.triviality_gate)
+    fidelity_gate = pick(args.fidelity_gate, cfg.fidelity_gate)
     semantic_rounds = pick(args.semantic_rounds, cfg.semantic_rounds)
     formalize_rounds = pick(args.formalize_rounds, cfg.formalize_rounds)
     retrieval = pick(args.retrieval, cfg.retrieval)
@@ -1813,6 +813,7 @@ def main() -> int:
                  max_issues=max_issues, max_attempt_issues=max_attempt, gate_budget=gate_budget,
                  formalize_rounds=formalize_rounds, proactive_fn=proactive_fn,
                  depth_gate=depth_gate, triviality_gate=triviality_gate,
+                 fidelity_gate=fidelity_gate,
                  semantic_rounds=semantic_rounds, system_prompt=prove_system,
                  feasibility_fn=feasibility_fn, gate_cache=gate_cache,
                  log=lambda m: print(f"[refill] {m}", file=sys.stderr))
@@ -1830,6 +831,8 @@ def main() -> int:
 
     print(json.dumps(res))
     return 0
+
+
 
 
 def explicit_arg_names(binders: str) -> list[str]:
@@ -1854,6 +857,8 @@ def explicit_arg_names(binders: str) -> list[str]:
     return names
 
 
+
+
 # --- strengthen: post-proof unused-hypothesis stripping ------------------------
 # 2/2 production PRs shipped a hypothesis the finished proof never used (#123
 # hTn, #124 hσ_eq). Unused-ness is a property of the PROOF, so it is only
@@ -1874,6 +879,8 @@ def _locate_named(text: str, name: str) -> tuple[int, int, int]:
     off = m.start()
     _n, bstart, sep, end = _locate(text[off:])
     return off + bstart, off + sep, off + end
+
+
 
 
 def _binder_groups(binders: str) -> list[tuple[int, int, str, list[str] | None]]:
@@ -1897,6 +904,8 @@ def _binder_groups(binders: str) -> list[tuple[int, int, str, list[str] | None]]
                 groups.append((start, i + 1, opener, names))
                 start = -1
     return groups
+
+
 
 
 def remove_explicit_binders(binders: str, drop: set[str]) -> tuple[str, list[str]]:
@@ -1924,6 +933,8 @@ def remove_explicit_binders(binders: str, drop: set[str]) -> tuple[str, list[str
     return re.sub(r"[ \t]{2,}", " ", "".join(parts)), dropped
 
 
+
+
 def unused_theorem_hypotheses(warnings, binders: str) -> list[str]:
     """Names the elaborator flagged `unused variable` that are EXPLICIT binders of
     the theorem — the strippable set (proof-internal unused vars are not statement
@@ -1939,6 +950,8 @@ def unused_theorem_hypotheses(warnings, binders: str) -> list[str]:
             seen.add(x)
             out.append(x)
     return out
+
+
 
 
 def _rebuild_snippet(snippet: str, candidate: str, thm_name: str) -> str | None:
@@ -1961,109 +974,11 @@ def _rebuild_snippet(snippet: str, candidate: str, thm_name: str) -> str | None:
         return None
 
 
-def bundle_conclusion(concl: str) -> bool:
-    """True when the conclusion is an `∧`-bundle at the TOP level (paren-nested
-    conjunctions are someone else's shape). Triggers the one-round advisory:
-    prefer named per-fact lemmas/corollaries around a single proved core."""
-    depth = 0
-    for c in concl:
-        if c in _OPEN:
-            depth += 1
-        elif c in _CLOSE:
-            depth -= 1
-        elif c == "∧" and depth == 0:
-            return True
-    return False
-
-
-_BUNDLE_ADVISORY = (
-    "The conclusion is an `∧`-bundle. If ONE core fact yields the parts, restate as the "
-    "core theorem (`:= by sorry`) plus the issue-shaped corollary proved by applying it; "
-    "if the parts are independent leaf facts, keep the bundle as the single `sorry` "
-    "theorem and ADD named per-fact corollaries as projections (`(thm …).1`, "
-    "`(thm …).2.1`, …) after it. Extra theorems must be sorry-free terms — exactly ONE "
-    "`sorry` total, on the FIRST theorem. If the bundle truly is the honest final shape, "
-    "resend it unchanged."
-)
-
-
-# the bounded battery: intros peels ∀/→, then certificates before search. `exact?`
-# makes the probe catch lemma-shaped derivability (the zcb_pos class); the `Prop`
-# ascription in the probe goal makes data binders a type error, never a false hit.
-_DERIVABLE_TAC = "by intros; first | positivity | norm_num | simp | exact?"
-
-
-def derivable_probe(lean_text: str) -> tuple[str, list[str], int] | None:
-    """Build the one-file probe for the stub's theorem: everything before the
-    theorem (imports + drafted defs, kept so hypothesis types elaborate), then one
-    single-line `example` per single-name explicit binder proving its type from the
-    EARLIER binders only, then `end MathFin`. Returns `(probe_text, names,
-    first_example_line)`; None when there is nothing to probe."""
-    m = _DECL_RE.search(lean_text)
-    if not m:
-        return None
-    off = m.start()
-    try:
-        _n, bstart, sep, _end = _locate(lean_text[off:])
-    except ValueError:
-        return None
-    binders = lean_text[off + bstart:off + sep]
-    groups = _binder_groups(binders)
-    lines, names = [], []
-    for i, (start, end, opener, gnames) in enumerate(groups):
-        if opener != "(" or not gnames or len(gnames) != 1:
-            continue
-        group = binders[start + 1:end - 1]
-        colon = group.find(":")
-        if colon == -1:
-            continue
-        typ = re.sub(r"\s+", " ", group[colon + 1:].strip())
-        earlier = " ".join(re.sub(r"\s+", " ", binders[s:e]) for s, e, _o, _gn in groups[:i])
-        head = f"example {earlier} " if earlier else "example "
-        lines.append(f"set_option maxHeartbeats 50000 in {head}: (({typ}) : Prop) := {_DERIVABLE_TAC}")
-        names.append(gnames[0])
-    if not lines:
-        return None
-    prefix = lean_text[:off]
-    if not prefix.endswith("\n"):
-        prefix += "\n"
-    base = prefix.count("\n") + 1
-    return prefix + "\n".join(lines) + "\n\nend MathFin\n", names, base
-
-
-def derivable_hypotheses(lean_text: str, *, check_fn) -> list[str]:
-    """Single-name explicit hypotheses of the stub's theorem that the bounded
-    battery PROVES from the earlier binders + the library — the #123 `hP` class
-    (zcb positivity assumed although `zcb_pos` exists; the gate-time strengthen
-    pass cannot see it because the finished proof USES the hypothesis). One daemon
-    call. Fail-open: a daemon error, an unlocatable error, or any error OUTSIDE
-    the example lines (broken context) returns [] — never blocks a good draft."""
-    built = derivable_probe(lean_text)
-    if built is None:
-        return []
-    probe, names, base = built
-    try:
-        r = check_fn(probe)
-    except Exception:  # noqa: BLE001 — probe is advisory-shaped; never crash the draw
-        return []
-    if not isinstance(r, dict):
-        return []
-    if r.get("error"):   # H5: daemon error — fail open to [] (never flag all-names)
-        return []
-    example_lines = {base + j for j in range(len(names))}
-    hit = set()
-    for e in r.get("errors") or []:
-        lns = [int(x) for x in re.findall(r"line (\d+):", str(e))]
-        if not lns:
-            return []
-        for ln in lns:
-            if ln not in example_lines:
-                return []
-            hit.add(ln)
-    return [nm for j, nm in enumerate(names) if base + j not in hit]
 
 
 _MATHFIN_IMPORT_RE = re.compile(r"^public import (MathFin\.\S+)[ \t]*\n", re.MULTILINE)
+
+
 
 
 def trim_unused_imports(candidate: str, *, check_fn) -> dict:
@@ -2084,22 +999,13 @@ def trim_unused_imports(candidate: str, *, check_fn) -> dict:
     return {"candidate": candidate, "removed": removed}
 
 
-GOLF_SYSTEM = (
-    "You are polishing an ACCEPTED, kernel-checked Lean 4 proof to the library's house "
-    "register. Rewrite ONLY proof bodies (what follows each `:=`): every statement, "
-    "name, docstring, import and definition stays byte-identical. House idioms: the "
-    "certificate over search (`mul_nonneg h₁ h₂` over `nlinarith`, `hA.ne'` over "
-    "`linarith`); bare proof TERM over `by exact`; no `set … with h` whose equation is "
-    "never used; fold `have h := e; simp at h; exact h` into `simpa using e`; fewer "
-    "`have`s — surface the shape with `suffices`/`show`; `↦` over `=>`; never introduce "
-    "`sorry` or `?`-suggestion tactics. If the proof is already minimal, return it "
-    "unchanged. Output exactly one ```lean block containing the FULL file."
-)
 
 _GOLF_DECL_RE = re.compile(
     r"^\s*(?:@\[[^\]]*\]\s*)?(?:noncomputable\s+)?(?:theorem|lemma|def|abbrev)\s",
     re.MULTILINE,
 )
+
+
 
 
 def _decl_signatures(text: str) -> list[str]:
@@ -2120,6 +1026,8 @@ def _decl_signatures(text: str) -> list[str]:
                 break
             k += 1
     return sigs
+
+
 
 
 def golf_candidate(candidate: str, *, chat_fn, regate_fn, log=lambda m: None) -> dict:
@@ -2145,6 +1053,8 @@ def golf_candidate(candidate: str, *, chat_fn, regate_fn, log=lambda m: None) ->
         return {"candidate": candidate, "golfed": False}
     log("golf: accepted (proof-only edit, full gate green)")
     return {"candidate": golfed, "golfed": True}
+
+
 
 
 def _protected_from_strip(binders: str, body: str, drop: list[str]) -> set[str]:
@@ -2183,6 +1093,8 @@ def _protected_from_strip(binders: str, body: str, drop: list[str]) -> set[str]:
                 protected.add(name)
                 break
     return protected
+
+
 
 
 def strengthen_candidate(candidate: str, snippet: str | None, thm_name: str,
@@ -2231,6 +1143,8 @@ def strengthen_candidate(candidate: str, snippet: str | None, thm_name: str,
     return {"candidate": candidate, "entry_code": entry_code, "stripped": stripped}
 
 
+
+
 # --- placement + mechanical emit ---------------------------------------------
 
 # issue area label -> MathFin subdirectory. Areas without a directory yet (fx)
@@ -2243,6 +1157,8 @@ _AREA_TO_SECTION = {
     "defi": "DeFi", "credit": "FixedIncome", "execution": "Portfolio",
 }
 
+
+
 _LICENSE = (
     "/-\n"
     "Copyright (c) 2026 Raphael Coelho. All rights reserved.\n"
@@ -2250,8 +1166,14 @@ _LICENSE = (
     "Authors: Raphael Coelho\n"
     "-/"
 )
+
+
 _BENCHMARK = "benchmarks/mathematical_finance.json"
+
+
 _DOMAIN = "mathematical_finance"
+
+
 
 
 def section_for_area(area: str) -> str:
@@ -2259,6 +1181,8 @@ def section_for_area(area: str) -> str:
     if area in _AREA_TO_SECTION:
         return _AREA_TO_SECTION[area]
     return "".join(p.capitalize() for p in re.split(r"[-_ ]+", area or "") if p)
+
+
 
 
 def normalize_deferred(val) -> list[str]:
@@ -2277,15 +1201,21 @@ def normalize_deferred(val) -> list[str]:
     return out
 
 
+
+
 # A5: a `/-- … -/` decl docstring immediately followed by an `omit …/set_option …
 # in` modifier is a parse error (`unexpected token 'omit'`) — the modifier must sit
 # ABOVE the docstring. This regex captures (docstring)(modifier-lines) to swap them.
 _MODIFIER_AFTER_DOC_RE = re.compile(
     r"(/--.*?-/)\n((?:[ \t]*(?:omit|set_option)\b[^\n]*?\bin\b[ \t]*\n)+)", re.DOTALL)
+
+
 # A7: a capital `Σ`/`Π` glued into an identifier collides with sigma/pi-type
 # notation (a recurring drafter slip — girsanov era). Match one adjacent to an
 # ASCII identifier char so the standalone `Σ x, …` type-former is NOT flagged.
 _SIGMA_PI_IDENT_RE = re.compile(r"[A-Za-z0-9_'][ΣΠ]|[ΣΠ][A-Za-z0-9_']")
+
+
 
 
 def _prelint_stub(stub: str) -> str:
@@ -2321,6 +1251,8 @@ def _prelint_stub(stub: str) -> str:
             f"identifier uses `{bad.group()}` — a capital Σ/Π collides with sigma/pi-type "
             "notation; rename it with an ASCII/lowercase identifier (e.g. `sigma`).")
     return _MODIFIER_AFTER_DOC_RE.sub(lambda m: m.group(2) + m.group(1) + "\n", stub)
+
+
 
 
 def emit_target_files(issue: dict, stub: str, meta: dict) -> tuple[str, dict, dict]:
@@ -2472,6 +1404,7 @@ def emit_target_files(issue: dict, stub: str, meta: dict) -> tuple[str, dict, di
         "deferred": deferred,
     }
     return lean_text, entry, placement
+
 
 
 if __name__ == "__main__":

@@ -65,6 +65,10 @@ semantic_rounds = 2
 triviality_gate = true     # splice `first | rfl | simp` over the sorry at draft time: a clean
                            # close means a definitional restatement with no content (the
                            # cal-bk-67 class, caught before prove-compute instead of at open-pr)
+fidelity_gate = true       # the intent-fidelity judge (Claude: does the Lean render the drafted
+                           # intent?). rubric is a near-twin of the issue->stub faithfulness judge
+                           # that still runs; toggleable so its marginal catch can be A/B-measured
+                           # against the live death families before deciding whether to drop it.
 gate_cache = true          # item L: content-address the adversarial gate goals (vacuity/disproof)
                            # and substitute the cached verdict on a hit — 0 tokens, no daemon
                            # call — across attempts + ticks (the persist step commits runs/, so
