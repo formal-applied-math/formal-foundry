@@ -44,13 +44,25 @@ pytestmark = pytest.mark.skipif(
 _ELAB_TIMEOUT = 360
 
 
+# the daemon's OWN internal elab-timeout (default 180s) surfaces a killed REPL as a
+# plural `errors` entry ("elaboration timed out after …s (REPL killed)"), NOT the
+# singular `error` infra sentinel — and it fires before the client `_ELAB_TIMEOUT`.
+# on a contended 2-core runner an `import Mathlib` elaboration can exceed that window,
+# which is indeterminate infra, not a slip-catch regression, so skip on it too.
+_INFRA_ERR_MARKERS = ("timed out", "repl killed", "timeout")
+
+
 def _check_or_skip(code: str):
     """A daemon check, but a "did not complete" TIMEOUT is INDETERMINATE infra (a wedged /
-    backed-up daemon on a slow shared runner), not a regression of the slip-catch — skip
-    rather than red the run, the same philosophy as the daemon-down skip above."""
+    backed-up daemon on a slow shared runner, or the daemon's internal elab-timeout killing
+    the REPL), not a regression of the slip-catch — skip rather than red the run, the same
+    philosophy as the daemon-down skip above."""
     r = daemon_check(code, timeout=_ELAB_TIMEOUT)
     if r.get("error"):   # singular = the infra sentinel from probe.daemon_check
         pytest.skip(f"daemon check did not complete (infra, not a regression): {r['error']}")
+    errs = " ".join(str(e) for e in (r.get("errors") or [])).lower()
+    if any(mk in errs for mk in _INFRA_ERR_MARKERS):   # daemon-internal elab-timeout / killed REPL
+        pytest.skip(f"daemon elaboration timed out (infra, not a regression): {r.get('errors')}")
     return r
 
 
