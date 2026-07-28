@@ -1,0 +1,134 @@
+name: build lean_scout index
+
+# THE "REBUILD ONCE PER PIN" STEP, made a job instead of a chore.
+#
+# `scripts/build-index.sh` extracts the lean_scout index the context packs
+# consume (`house_context` → `scout_index.ScoutIndex`) by running lean_scout
+# over the MathFin library. The index is gitignored on purpose — it is a
+# derived artifact keyed to a pin, and `index/PIN` records the toolchain +
+# lean_scout rev it was built under so staleness is detectable rather than
+# silent.
+#
+# The catch is that "rebuild once per pin" is a manual, hour-ish, one-Lean-slot
+# local job, so in practice it lags the pin — the foundry keeps running on the
+# regex `extract_signatures` fallback with coarser context packs, and nobody
+# notices because nothing breaks. This job removes the excuse: it runs the same
+# script against the same pinned image on a runner and uploads the result, so
+# refreshing the index is "download the artifact, unzip into index/".
+#
+# It also answers the question scout-lake/README.md flags as the one thing that
+# can go wrong: does lean_scout @<rev> actually build against MathFin's current
+# Mathlib? A red run here IS that answer, and it arrives at the pin bump rather
+# than the next time somebody wants an index.
+#
+# Runs on the pin-following commits (the paths below are what changes when the
+# library moves) plus manual dispatch. The extraction reuses the image's baked
+# `/app` — Mathlib + BrownianMotion + MathFin oleans are already compiled in
+# there, so only lean_scout itself compiles here.
+
+on:
+  # `pull_request` as well as `push`, so the run that proves lean_scout still
+  # builds against the library's pins happens BEFORE the pin-following change
+  # lands, not after.
+  pull_request:
+    paths:
+      - 'scout-lake/**'
+      - 'scripts/build-index.sh'
+      - '.github/workflows/build-index.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'scout-lake/**'
+      - 'scripts/build-index.sh'
+      - '.github/workflows/build-index.yml'
+  workflow_dispatch:
+    inputs:
+      tactics:
+        description: "Also extract the tactics index (heavy — re-elaborates every tactic)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: build-index
+  cancel-in-progress: true
+
+jobs:
+  index:
+    name: extract from the pinned image
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      # The verify image is Mathlib-sized; the runner's default free disk is
+      # not. Same reclaim pipeline.yml uses before pulling it.
+      - name: Reclaim disk
+        run: |
+          df -h / | tail -1
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+                      /usr/local/.ghcup /usr/local/share/boost /opt/hostedtoolcache/CodeQL \
+                      /usr/local/lib/node_modules 2>/dev/null || true
+          docker image prune -af >/dev/null 2>&1 || true
+          echo "after cleanup:"; df -h / | tail -1
+
+      - name: Checkout foundry
+        uses: actions/checkout@v4
+
+      # Only for the PIN stamp — the extraction itself reads the image's baked
+      # /app, not this checkout. Shallow is enough (the script asks for
+      # `rev-parse HEAD` and `lean-toolchain`).
+      - name: Checkout MathFin (for the pin stamp)
+        uses: actions/checkout@v4
+        with:
+          repository: raphaelrrcoelho/formal-mathfin
+          path: main
+
+      - name: GHCR login (optional — image is public; login only eases rate limits)
+        env:
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+        run: |
+          if [ -n "$GHCR_TOKEN" ]; then
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u raphaelrrcoelho --password-stdin
+          else
+            echo "no GHCR_TOKEN set — anonymous pull (mathfin-verify is public)"
+          fi
+
+      - name: Pull the pinned verify image
+        run: docker pull ghcr.io/raphaelrrcoelho/mathfin-verify:latest
+
+      - name: Report the pins this index will be built under
+        run: |
+          echo "library toolchain: $(cat main/lean-toolchain)"
+          echo "library commit:    $(git -C main rev-parse --short HEAD)"
+          grep -E '^REV=' scripts/build-index.sh
+          echo "image /app toolchain:"
+          docker run --rm --entrypoint cat \
+            ghcr.io/raphaelrrcoelho/mathfin-verify:latest /app/lean-toolchain
+
+      - name: Extract
+        env:
+          MAIN_REPO: ${{ github.workspace }}/main
+          SCOUT_TACTICS: ${{ inputs.tactics && '1' || '0' }}
+          # A hosted runner is 4-core; the script's local default (cpuset 0-3,
+          # 6 GB) is the 10 GB-box cap and fits here unchanged.
+          VERIFY_CPUSET: "0-3"
+        run: bash scripts/build-index.sh
+
+      - name: Summarise
+        run: |
+          echo "### lean_scout index" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat index/PIN >> "$GITHUB_STEP_SUMMARY"
+          wc -l index/*.jsonl >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      # Unzip into `index/` at the foundry root to use it. Kept as an artifact
+      # rather than committed: it is derived, pin-keyed, and large enough that
+      # versioning it would bloat the repo for no gain.
+      - name: Upload the index
+        uses: actions/upload-artifact@v4
+        with:
+          name: lean-scout-index
+          path: |
+            index/*.jsonl
+            index/PIN
+          if-no-files-found: error
+          retention-days: 90
