@@ -14,13 +14,13 @@ defaultTargets = []
 # built against a different Mathlib this is where a conflict surfaces — see
 # scout-lake/README.md for the fallback.
 
-# Pinned to the last rev on Lean v4.31.0 (our toolchain). 5b7cdb6 (HEAD)
-# bumped to v4.32.0-rc1 — a toolchain mismatch. lean_scout has NO Mathlib
-# require, so once the toolchain matches there is no dependency conflict.
+# Pinned to lean_scout's HEAD on Lean v4.32.0 (our toolchain after the
+# 2026-07-27 bump). lean_scout has NO Mathlib require, so with the toolchains
+# matching there is no dependency conflict.
 [[require]]
 name = "lean_scout"
 git = "https://github.com/mathlib-initiative/lean_scout.git"
-rev = "97ab10e8a620"
+rev = "289c1f1f88a4"
 
 [[require]]
 name = "MathFin"
