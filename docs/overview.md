@@ -39,7 +39,7 @@ A Lean 4 library built on top of two dependencies:
 - **Degenne's `BrownianMotion`** — a Lean formalization of Brownian motion we
   build the stochastic-calculus layer on.
 
-Pinned to **Lean v4.31.0 · Mathlib @fabf563a · BrownianMotion @bdf5ea0c**. The
+Pinned to **Lean v4.32.0 · Mathlib @81a5d257 · BrownianMotion @4d52fa77**. The
 pins are exact and load-bearing; a version bump is a real event.
 
 ### The two commitments that make it trustworthy
