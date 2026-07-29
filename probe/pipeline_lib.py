@@ -81,16 +81,12 @@ class AutoformalizeConfig:
     retrieval_k: int = 8                    # top-k premises surfaced per query
     embed_model: str = "mistral-embed"      # Mistral /v1/embeddings model id
     # semantic repair cascade (design: 2026-07-17-semantic-repair-cascade): a semantic
-    # gate rejection (shallow/trivial/vacuous/false/unfaithful/drift) re-drafts BOTH
+    # gate rejection (shallow/trivial/vacuous/false/unfaithful) re-drafts BOTH
     # stages with the gate verdict as feedback, up to semantic_rounds total attempts
     # per issue (1 = the old terminal-skip behavior). triviality_gate splices
     # `first | rfl | simp` over the sorry at draft time (the cal-bk-67 rfl class).
     semantic_rounds: int = 2
     triviality_gate: bool = True
-    # the intent-fidelity judge (Claude: does the Lean render the drafted intent?). Its rubric
-    # is a near-twin of judge_faithfulness (issue->stub); kept ON, but toggleable so its marginal
-    # catch over faithfulness can be A/B-measured against the live death families before any cut.
-    fidelity_gate: bool = True
     # item L: content-address the adversarial gate goals (vacuity/disproof) and substitute
     # the cached verdict on a hit, across attempts + ticks. Off by default (the census is
     # not yet volume-bound); enable once the queue is large enough to pay back.

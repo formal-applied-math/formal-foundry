@@ -9,7 +9,7 @@ import subprocess
 from af_parse import *  # noqa: F401,F403
 from af_prompts import *  # noqa: F401,F403
 
-__all__ = ['_JSON_FENCE_RE', '_extract_json', 'parse_verdict', 'judge_faithfulness', 'intent_reject_reason', 'parse_intent', '_CLAUDE_CAP_MARKERS', 'ClaudeCapError', '_claude_draft_args', 'claude_draft_fn', 'claude_chat_fn', 'claude_auth_present', 'draft_intent', 'loogle_candidates', 'intent_fidelity_check']
+__all__ = ['_JSON_FENCE_RE', '_extract_json', 'parse_verdict', 'judge_faithfulness', 'intent_reject_reason', 'parse_intent', '_CLAUDE_CAP_MARKERS', 'ClaudeCapError', '_claude_draft_args', 'claude_draft_fn', 'claude_chat_fn', 'claude_auth_present', 'draft_intent', 'loogle_candidates']
 
 
 
@@ -173,7 +173,7 @@ def claude_draft_fn(messages: list[dict], *, model: str = "", run_fn=None) -> tu
 
 def claude_chat_fn(drafter):
     """The `claude -p` chat fn bound to the configured model. ONE claude does every general-
-    reasoner role — intent, the faithfulness/intent-fidelity JUDGE, and the decompose split
+    reasoner role — intent, the faithfulness JUDGE, and the decompose split
     (Leanstral still PROVES). A subscription cap raises `ClaudeCapError`, which refill defers."""
     def call(msgs):
         return claude_draft_fn(msgs, model=drafter.claude_model)
@@ -231,11 +231,3 @@ def loogle_candidates(name: str, *, main_repo: str, run_fn=None) -> str:
 
 
 
-def intent_fidelity_check(intent: dict, stub: str, *, reason_fn) -> dict:
-    """The folded roundtrip: does Claude's own agentically-formalized Lean faithfully render the
-    intent it specified in step 1? Same model checks its own work. Soft + lenient — reject ONLY on
-    an explicit `faithful: false`. Returns `{faithful, verdict, tokens}`."""
-    content, tokens = reason_fn(fidelity_messages(intent, stub))
-    v = _extract_json(content) or {}
-    return {"faithful": v.get("faithful") is not False,
-            "verdict": v.get("verdict", ""), "tokens": tokens}
