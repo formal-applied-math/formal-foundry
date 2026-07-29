@@ -1,0 +1,23 @@
+{
+  "id": "mf-blackscholes-forward-start-call",
+  "name": "Forward-start call closed form (Rubinstein)",
+  "description": "Closed-form price of a forward-start call via GBM ratio factorization (Rubinstein).",
+  "domain": "mathematical_finance",
+  "code": {
+    "lean": "import MathFin.BlackScholes.ForwardStartCall\n\nopen MathFin\n\n/-- Closed-form price of a forward-start call via GBM ratio factorization (Rubinstein). -/\ntheorem mf_blackscholes_forward_start_call {Ω : Type*} {mΩ : MeasurableSpace Ω} {Q : Measure Ω} [IsProbabilityMeasure Q]\n    {S_0 r q σ α t1 T : ℝ} {Z1 Z2 : Ω → ℝ}\n    (hS_0 : 0 < S_0) (hσ : 0 < σ) (hα : 0 < α) (ht1 : 0 < t1) (ht1T : t1 < T)\n    (hZ1 : HasLaw Z1 (gaussianReal 0 1) Q)\n    (hZ2 : BSCallHyp Q 1 α (r - q) σ (T - t1) Z2)\n    (hIndep : IndepFun Z1 Z2 Q) :\n    ∫ ω, Real.exp (-r * T) *\n        max (bsTerminal (bsTerminal S_0 (r - q) σ t1 (Z1 ω)) (r - q) σ (T - t1) (Z2 ω)\n              - α * bsTerminal S_0 (r - q) σ t1 (Z1 ω)) 0 ∂Q\n      = S_0 * Real.exp (-q * t1) *\n          bsVGarman (Real.exp (-q * (T - t1))) α (Real.exp (-r * (T - t1))) σ (T - t1) :=\n  MathFin.forward_start_call_price hS_0 hσ hα ht1 ht1T hZ1 hZ2 hIndep\n"
+  },
+  "metadata": {
+    "chapter": 0,
+    "reference": "Forward-start call closed form (Rubinstein)",
+    "difficulty": "medium",
+    "formalization_status": "full",
+    "formalization_scope": "Full formal proof in MathFin/BlackScholes/ForwardStartCall.lean (autoformalized statement, leanstral proof). Re-export from MathFin. Axioms-clean.",
+    "provenance": {
+      "statement_source": "autoform",
+      "statement_model": "autoform",
+      "source": "leanstral-autoform",
+      "model": "labs-leanstral-1-5",
+      "issue": 56
+    }
+  }
+}
