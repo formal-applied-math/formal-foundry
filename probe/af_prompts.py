@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from house_context import build_drafter_prompt, build_system_prompt, extract_signatures
 
-__all__ = ['JUDGE_SYSTEM', '_issue_prose', 'judge_messages', '_assistant', 'INTENT_SYSTEM', 'FORMALIZE_SYSTEM', 'FIDELITY_SYSTEM', 'INTENT_DEFS_ADDENDUM', '_DRAFTER_PROMPT', 'set_drafter_prompt', '_drafter_system', 'intent_messages', '_AGENTIC_PITFALLS', 'fidelity_messages', '_GATE_INSTRUCTIONS', 'render_gate_feedback', 'GOLF_SYSTEM']
+__all__ = ['JUDGE_SYSTEM', '_issue_prose', 'judge_messages', '_assistant', 'INTENT_SYSTEM', 'FORMALIZE_SYSTEM', 'INTENT_DEFS_ADDENDUM', '_DRAFTER_PROMPT', 'set_drafter_prompt', '_drafter_system', 'intent_messages', '_AGENTIC_PITFALLS', '_GATE_INSTRUCTIONS', 'render_gate_feedback', 'GOLF_SYSTEM']
 
 
 
@@ -121,19 +121,6 @@ FORMALIZE_SYSTEM = (
 
 
 
-FIDELITY_SYSTEM = (
-    "You are given an INTENDED STATEMENT in prose and a candidate Lean 4 theorem meant to formalize "
-    "it. Decide whether the Lean faithfully renders the intent: same hypotheses, same conclusion, "
-    "nothing weakened, dropped, or flipped. This is a SAFETY NET for gross formalization failures, "
-    "not a maximal-formality check (a human makes the final call at merge); accept reasonable "
-    "abstractions. A hypothesis the intent lists as an ASSUMPTION but that becomes PROVABLE once "
-    "the Lean realizes the quantity with a concrete definition is faithfully OMITTED, not dropped: "
-    "e.g. the intent assumes `0 < P` for a discount factor, but the Lean uses `MathFin.zcb` (a "
-    "`Real.exp`, automatically positive), so leaving out `0 < P` is a correct refinement, not a "
-    "weakening. (A side condition NOT provable from the concrete defs is still required.) "
-    "Respond with ONLY a JSON object: "
-    '{"faithful": true|false, "verdict": "<one line>", "issues": ["<gross divergence>", ...]}.'
-)
 
 
 
@@ -230,10 +217,6 @@ _AGENTIC_PITFALLS = (
 
 
 
-def fidelity_messages(intent: dict, stub: str) -> list[dict]:
-    return [{"role": "system", "content": FIDELITY_SYSTEM},
-            {"role": "user",
-             "content": f"INTENDED STATEMENT:\n{intent['statement']}\n\nLEAN:\n```lean\n{stub}\n```"}]
 
 
 
@@ -284,8 +267,6 @@ _GATE_INSTRUCTIONS = {
     "unfaithful": "A faithfulness judge found the statement diverges grossly from "
                   "the issue. Address each listed divergence without weakening any "
                   "fact you state.",
-    "drift": "The Lean does not faithfully render the intended statement. Re-render "
-             "every hypothesis and the full conclusion exactly.",
     "newdef_depth": "The theorem's TYPE must be stated THROUGH the drafted definitions — "
                     "apply each drafted def in the hypotheses/conclusion, never restate "
                     "their formulas inline; and the module must actually contain the "

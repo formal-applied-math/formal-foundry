@@ -308,13 +308,12 @@ def prepare_issues(raw: list[dict], *, max_difficulty: str = "medium") -> list[d
 def semantic_verdict(*, lean_text: str, stub: str, name: str, intent: dict, issue: dict,
                      deferred: list[str], reason_fn, prove_fn, check_fn, gate_budget: int,
                      depth_gate: bool = True, triviality_gate: bool = True,
-                     fidelity_gate: bool = True,
                      route: str = "theorem", def_names: list[str] | None = None,
                      system_prompt=None, cache=None) -> tuple[dict | None, int]:
     """Run the semantic gate battery on an ELABORATING draft, cheapest-first:
     depth (theorem route) / defs consumption+grounding (defs route) → triviality
     (structural, zero tokens) → hypothesis-rejection → disproof (kernel,
-    leanstral) → issue-faithfulness → intent-fidelity (Claude judges).
+    leanstral) → issue-faithfulness (Claude judge).
     Returns `(failure, tokens)`: failure is None when every gate passes, else
     `{gate, detail}` for `render_gate_feedback`. The battery's DIVERSITY is the
     anti-Goodhart defense of the repair loop: a re-draft that games one gate still
@@ -362,11 +361,6 @@ def semantic_verdict(*, lean_text: str, stub: str, name: str, intent: dict, issu
         if j.get("issues"):
             detail += "; issues: " + "; ".join(str(x) for x in j["issues"][:4])
         return {"gate": "unfaithful", "detail": detail}, tokens
-    if fidelity_gate:
-        fid = intent_fidelity_check(intent, stub, reason_fn=reason_fn)
-        tokens += fid["tokens"]
-        if not fid.get("faithful"):
-            return {"gate": "drift", "detail": fid.get("verdict", "")}, tokens
     return None, tokens
 
 
@@ -417,7 +411,6 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn, int
            queue_dir: str, budget: int, max_issues: int = 1,
            max_attempt_issues: int = 3, gate_budget: int = 20_000, formalize_rounds: int = 3,
            proactive_fn=None, depth_gate: bool = True, triviality_gate: bool = True,
-           fidelity_gate: bool = True,
            semantic_rounds: int = 2, system_prompt=None,
            feasibility_fn=None, gate_cache=None, log=lambda m: None) -> dict:
     """Draft + gate + stage up to `max_issues` targets from `issues`.
@@ -426,7 +419,7 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn, int
     SPECIFIES the statement) → agentic formalize (`agentic_formalize_fn`, Claude +
     the lean-lsp MCP writes elaborating Lean, self-validating to elaboration — the
     only drafter) → the semantic gate battery (`semantic_verdict`: depth →
-    triviality → vacuity → disproof → judge → intent-fidelity, leanstral proving the
+    triviality → vacuity → disproof → judge, leanstral proving the
     kernel gates). A gate rejection is NOT terminal: it becomes a
     `render_gate_feedback` block and the issue is RE-DRAFTED — both stages see the
     verdict — up to `semantic_rounds` total attempts (the repair cascade; design:
@@ -542,7 +535,7 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn, int
                     lean_text=lean_text, stub=stub, name=name, intent=intent, issue=issue,
                     deferred=deferred, reason_fn=reason_fn, prove_fn=prove_fn,
                     check_fn=check_fn, gate_budget=gate_budget, depth_gate=depth_gate,
-                    triviality_gate=triviality_gate, fidelity_gate=fidelity_gate, route=route,
+                    triviality_gate=triviality_gate, route=route,
                     def_names=drafted_def_names(stub) if route == "defs" else None,
                     system_prompt=system_prompt, cache=gate_cache)
                 spent += gate_tokens
@@ -677,9 +670,6 @@ def main() -> int:
     p.add_argument("--triviality-gate", dest="triviality_gate",
                    action=argparse.BooleanOptionalAction, default=None,
                    help="rfl/simp triviality gate (default: config)")
-    p.add_argument("--fidelity-gate", dest="fidelity_gate",
-                   action=argparse.BooleanOptionalAction, default=None,
-                   help="intent-fidelity judge gate (default: config)")
     p.add_argument("--semantic-rounds", type=int, default=None,
                    help="total draft attempts per issue incl. feedback re-drafts (default: config)")
     p.add_argument("--retrieval", dest="retrieval", action=argparse.BooleanOptionalAction,
@@ -701,7 +691,6 @@ def main() -> int:
     prover_model = pick(args.prover_model, cfg.prover_model)   # leanstral: the gate battery
     depth_gate = pick(args.depth_gate, cfg.depth_gate)
     triviality_gate = pick(args.triviality_gate, cfg.triviality_gate)
-    fidelity_gate = pick(args.fidelity_gate, cfg.fidelity_gate)
     semantic_rounds = pick(args.semantic_rounds, cfg.semantic_rounds)
     formalize_rounds = pick(args.formalize_rounds, cfg.formalize_rounds)
     retrieval = pick(args.retrieval, cfg.retrieval)
@@ -813,7 +802,6 @@ def main() -> int:
                  max_issues=max_issues, max_attempt_issues=max_attempt, gate_budget=gate_budget,
                  formalize_rounds=formalize_rounds, proactive_fn=proactive_fn,
                  depth_gate=depth_gate, triviality_gate=triviality_gate,
-                 fidelity_gate=fidelity_gate,
                  semantic_rounds=semantic_rounds, system_prompt=prove_system,
                  feasibility_fn=feasibility_fn, gate_cache=gate_cache,
                  log=lambda m: print(f"[refill] {m}", file=sys.stderr))

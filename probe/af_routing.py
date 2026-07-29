@@ -65,7 +65,7 @@ def classify_refill(rec: dict) -> str:
         return "defs_rejected"
     if out == "trivial":
         return "trivial_restatement"
-    if out in ("unfaithful", "drift"):
+    if out == "unfaithful":
         return "fidelity"
     if out in ("intent", "formalize"):
         return "undraftable"

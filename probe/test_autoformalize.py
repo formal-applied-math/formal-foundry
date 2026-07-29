@@ -719,7 +719,6 @@ def test_refill_logs_rejected_statement_on_unfaithful(monkeypatch, tmp_path):
     monkeypatch.setattr(af, "disproof", lambda *a, **k: {"false": False, "tokens": 1})
     monkeypatch.setattr(af, "judge_faithfulness",
                         lambda i, s, chat_fn, deferred=None: {"faithful": False, "verdict": "missing X", "tokens": 1})
-    monkeypatch.setattr(af, "intent_fidelity_check", lambda intent, s, *, reason_fn: {"faithful": True, "tokens": 1})
     logs = []
     af.refill([_issue(7)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
               context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000, log=lambda m: logs.append(m),
@@ -1149,7 +1148,6 @@ def test_classify_refill_families():
     assert af.classify_refill({"outcome": "ungrounded"}) == "defs_rejected"
     assert af.classify_refill({"outcome": "trivial"}) == "trivial_restatement"
     assert af.classify_refill({"outcome": "unfaithful"}) == "fidelity"
-    assert af.classify_refill({"outcome": "drift"}) == "fidelity"
     assert af.classify_refill({"outcome": "intent"}) == "undraftable"
     assert af.classify_refill({"outcome": "formalize"}) == "undraftable"
     assert af.classify_refill({"outcome": "vacuous"}) == "statement_wrong"
@@ -1542,29 +1540,6 @@ def test_semantic_verdict_defs_route_swaps_depth_for_defs_gate(monkeypatch):
     assert fail == {"gate": "ungrounded", "detail": "w"}
 
 
-def test_semantic_verdict_fidelity_gate_off_skips_intent_fidelity(monkeypatch):
-    # fidelity_gate=False bypasses the intent-fidelity judge entirely: a draft that
-    # would fail fidelity but passes every other gate is accepted, and the judge is
-    # never invoked (the A/B lever for the least-differentiated gate — its rubric is
-    # a near-twin of judge_faithfulness, which still runs).
-    called = []
-    monkeypatch.setattr(af, "depth_rejection", lambda *a, **k: {"shallow": False, "tokens": 0})
-    monkeypatch.setattr(af, "triviality_rejection", lambda *a, **k: {"trivial": False, "tokens": 0})
-    monkeypatch.setattr(af, "hypothesis_rejection", lambda *a, **k: {"vacuous": False, "tokens": 0})
-    monkeypatch.setattr(af, "disproof", lambda *a, **k: {"false": False, "tokens": 0})
-    monkeypatch.setattr(af, "judge_faithfulness",
-                        lambda i, s, chat_fn, deferred=None: {"faithful": True, "tokens": 0})
-    monkeypatch.setattr(af, "intent_fidelity_check", lambda intent, s, *, reason_fn:
-                        called.append(1) or {"faithful": False, "verdict": "drift", "tokens": 0})
-    common = dict(lean_text="lt", stub="s", name="t", intent={}, issue={"pointers": []},
-                  deferred=[], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK, gate_budget=100)
-    fail_on, _ = af.semantic_verdict(**common)                 # ON (default): drift is caught
-    assert fail_on == {"gate": "drift", "detail": "drift"} and called == [1]
-    called.clear()
-    fail_off, _ = af.semantic_verdict(fidelity_gate=False, **common)   # OFF: judge skipped, draft passes
-    assert fail_off is None and called == []
-
-
 def test_render_gate_feedback_covers_defs_gates():
     assert "drafted def" in af.render_gate_feedback("newdef_depth", "", None)
     assert "wrapper" in af.render_gate_feedback("ungrounded", "", None)
@@ -1770,8 +1745,6 @@ def _pass_gates(monkeypatch):
     monkeypatch.setattr(af, "disproof", lambda *a, **k: {"false": False, "tokens": 1})
     monkeypatch.setattr(af, "judge_faithfulness",
                         lambda i, s, chat_fn, deferred=None: {"faithful": True, "tokens": 1})
-    monkeypatch.setattr(af, "intent_fidelity_check",
-                        lambda intent, s, *, reason_fn: {"faithful": True, "tokens": 1})
 
 
 _NOOP = lambda m: ("", 0)
@@ -1850,7 +1823,6 @@ def test_refill_skips_vacuous_then_stages_next(monkeypatch, tmp_path):
     monkeypatch.setattr(af, "disproof", lambda *a, **k: {"false": False, "tokens": 1})
     monkeypatch.setattr(af, "judge_faithfulness",
                         lambda i, s, chat_fn, deferred=None: {"faithful": True, "tokens": 1})
-    monkeypatch.setattr(af, "intent_fidelity_check", lambda intent, s, *, reason_fn: {"faithful": True, "tokens": 1})
     # issue 1's stub is vacuous, issue 2's is not
     monkeypatch.setattr(af, "hypothesis_rejection",
                         lambda lt, nm, **k: {"vacuous": "theorem t1 " in lt, "tokens": 1})
@@ -1869,27 +1841,11 @@ def test_refill_skips_unfaithful_judge(monkeypatch, tmp_path):
     monkeypatch.setattr(af, "disproof", lambda *a, **k: {"false": False, "tokens": 1})
     monkeypatch.setattr(af, "judge_faithfulness",
                         lambda i, s, chat_fn, deferred=None: {"faithful": False, "verdict": "weaker", "tokens": 1})
-    monkeypatch.setattr(af, "intent_fidelity_check", lambda intent, s, *, reason_fn: {"faithful": True, "tokens": 1})
     res = af.refill([_issue(7)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
                     context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000,
                     agentic_formalize_fn=_good_agentic, slot_switch_fn=lambda s: None)
     assert res["seeded"] == []
     assert not (tmp_path / "cal-bk-7.lean").exists()
-
-
-def test_refill_skips_intent_drift(monkeypatch, tmp_path):
-    # the folded roundtrip: leanstral's Lean does not render the intent → skip.
-    _two_stage_ok(monkeypatch)
-    monkeypatch.setattr(af, "depth_rejection", lambda lt, nm, ptr, **k: {"shallow": False, "tokens": 0})
-    monkeypatch.setattr(af, "hypothesis_rejection", lambda *a, **k: {"vacuous": False, "tokens": 1})
-    monkeypatch.setattr(af, "disproof", lambda *a, **k: {"false": False, "tokens": 1})
-    monkeypatch.setattr(af, "judge_faithfulness", lambda i, s, chat_fn, deferred=None: {"faithful": True, "tokens": 1})
-    monkeypatch.setattr(af, "intent_fidelity_check",
-                        lambda intent, s, *, reason_fn: {"faithful": False, "verdict": "dropped hyp", "tokens": 1})
-    res = af.refill([_issue(7)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
-                    context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000,
-                    agentic_formalize_fn=_good_agentic, slot_switch_fn=lambda s: None)
-    assert res["seeded"] == []
 
 
 def test_refill_skips_issue_on_step_exception(monkeypatch, tmp_path):
@@ -2083,8 +2039,6 @@ def test_draft_intent_not_ok_when_unparseable():
     assert r["ok"] is False and r["intent"] is None
 
 
-_INTENT = {"statement": "P1 = P2*(1+d)", "objects": ["MathFin.zcb"], "module_name": "FRA",
-           "benchmark_id": "mf-fi-fra", "docstring": "d", "deferred": []}
 
 
 def test_assistant_turn_substitutes_placeholder_for_empty():
@@ -2271,31 +2225,6 @@ def test_golf_candidate_fails_open_on_regate_failure_or_no_lean():
 
 def test_loogle_candidates_uses_injected_runner():
     assert af.loogle_candidates("zcb", main_repo="/x", run_fn=lambda nm: f"hit:{nm}") == "hit:zcb"
-
-
-def test_fidelity_system_accepts_concrete_realization_refinement():
-    # #67 passed the judge but fidelity flagged "drops positivity" — the same over-strictness:
-    # omitting `0 < P` is correct when the Lean realizes P with `zcb` (Real.exp, provably positive).
-    sys = " ".join(m["content"] for m in af.fidelity_messages(_INTENT, "theorem foo : True := by sorry"))
-    assert "PROVABLE" in sys and "correct refinement" in sys
-
-
-def test_intent_fidelity_faithful_and_tokens():
-    r = af.intent_fidelity_check(_INTENT, "theorem foo : True := by sorry",
-                                 reason_fn=_canned_chat('{"faithful": true, "verdict": "ok"}', 8))
-    assert r["faithful"] is True and r["tokens"] == 8
-
-
-def test_intent_fidelity_rejects_on_explicit_false():
-    r = af.intent_fidelity_check(_INTENT, "theorem foo : True := by sorry",
-                                 reason_fn=_canned_chat('{"faithful": false, "verdict": "dropped hyp"}', 8))
-    assert r["faithful"] is False
-
-
-def test_intent_fidelity_fails_open_when_unparseable():
-    r = af.intent_fidelity_check(_INTENT, "theorem foo : True := by sorry",
-                                 reason_fn=_canned_chat("hmm no json", 3))
-    assert r["faithful"] is True    # reject only on an explicit false
 
 
 # --- issue preparation (pointers extraction + filter/enrich) -----------------
