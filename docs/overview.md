@@ -15,9 +15,10 @@ There are two repos:
   only when Lean's kernel accepts a proof with zero gaps.
 - **`mathfin-foundry`** (private, this repo) — a two-engine, self-feeding
   autoformalization pipeline. From an open proof *issue* it drafts a Lean
-  *statement* (Mistral's **Magistral**, faithfulness-gated), then proves it
-  (Mistral's **Leanstral**), checks both against Lean's kernel, and surfaces the
-  good ones for a human to refine and merge into `formal-mathfin`.
+  *statement* (Anthropic's **Claude** — specify the intent, then write the Lean
+  agentically against the lean-lsp — faithfulness-gated), then proves it (Mistral's
+  **Leanstral**), checks both against Lean's kernel, and surfaces the good ones for
+  a human to refine and merge into `formal-mathfin`.
 
 If you've built agentic coding loops, you already understand the foundry. It is
 an agent proposing code (a Lean proof) into a **compiler-feedback repair loop** —
@@ -100,10 +101,10 @@ The pipeline is a metered repair loop. Full ASCII/Mermaid diagram in
 
 ```
  TARGET            a Lean stub `theorem … := by sorry` + pointers. When the queue
- (from an issue)   is empty the tick SELF-FEEDS: Magistral drafts the stub from the
-                   next ready issue and five faithfulness gates validate it
-                   (elaborate · ⊢False · ⊢¬Concl · judge · roundtrip) before it is
-                   queued — `probe/autoformalize.py`.
+ (from an issue)   is empty the tick SELF-FEEDS: Claude drafts the stub agentically
+                   from the next ready issue and the semantic gates validate it
+                   (elaborate · depth · triviality · ⊢False · ⊢¬Concl · Claude judge)
+                   before it is queued — `probe/autoformalize.py`.
         │
         ▼
  HOUSE DOCTRINE    injected as the system prompt on every attempt:
@@ -112,9 +113,9 @@ The pipeline is a metered repair loop. Full ASCII/Mermaid diagram in
                    per-target context pack (signatures of the modules to reuse)
         │
         ▼
- LEANSTRAL         Mistral's Lean-4 prover. Emits a candidate .lean file;
- (the prover)      on failure it is re-fed the compiler errors and resends
-        │  ▲       the whole file. This is the loop it was trained for.
+ LEANSTRAL         Mistral's Lean-4 prover. Drives the live goal state through the
+ (the prover)      vibe ⇄ lean-lsp-mcp harness — one deep agentic session per target
+        │  ▲       (turns 60), the loop it was trained for.
         ▼  │ goal states + compiler errors
  LEAN ENVIRONMENT  Docker, memory-capped, ONE Lean process at a time
  (checks it)       (a persistent REPL daemon XOR the lean-lsp server)
@@ -135,13 +136,15 @@ is true, in the house idiom, before it merges. An opaque 20-premise discharge is
 
 ### The knobs (this is where the ML-systems intuition pays off)
 
-`pipeline.toml` configures a **pass@k** harness. Per proof task, it samples
-`fanout` whole-proof candidates in parallel (currently 8), batch-checks them, then
-runs up to `repair_rounds` (2) compiler-feedback repairs on the best failure. The
+`pipeline.toml` configures a **depth-over-breadth** harness. Per proof task the
+prover runs one deep `vibe ⇄ lean-lsp-mcp` session bounded by `max_turns` (60) —
+more turns is more repair depth in a single session, the live realization of the
 research finding baked in: **tokens-per-attempt is the dominant lever** — a bigger
 per-attempt reasoning budget beats more small attempts (Leanstral's own
 PutnamBench curve climbs 44 → 587 solves as the per-problem budget goes
-50k → 4M tokens). A monthly token allowance caps spend; hard tasks escalate.
+50k → 4M tokens). A monthly token allowance caps spend; a target the plain session
+can't close escalates to the **decompose** path. (This replaced an earlier pass@k
+text-loop of `fanout` parallel whole-proof samples + `repair_rounds`.)
 
 ### The hard rules (read these before touching anything)
 
@@ -161,7 +164,7 @@ PutnamBench curve climbs 44 → 587 solves as the per-problem budget goes
 ### The hands-off PR pipeline
 
 `.github/workflows/pipeline.yml` runs on a cron. When the queue has no
-unattempted target it first **self-feeds** — Magistral autoformalizes and
+unattempted target it first **self-feeds** — Claude autoformalizes and
 faithfulness-gates a stub from the next ready issue (`autoformalize.py`) — then it
 proves the target and, on a pass, opens a *ready-for-review* PR on `formal-mathfin`
 that closes the source issue (assembling the proof into its module + a re-export
@@ -172,10 +175,9 @@ parent and lists the remainder as **suggested follow-up issues** for R to open �
 the gate rejects a *silent* gap, never a *declared* one. The first such PR (#120, a contango result) opened 2026-07-11 —
 CI-green but **unmerged** (both early autoform PRs are now conflicting as `main`
 moved on). An opened PR is a *proposal* R reviews + revises before merge, not proof
-of quality; the merge is. (Likewise the Magistral judge is a *soft self-check*; the
-roundtrip is a *cross-model back-translation* — Leanstral independently re-formalizes —
-genuinely independent but still soft. Neither soft check is a faithfulness guarantee;
-the kernel gates + human review are the rigorous ones.) A candidate that won't assemble
+of quality; the merge is. (Likewise the Claude faithfulness judge is a *soft
+self-check* — statement vs issue, not a faithfulness guarantee; the kernel gates +
+human review are the rigorous ones.) A candidate that won't assemble
 green files a blocked issue on
 the foundry instead of opening a red PR. The one credential that grants write
 access to main is a fine-grained PAT (`MAIN_PR_TOKEN`); revoking it fully disables
@@ -301,7 +303,7 @@ still in use:
 - **[Draft, Sketch, and Prove](https://arxiv.org/abs/2210.12283)** (Jiang et al.,
   ICLR 2023) — informal proof → formal *sketch* → let an automated prover fill the
   gaps. The decomposition pattern Aristotle and Gauss still run on, and the
-  blueprint for our roadmap's subgoal-decomposition step.
+  blueprint for our **decompose** path (now live).
 - **[LeanDojo / ReProver](https://arxiv.org/abs/2306.15626)** (Yang et al., NeurIPS
   2023; [leandojo.org](https://leandojo.org/)) — the open Lean-interaction
   environment plus **retrieval-augmented** proving (pull the right premises from
@@ -331,10 +333,11 @@ these are the papers behind it:
   exact justification for our repair loop.
 - **[Kimina-Prover](https://arxiv.org/abs/2504.11354)** — whole-proof generation,
   no tree search; documents the **pass@k sample-efficiency knee** (~most of the
-  value by 32 samples) that sets our `fanout`.
+  value by 32 samples) that set the retired pass@k harness's `fanout` (now a single
+  deep vibe session — depth over breadth).
 - **[DeepSeek-Prover-V2](https://arxiv.org/abs/2504.21801)** — **subgoal
   decomposition**: a big model splits a hard theorem into lemmas a small prover
-  can close. The next capability jump on our roadmap.
+  can close. Now live as our **decompose** path (Claude splits ≤3 leaves + main).
 - **[AlphaProof (Nature, 2025)](https://www.nature.com/articles/s41586-025-09833-y)** —
   the frontier, *tree-search* shape (needs a datacenter). Read it to understand
   what does **not** transfer to a one-box operation — and why we deliberately

@@ -3,8 +3,9 @@
 Private operational repo for the **MathFin autoformalization operation**. It runs
 a two-engine, self-feeding loop that turns an open proof *issue* on
 [`formal-mathfin`](https://github.com/raphaelrrcoelho/formal-mathfin) into a
-ready-for-review PR: a general reasoner (Mistral's **Magistral**) drafts and
-faithfulness-gates a Lean *statement* from the issue, and a leaf-prover (Mistral's
+ready-for-review PR: a frontier reasoner (Anthropic's **Claude**) drafts and
+faithfulness-gates a Lean *statement* from the issue — specifying the intent, then
+writing the Lean **agentically** against the lean-lsp — and a leaf-prover (Mistral's
 **Leanstral**) proves it — both checked against Lean's kernel, both **scouts, not
 authors**. If you've built agentic coding loops, this is two of them chained: a
 model proposing code (a Lean statement, then its proof) into compiler-feedback
@@ -19,32 +20,31 @@ proof and a human still owns the merge.
 
 ```
  SELF-FEED  (when the queue has no unattempted target)
-   ISSUE → MAGISTRAL specifies intent → LEANSTRAL formalizes ⇄ elaborate → depth gate → kernel gates (vacuity·disproof) → judge → intent-fidelity → STUB
+   ISSUE → CLAUDE specifies intent → CLAUDE formalizes agentically ⇄ lean-lsp → depth gate → triviality → kernel gates (vacuity·disproof, Leanstral) → judge (Claude) → STUB
  PROVE + SHIP
    STUB → HOUSE DOCTRINE (+ LIVE docs/patterns.md) → LEANSTRAL ⇄ LEAN ENV → GATE → REFINERY → PR
           (system prompt)                             (the prover)  (checks it) (kernel)  (human)  (human-merged)
 ```
 
 **Self-feed (the refill phase, `probe/autoformalize.py`).** When the queue is empty,
-the tick pulls the next `status:ready`+`type:proof` issue and drafts it in **two
-stages, each model to its strength**: **Magistral specifies** the intended statement in
-precise prose (its reasoning strength — no Lean), then **Leanstral formalizes** it into
-a `theorem … := by sorry` and repairs against the elaborator (compiler feedback, plus
-loogle candidates on `unknown identifier X`) until it is well-formed. Draft failures
-were *Lean* failures (unknown identifiers, `let`-scoping, coercions), so the Lean writing
-moved to the Lean model. A cascade of gates then guards faithfulness before any proving
-budget is spent: elaboration, a **structural depth gate** (a `run_cmd` meta check
-requiring the statement's TYPE to consume a def from its `-- pointers:` MathFin modules —
-else it is a Mathlib identity in domain clothing, like cal-bk-67 inlining the forward
-rate over raw reals instead of consuming `MathFin.zcb`; pointers-scoped, so it skips when
-the issue cites none), two kernel-grade Leanstral probes (**hypothesis-rejection** ⊢ False
-and **disproof** ⊢ ¬Concl → retire if provable), a Magistral **semantic judge**, and an
-**intent-fidelity** check. A passing draft is staged as a validated target; a rejected
-issue stays `status:ready`, never auto-closed. Honest caveat: elaboration, the depth gate,
-and the Leanstral probes are *independent, elaborator/kernel-grade* checks; the judge is a
-*soft magistral self-check* (statement vs issue); the intent-fidelity check (does
-Leanstral's Lean render Magistral's intent?) is *soft* too. None of the soft checks is a
-faithfulness guarantee — the real authority is the human review at merge.
+the tick pulls the next `status:ready`+`type:proof` issue and drafts it with **Claude**
+in **two stages**: **Claude specifies** the intended statement in precise prose (the
+objects it must consume + naming meta), then **Claude formalizes** it **agentically** —
+one `claude -p` session wired to the same lean-lsp MCP the prover uses, writing a
+`theorem … := by sorry` against live diagnostics (`lean_diagnostics`/`lean_loogle`/
+`lean_leansearch`) and self-validating to elaboration. A cascade of gates then guards
+faithfulness before any proving budget is spent: elaboration, a **structural depth gate**
+(a `run_cmd` meta check requiring the statement's TYPE to consume a def from its
+`-- pointers:` MathFin modules — else it is a Mathlib identity in domain clothing, like
+cal-bk-67 inlining the forward rate over raw reals instead of consuming `MathFin.zcb`;
+pointers-scoped, so it skips when the issue cites none), a **triviality** check, two
+kernel-grade **Leanstral** probes (**hypothesis-rejection** ⊢ False and **disproof**
+⊢ ¬Concl → retire if provable), and a **Claude faithfulness judge**. A rejection feeds
+its verdict back and re-drafts (semantic-repair cascade, ×2). A passing draft is staged
+as a validated target; a rejected issue stays `status:ready`, never auto-closed. Honest
+caveat: elaboration, the depth gate, and the Leanstral probes are *independent,
+elaborator/kernel-grade* checks; the judge is a *soft Claude self-check* (statement vs
+issue), not a faithfulness guarantee — the real authority is the human review at merge.
 
 **Prove + ship.** A queued target is a stub plus pointers to the modules it should
 reuse. The house doctrine — values gate · **the live `docs/patterns.md` injected in
@@ -56,16 +56,17 @@ A candidate passes the gate only with no errors, no `sorry`, axioms ⊆
 *candidate*, not a contribution — the refinery rewrites it to the
 conceptually-right proof under the 8-lens bar before a human merges it.
 
-**Two proving paths (Phase 2).** The scheduled cron's stated job is now **calibration +
+**Two proving paths (Phase 2).** The scheduled cron's stated job is **calibration +
 easy-harvest** — it proves targets a single vibe session can close and keeps the pipeline
-honest against the live queue. A **hard** target (tagged `decompose`) instead takes the
-**lemma-DAG path**: Magistral splits it into a few leaf lemmas + a main theorem, a
-skeleton gate rejects a bad split for one elaboration's cost, the same vibe prover proves
-the leaves, and a recomposition gate assembles the whole. Both paths are Mistral; whether
-decomposition earns its tokens is measured on the real queue in
-[`docs/research/ab-decomposer.md`](docs/research/ab-decomposer.md) for the 2026-09-30
-engine decision. The path is **off by default** (`pipeline.toml [decompose] enabled`), so
-the running cron is unchanged until it is flipped on.
+honest against the live queue. A **hard** target instead takes the **lemma-DAG path**:
+**Claude splits** it into a few leaf lemmas + a main theorem, a skeleton gate rejects a
+bad split for one elaboration's cost, the same vibe prover (Leanstral) proves the leaves,
+and a recomposition gate assembles the whole. The path is **on**
+(`pipeline.toml [decompose] enabled`), routed by the `decompose` tag, a
+`workflow_dispatch` flag, or **autonomous escalation** — a plain attempt that can't close
+its target escalates that same target to the split. Whether decomposition earns its
+tokens is tracked on the live queue in
+[`docs/research/ab-decomposer.md`](docs/research/ab-decomposer.md).
 
 Full diagram: [`docs/leanstral-architecture.md`](docs/leanstral-architecture.md).
 How the prover agents are equipped (context pack, loop, lean-lsp-mcp harness, PR
@@ -80,10 +81,12 @@ Decomposition mechanics: [`docs/superpowers/specs/2026-07-18-decomposer-design.m
   ready-for-review PR** (a branch, with `MAIN_PR_TOKEN`) but **never merges**: every
   PR is human-reviewed (refinery + 8-lens) and R owns the merge. Nothing reaches
   `main` without a human.
-- API traffic (Mistral or any prover) carries only public-corpus statements and
-  fresh textbook statements. Never held-out eval content (`formal-mathfin-evals`),
+- API traffic (Claude, Mistral, or any prover) carries only public-corpus statements
+  and fresh textbook statements. Never held-out eval content (`formal-mathfin-evals`),
   never DMW/Dalang-named material.
-- `MISTRAL_API_KEY` lives in `.env` (gitignored) or the shell env. Never committed.
+- `MISTRAL_API_KEY` (Leanstral + `mistral-embed` retrieval) and
+  `CLAUDE_CODE_OAUTH_TOKEN` (the Claude drafter) live in `.env` (gitignored) or the
+  shell env. Never committed. With no Claude auth the drafts defer (no fallback drafter).
 - Machine proofs are scouts, not authors: nothing merges to main without the
   refinery (conceptually-right refactor + house idiom + 8-lens bar).
 - **One Lean-loaded process at a time** (~10 GB box, ~4–5 GB per Mathlib env). REPL
@@ -93,7 +96,7 @@ Decomposition mechanics: [`docs/superpowers/specs/2026-07-18-decomposer-design.m
 
 | Path | What |
 |---|---|
-| `probe/` | the pipeline: `probe.py` (metered prover loop) · `autoformalize.py` (the issue→stub refill: Magistral draft-with-repair + kernel/judge/roundtrip gates) · `pipeline.py` + `pipeline_lib.py` (cadence + token budgeting) · `house_context.py` (system-prompt assembly, injects the live `docs/patterns.md`) · `build_manifest.py` (elaborate-with-sorry target validation) · `assemble.py` (corpus entry assembly) · `scout_index.py` (main-repo declaration index) · `issues.py` (issue sync) + tests |
+| `probe/` | the pipeline: `probe.py` (metered prover loop) · `autoformalize.py` + `af_parse`/`af_prompts`/`af_routing`/`af_drafting`/`af_gates` (the issue→stub refill: Claude intent + agentic formalize + kernel/judge gates, split into focused modules re-exported through `autoformalize`) · `pipeline.py` + `pipeline_lib.py` (cadence + token budgeting) · `house_context.py` (system-prompt assembly, injects the live `docs/patterns.md`) · `build_manifest.py` (elaborate-with-sorry target validation) · `assemble.py` (corpus entry assembly) · `scout_index.py` (main-repo declaration index) · `issues.py` (issue sync) + tests |
 | `scripts/` | shell entrypoints: `pipeline-tick.sh` (the cron prove step) · `open-pr.sh` (assemble + open the PR) · `contribute.sh` (manual contribution packet) · `leanstral-vibe.sh` (hands-on vibe + lean-lsp path) · `build-index.sh` (build the scout index) |
 | `targets/` | `queue/` — validated targets (stub `.lean` + `.entry.json` sidecar + `manifest.json`, seeded from `status:ready`+`type:proof` issues) · `informal/` — informal statements |
 | `index/` | the scout index of the main repo: `const_dep.jsonl`, `types.jsonl`, `PIN` |
@@ -107,8 +110,9 @@ Decomposition mechanics: [`docs/superpowers/specs/2026-07-18-decomposer-design.m
 ## Runbook
 
 `MAIN_REPO` defaults to `/home/rapha/code/automated_proofs_quantfin`; the daemon and
-Docker image live in the main repo. `MISTRAL_API_KEY` is sourced from the main
-repo's `.env` locally (from the CI secret in Actions).
+Docker image live in the main repo. `MISTRAL_API_KEY` (Leanstral + embeddings) and
+`CLAUDE_CODE_OAUTH_TOKEN` (the Claude drafter) are sourced from the main repo's `.env`
+locally (from the CI secrets in Actions).
 
 ```bash
 # All commands run from the foundry root.
@@ -119,7 +123,7 @@ docker compose -f $MAIN_REPO/docker/docker-compose.yml up -d lean-repl   # in th
 
 # 2. Run one tick now (needs the daemon up + the API key). If the queue has no
 #    unattempted target, the tick first SELF-FEEDS — autoformalizes a stub from the
-#    next ready issue (Magistral draft + faithfulness gates → build_manifest) — then
+#    next ready issue (Claude draft + faithfulness gates → build_manifest) — then
 #    proves it. Toggle with [autoformalize].enabled in pipeline.toml.
 FORCE=1 scripts/pipeline-tick.sh
 
