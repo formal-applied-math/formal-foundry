@@ -1,0 +1,27 @@
+{
+  "id": "mf-merton-jd-delta",
+  "name": "Merton jump-diffusion delta / greeks: the Poisson-weighted Black–Scholes delta",
+  "description": "Merton call delta as the Poisson-weighted mixture of chain-ruled Black–Scholes deltas, with the mixture bounded in [0,1].",
+  "domain": "mathematical_finance",
+  "code": {
+    "lean": "import MathFin.BlackScholes.MertonJumpDiffusionDelta\n\nopen MathFin\n\n/-- Merton call delta as the Poisson-weighted mixture of chain-ruled Black–Scholes deltas, with the mixture bounded in [0,1]. -/\ntheorem mf_merton_jd_delta {S_0 K r σ T k : ℝ} (δ : ℝ) (Λ : ℝ≥0)\n    (hS_0 : 0 < S_0) (hK : 0 < K) (hσ : 0 < σ) (hT : 0 < T) (hk : -1 < k) :\n    HasDerivAt (fun S ↦ mertonCallPrice S K r σ T k δ Λ)\n        (∑' n : ℕ, Real.exp (-(Λ : ℝ)) * (Λ : ℝ) ^ n / (n.factorial : ℝ)\n          * (mertonSpot S_0 k Λ n / S_0)\n          * deriv (fun S ↦ bsV K r (mertonVol σ δ T n) S T) (mertonSpot S_0 k Λ n)) S_0\n      ∧ (∑' n : ℕ, Real.exp (-(Λ : ℝ)) * (Λ : ℝ) ^ n / (n.factorial : ℝ)\n          * (mertonSpot S_0 k Λ n / S_0)\n          * deriv (fun S ↦ bsV K r (mertonVol σ δ T n) S T) (mertonSpot S_0 k Λ n))\n        ∈ Set.Icc (0 : ℝ) 1 :=\n  MathFin.mertonCallPrice_hasDerivAt δ Λ hS_0 hK hσ hT hk\n"
+  },
+  "metadata": {
+    "chapter": 0,
+    "reference": "Merton jump-diffusion delta / greeks: the Poisson-weighted Black–Scholes delta",
+    "difficulty": "medium",
+    "formalization_status": "full",
+    "formalization_scope": "Full formal proof in MathFin/BlackScholes/MertonJumpDiffusionDelta.lean (autoformalized statement, leanstral proof). Re-export from MathFin. Axioms-clean. Faithful SUBSET of issue #129; deferred to follow-up issues: gamma mixture: the analogous second S-derivative (Poisson-weighted BS gammas) of mertonCallPrice; vega mixture: the analogous σ-derivative of mertonCallPrice, requiring the chain rule through mertonVol σ δ T n.",
+    "provenance": {
+      "statement_source": "autoform",
+      "statement_model": "autoform",
+      "source": "leanstral-autoform",
+      "model": "labs-leanstral-1-5",
+      "issue": 129,
+      "deferred": [
+        "gamma mixture: the analogous second S-derivative (Poisson-weighted BS gammas) of mertonCallPrice",
+        "vega mixture: the analogous σ-derivative of mertonCallPrice, requiring the chain rule through mertonVol σ δ T n"
+      ]
+    }
+  }
+}
