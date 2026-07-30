@@ -34,6 +34,8 @@ class Node:
     statement: str
     pointers: list[str] = field(default_factory=list)
     depends_on: list[str] = field(default_factory=list)
+    applied_to: list[str] = field(default_factory=list)  # Mathlib/MathFin lemmas the leaf's
+                                                          # proof consumes — a prover hint
     is_main: bool = False
     proof: str = ""   # the main node's Lean proof applying the leaves (leaves: "")
 
@@ -80,9 +82,13 @@ def parse_dag(spec, *, max_leaves: int | None = None) -> Dag:
         if name in seen:
             raise DagError(f"duplicate leaf name: {name}")
         seen.add(name)
+        applied = leaf.get("applied_to") or []
+        if not isinstance(applied, list) or not all(isinstance(a, str) for a in applied):
+            raise DagError(f"leaf {name} `applied_to` must be a list of strings")
         leaves.append(Node(name=name, statement=leaf["statement"],
                            pointers=list(leaf.get("pointers") or []),
-                           depends_on=list(leaf.get("depends_on") or [])))
+                           depends_on=list(leaf.get("depends_on") or []),
+                           applied_to=applied))
     if m["name"] in seen:
         raise DagError(f"main name {m['name']} collides with a leaf name")
 
@@ -98,7 +104,33 @@ def parse_dag(spec, *, max_leaves: int | None = None) -> Dag:
                 depends_on=[leaf.name for leaf in leaves])
     dag = Dag(main=main, leaves=leaves)
     topo_order(dag)   # raises DagError on a cycle
+    _check_leaf_reachability(main, leaves)   # raises DagError on a dead (orphan) leaf
     return dag
+
+
+def _check_leaf_reachability(main: Node, leaves: list[Node]) -> None:
+    """Reject a leaf the main proof never dispatches to — directly (its name appears in the
+    proof) or transitively (a reachable leaf `depends_on` it). Such a leaf is dead weight
+    that would burn prover budget for nothing. Only meaningful once the main carries a REAL
+    proof; a sketch/empty proof (the schema-validation shape) skips the check. Substring
+    matching is word-bounded so `bar_neg` is not seen inside `bar_negative`; over-counting a
+    reference can only UNDER-reject, never falsely reject a good DAG."""
+    if not main.proof.strip():
+        return
+    by_name = {leaf.name: leaf for leaf in leaves}
+    reachable: set[str] = set()
+    frontier = [leaf.name for leaf in leaves
+                if re.search(rf"\b{re.escape(leaf.name)}\b", main.proof)]
+    while frontier:
+        name = frontier.pop()
+        if name in reachable:
+            continue
+        reachable.add(name)
+        frontier.extend(by_name[name].depends_on)
+    orphans = [leaf.name for leaf in leaves if leaf.name not in reachable]
+    if orphans:
+        raise DagError(f"leaf(s) never dispatched to by the main proof: {', '.join(orphans)} "
+                       "(dead weight — reference them in the proof or drop them)")
 
 
 def topo_order(dag: Dag) -> list[Node]:
@@ -150,14 +182,39 @@ DECOMPOSE_SYSTEM = (
     "deferred, never silently dropped.\n"
     "- Keep leaves FEW and short (a handful at most); a split that needs many leaves is "
     "mis-shaped.\n"
+    "- Every leaf MUST be dispatched to by the main proof — directly (its name appears in "
+    "your `proof`) or transitively (a sibling's `depends_on`). A leaf the main never uses is "
+    "rejected as dead weight.\n"
+    "Structural splits — when the difficulty lives INSIDE one proof (not in a reusable "
+    "sub-fact), the main's `proof` DISPATCHES to sorried leaves via a tactic; three moves:\n"
+    "- CASE-SPLIT: for a piecewise goal (a payoff branching on a sign/threshold, a "
+    "definition by cases), state ONE leaf per branch carrying its branch hypothesis "
+    "(`(h : 0 ≤ x)`, `(h : x ≤ 0)`) and dispatch `by rcases <disc> with h | h` (or "
+    "`by_cases h : <prop>`), one bullet per leaf. Prefer a stable Mathlib discriminant "
+    "(`le_total`, `lt_or_ge`, `em`); the skeleton gate rejects a non-exhaustive split for "
+    "free (a missing branch leaves an extra goal).\n"
+    "- INDUCTION: for a goal over ℕ or a recursive structure (n-period pricing, a finite "
+    "sum/product), state a BASE leaf (the goal at 0) and a STEP leaf that takes the "
+    "predecessor's result as an EXPLICIT premise — the induction hypothesis becomes a leaf "
+    "hypothesis: `theorem <name>_step (k : ℕ) (ih : P k) : P (k+1)`; dispatch `by induction n "
+    "with | zero => exact <base> | succ k ih => exact <step> k ih`.\n"
+    "- GOAL-REDUCTION: when it suffices to show a core fact Q, isolate Q as its OWN leaf and "
+    "state the reduction leaf carrying Q to the goal; dispatch `by suffices h : Q by "
+    "<apply the reduction>` then close Q via its leaf, or `by exact <reduce> <core>`. Keeps "
+    "the hard core Q as its own prove target instead of hoisting the whole proof.\n"
+    "Each leaf stays an ordinary single-`sorry` target; the skeleton must still elaborate "
+    "with exactly one `sorry` per leaf.\n"
     "Respond with ONLY a JSON object:\n"
     '{"main": {"name": "<snake_case>", "statement": "theorem <name> <binders> : <conclusion>", '
     '"proof": "<Lean proof applying the leaves — a term or `by ...`, NO sorry>"}, '
     '"leaves": [{"name": "<snake_case>", "statement": "theorem <name> <binders> : <conclusion>", '
-    '"pointers": ["MathFin/.../X.lean"], "depends_on": ["<sibling leaf name>", ...]}]}. '
+    '"pointers": ["MathFin/.../X.lean"], "depends_on": ["<sibling leaf name>", ...], '
+    '"applied_to": ["<Mathlib/MathFin lemma this leaf will consume>", ...]}]}. '
     "Every `statement` is a COMPLETE Lean 4 theorem HEAD (`theorem <name> ... : ...`) with NO "
     "`:=` — the leaves are assembled with `:= by sorry` and the main with your `proof`, and the "
-    "whole skeleton must elaborate. pointers name the modules whose defs a leaf consumes."
+    "whole skeleton must elaborate. pointers name the modules whose defs a leaf consumes; "
+    "applied_to (optional) names the specific lemmas the leaf's proof will apply, surfaced to "
+    "the prover as a hint."
 )
 
 
@@ -214,7 +271,8 @@ def dag_to_dict(dag: Dag) -> dict:
         "main": {"name": dag.main.name, "statement": dag.main.statement,
                  "proof": dag.main.proof},
         "leaves": [{"name": leaf.name, "statement": leaf.statement,
-                    "pointers": leaf.pointers, "depends_on": leaf.depends_on}
+                    "pointers": leaf.pointers, "depends_on": leaf.depends_on,
+                    "applied_to": leaf.applied_to}
                    for leaf in dag.leaves],
     }
 
@@ -292,7 +350,11 @@ def _leaf_stub(leaf: Node, proved: dict) -> str:
     proof can consume them while the stub stays a single-sorry target."""
     deps = [proved[d] for d in leaf.depends_on if proved.get(d)]
     pointers = list(leaf.pointers)
-    return _module_text(pointers, "\n\n".join([*deps, f"{leaf.statement} := by sorry"]))
+    # a proving hint the vibe agent reads: the lemmas the decomposer expects this leaf to
+    # consume (a Lean line comment — no sorry, no effect on elaboration; sliced off by
+    # `extract_leaf_decl` at recompose since it starts at the `theorem` keyword)
+    hint = f"-- apply: {', '.join(leaf.applied_to)}\n" if leaf.applied_to else ""
+    return _module_text(pointers, "\n\n".join([*deps, f"{hint}{leaf.statement} := by sorry"]))
 
 
 def build_leaf_manifest(dag: Dag, meta: dict, out_dir: str, *, toolchain: str = "",

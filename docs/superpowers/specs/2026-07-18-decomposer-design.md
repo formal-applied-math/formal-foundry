@@ -184,3 +184,55 @@ swap). No continuous second arm before then.
    later tuning, gated on the obstruction report showing a decompose-shaped family.
 3. **No centaur/Claude arm.** Production is Mistral-only; the scoreboard is `cron` vs
    `decompose`. R's own manual proofs are independent author work, not a tracked arm.
+
+## Update 2026-07-29 — go-live reconciliation + structural-split playbook
+
+Two corrections to the sections above, which predate the same-day go-live commit
+(`0a2e277`, written ~90 min after this doc):
+
+- **Decompose is LIVE and `enabled = true`** (since 2026-07-18). The "tag-only /
+  byte-identical" framing in *As built* / Decision 2 is superseded: the path now takes
+  **three triggers** — a `-- decompose` tag, a `decompose=true` workflow_dispatch one-shot,
+  and **autonomous failure-escalation** (a plain prove that hits `max_rounds`/`fail_gate`
+  re-routes that same target through the lemma-DAG path, `pipeline-tick.sh`). CI decides to
+  decompose exactly what plain proving fails on.
+- **Drafter is Claude** (`[drafter].claude_model = claude-sonnet-5`), not Magistral — the
+  CLI wires `claude_draft_fn`. (Leanstral still PROVES the leaves.)
+
+**Structural-split playbook (B8) — no schema change.** A hard target whose difficulty lives
+*inside one proof* (a piecewise payoff → case split; an n-period/CRR recursion → induction;
+a one-step reduction → suffices) needs no new node kind: `main.proof` is arbitrary Lean, so
+the main DISPATCHES to sorried leaves via a tactic, and the existing skeleton gate validates
+it. `DECOMPOSE_SYSTEM` now teaches the three moves:
+
+- **case-split** — one leaf per branch carrying its branch hypothesis; main dispatches
+  `by rcases <disc> with h | h` / `by_cases`. A non-exhaustive split fails the gate for free
+  (a missing branch leaves an extra goal).
+- **induction** — a BASE leaf (goal at 0) + a STEP leaf taking the IH as an explicit premise
+  (`(k : ℕ) (ih : P k) : P (k+1)`); main dispatches `by induction n with | zero => … | succ k ih => …`.
+- **goal-reduction** — isolate the core fact `Q` as its own leaf + a reduction leaf; main
+  `by suffices h : Q by …` or `by exact <reduce> <core>`.
+
+Evidence (2026-07-29, real elaborator via the lean-repl daemon): hand-written skeletons for
+all three shapes elaborate clean — `errors: []`, `sorry_count == n_leaves` (a `skeleton_gate`
+PASS). So this is a decomposer *guidance* upgrade validated by the gate we already run, not a
+schema change. Tests: `test_decompose.py::{test_decompose_system_teaches_structural_split_patterns,
+test_cases_dag_assembles_and_gates, test_induction_dag_assembles_and_gates}`.
+
+**Hardening (built 2026-07-29/30):**
+
+- **Orphan-leaf check** — `parse_dag` now rejects a leaf the main proof never dispatches to
+  (directly, or transitively via a sibling's `depends_on`): dead weight that would burn prover
+  budget. Reachability is word-bounded substring matching over `main.proof`, closed under
+  `depends_on`; over-counting a reference can only under-reject, never falsely reject a good
+  DAG. Gated on a REAL main proof — the schema-validation shape (empty/sketch proof) skips it.
+  `DECOMPOSE_SYSTEM` states the rule so the decomposer avoids emitting orphans.
+- **`applied_to`** — an optional leaf field (`list[str]`, the Mathlib/MathFin lemmas the leaf's
+  proof will consume, inspired by LeanAide's `deduced-from`). It round-trips through the
+  persisted DAG and is surfaced to the vibe prover as an `-- apply: …` hint comment in the leaf
+  stub (a Lean line comment — no `sorry`, no elaboration effect; sliced off by
+  `extract_leaf_decl` at recompose). A CONSUMED field, not a dead one.
+
+Both are pure/host-side, unit-tested (`test_decompose.py::{test_dag_rejects_orphan_leaf,
+test_dag_orphan_check_follows_depends_on_and_skips_sketch, test_applied_to_*}`), and preserve
+every prior fixture.

@@ -105,9 +105,11 @@ class AutoformalizeConfig:
 
 @dataclasses.dataclass(frozen=True)
 class DecomposeConfig:
-    """Config for the lemma-DAG decompose path (the `[decompose]` block). OFF BY DEFAULT
-    and tag-only (R decision 2026-07-18): only a target tagged `decompose` takes the path,
-    and only when `enabled`, so the running cron is byte-identical until it is flipped on.
+    """Config for the lemma-DAG decompose path (the `[decompose]` block). The dataclass
+    DEFAULT is off, but `pipeline.toml` sets `enabled = true`: the path is LIVE (since
+    2026-07-18, `0a2e277`) and takes three triggers — a `decompose` tag, a `decompose=true`
+    workflow_dispatch one-shot, and autonomous failure-escalation (a plain prove that hits
+    `max_rounds`/`fail_gate` re-routes that target here).
     Design: docs/superpowers/specs/2026-07-18-decomposer-design.md."""
     enabled: bool = False
     max_leaves: int = 3        # tight splits first; a DAG wanting more is usually mis-shaped

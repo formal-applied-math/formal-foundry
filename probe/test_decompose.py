@@ -228,3 +228,137 @@ def test_recompose_full_and_partial():
     assert not part["ok"] and part["partial"] and part["deferred"]
     assert part["banked"] == [] and part["remainder"] == ["lem_refl"]
     assert called["n"] == 0
+
+
+# --- structural-split playbook: cases / induction / suffices ------------------
+# The lemma-DAG's `main.proof` is arbitrary Lean, so a split whose difficulty lives
+# INSIDE one proof (a case split, an induction, a goal reduction) needs no schema
+# change — the main dispatches to sorried leaves via `rcases` / `induction ... with` /
+# `suffices`, and the existing skeleton gate validates it. Confirmed against the real
+# elaborator 2026-07-29 (errors:[], sorry_count == n_leaves for all three shapes).
+# These tests pin that the decomposer is TAUGHT the moves and the machinery assembles
+# them.
+
+def test_decompose_system_teaches_structural_split_patterns():
+    from decompose import DECOMPOSE_SYSTEM
+    s = DECOMPOSE_SYSTEM
+    low = s.lower()
+    # case-split: dispatch to one leaf per branch
+    assert "rcases" in s or "by_cases" in s
+    # induction: base + step leaves, the IH as the step's hypothesis
+    assert "induction" in low
+    assert "induction hypothesis" in low or "ih" in low
+    # goal reduction
+    assert "suffices" in low
+
+
+_CASES_DAG = {
+    "main": {"name": "bar", "statement": "theorem bar (x : ℤ) : 0 ≤ x * x",
+             "proof": "by\n  rcases le_total 0 x with h | h\n  · exact bar_nonneg x h\n  · exact bar_neg x h"},
+    "leaves": [
+        {"name": "bar_nonneg", "statement": "theorem bar_nonneg (x : ℤ) (h : 0 ≤ x) : 0 ≤ x * x"},
+        {"name": "bar_neg", "statement": "theorem bar_neg (x : ℤ) (h : x ≤ 0) : 0 ≤ x * x"},
+    ],
+}
+
+_INDUCTION_DAG = {
+    "main": {"name": "foo", "statement": "theorem foo (n : ℕ) : n + 0 = n",
+             "proof": "by\n  induction n with\n  | zero => exact foo_base\n  | succ k ih => exact foo_step k ih"},
+    "leaves": [
+        {"name": "foo_base", "statement": "theorem foo_base : 0 + 0 = 0"},
+        {"name": "foo_step",
+         "statement": "theorem foo_step (k : ℕ) (ih : k + 0 = k) : (k + 1) + 0 = k + 1"},
+    ],
+}
+
+
+def test_cases_dag_assembles_and_gates():
+    from decompose import assemble_skeleton, skeleton_gate
+    dag = parse_dag(_CASES_DAG)
+    lean = assemble_skeleton(dag)
+    # the case-dispatch tactic survives verbatim into the main theorem's proof
+    assert "rcases le_total 0 x with h | h" in lean
+    # each branch is an ordinary single-sorry leaf carrying its branch hypothesis
+    assert "theorem bar_nonneg (x : ℤ) (h : 0 ≤ x) : 0 ≤ x * x := by sorry" in lean
+    assert "theorem bar_neg (x : ℤ) (h : x ≤ 0) : 0 ≤ x * x := by sorry" in lean
+    # clean elaboration with one sorry per branch leaf → the gate accepts the split
+    g = skeleton_gate(lean, len(dag.leaves),
+                      check_fn=lambda c: {"errors": [], "sorry_count": 2})
+    assert g["passed"]
+
+
+def test_induction_dag_assembles_and_gates():
+    from decompose import assemble_skeleton, skeleton_gate
+    dag = parse_dag(_INDUCTION_DAG)
+    lean = assemble_skeleton(dag)
+    # `induction ... with` dispatches zero/succ to the base and step leaves
+    assert "induction n with" in lean
+    assert "| succ k ih => exact foo_step k ih" in lean
+    # the step leaf carries the induction hypothesis as an explicit premise
+    assert ("theorem foo_step (k : ℕ) (ih : k + 0 = k) : (k + 1) + 0 = k + 1 := by sorry"
+            in lean)
+    g = skeleton_gate(lean, len(dag.leaves),
+                      check_fn=lambda c: {"errors": [], "sorry_count": 2})
+    assert g["passed"]
+
+
+# --- hardening: orphan-leaf rejection + applied_to proving hints --------------
+
+def test_dag_rejects_orphan_leaf():
+    # a leaf the main proof never dispatches to (and no reachable leaf depends on) is
+    # dead weight — reject so it never burns prover budget. Checked only when the main
+    # carries a real proof.
+    orphan = {"main": {"name": "m", "statement": "theorem m : P", "proof": "by exact used"},
+              "leaves": [{"name": "used", "statement": "theorem used : P"},
+                         {"name": "dead", "statement": "theorem dead : Q"}]}
+    with pytest.raises(DagError):
+        parse_dag(orphan)
+
+
+def test_dag_orphan_check_follows_depends_on_and_skips_sketch():
+    # `helper` is pulled in transitively via `used.depends_on` → NOT an orphan
+    dag = parse_dag({"main": {"name": "m", "statement": "theorem m : P", "proof": "by exact used h"},
+                     "leaves": [{"name": "used", "statement": "theorem used : P",
+                                 "depends_on": ["helper"]},
+                                {"name": "helper", "statement": "theorem helper : R"}]})
+    assert {leaf.name for leaf in dag.leaves} == {"used", "helper"}
+    # an empty/sketch main proof (schema-validation shape) → reachability not assessed
+    dag2 = parse_dag({"main": {"name": "m", "statement": "P"},
+                      "leaves": [{"name": "a", "statement": "x"}]})
+    assert dag2.leaves[0].name == "a"
+
+
+def test_applied_to_roundtrips_and_surfaces_as_prove_hint(tmp_path):
+    from decompose import build_leaf_manifest, dag_to_dict
+    spec = {"main": {"name": "m", "statement": "theorem m (x : ℤ) : 0 ≤ x * x",
+                     "proof": "by exact leaf1 x"},
+            "leaves": [{"name": "leaf1", "statement": "theorem leaf1 (x : ℤ) : 0 ≤ x * x",
+                        "pointers": ["MathFin/A.lean"],
+                        "applied_to": ["mul_self_nonneg", "le_total"]}]}
+    dag = parse_dag(spec)
+    assert dag.leaves[0].applied_to == ["mul_self_nonneg", "le_total"]
+    # round-trips through the persisted DAG shape
+    again = parse_dag(dag_to_dict(dag))
+    assert again.leaves[0].applied_to == ["mul_self_nonneg", "le_total"]
+    # the per-leaf stub carries the hint as a comment the vibe prover reads,
+    # while staying an ordinary single-sorry target
+    man = build_leaf_manifest(dag, {"id": "t1"}, str(tmp_path))
+    stub = (tmp_path / man["targets"][0]["file"]).read_text(encoding="utf-8")
+    assert "-- apply: mul_self_nonneg, le_total" in stub
+    assert stub.count("sorry") == 1
+
+
+def test_applied_to_absent_leaves_no_hint_comment(tmp_path):
+    from decompose import build_leaf_manifest
+    dag = parse_dag(_INDUCTION_DAG)   # its leaves carry no applied_to
+    man = build_leaf_manifest(dag, {"id": "t2"}, str(tmp_path))
+    for t in man["targets"]:
+        stub = (tmp_path / t["file"]).read_text(encoding="utf-8")
+        assert "-- apply:" not in stub
+
+
+def test_applied_to_must_be_list_of_strings():
+    with pytest.raises(DagError):
+        parse_dag({"main": {"name": "m", "statement": "theorem m : P", "proof": "by exact a"},
+                   "leaves": [{"name": "a", "statement": "theorem a : P",
+                               "applied_to": "not-a-list"}]})
