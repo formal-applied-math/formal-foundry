@@ -46,8 +46,9 @@ Lean~4 growing without much supervision. It reads the project's own backlog of i
 drafts a Lean statement for one, proves it, and opens a pull request that has already
 passed the kernel; a person only reviews and merges. Two decisions do most of the work.
 The first is to use two language models rather than one, split by what each is good at:
-a general model works out what the theorem should say, and how to break a hard one into
-lemmas, while a Lean-specialised model writes the Lean and proves it. The second is to
+a frontier reasoning model drafts each statement---deciding what the theorem should say,
+writing it in Lean against a live language server, and breaking a hard one into
+lemmas---while a Lean-specialised model proves it. The second is to
 check that a drafted statement means what the issue asked \emph{before} putting a prover
 on it, because the usual way autoformalization goes wrong is a statement that compiles
 but says the wrong thing. What we accept is defined mechanically: the proof elaborates
@@ -75,8 +76,8 @@ built on Mathlib~\cite{mathlib2020} and R\'emy Degenne's \lean{BrownianMotion}
 package~\cite{brownianMotion}. It takes GitHub issues in and puts pull requests out, and
 between the two it runs on its own.
 
-A few choices shape it, and each gets a section. We keep the reasoning and the Lean in
-separate models (\S\ref{sec:engines}). We check a statement for faithfulness before
+A few choices shape it, and each gets a section. We split the drafting from the proving
+across two models (\S\ref{sec:engines}). We check a statement for faithfulness before
 proving it rather than after (\S\ref{sec:gates}). We prove in one long interactive
 session instead of many blind attempts, and fall back to decomposition when that is not
 enough (\S\ref{sec:prove}). We make acceptance a mechanical bar rather than a human
@@ -120,28 +121,33 @@ cannot spend without limit.
 
 \section{Two models}\label{sec:engines}
 
-We use two models. One is a general reasoning model (Magistral); the other, Leanstral, is
-specialised for Lean~\cite{magistral2025}. Each takes the part of the work it handles
-better.
+We use two models. One is a frontier reasoning model, Anthropic's
+Claude~\cite{anthropicClaude}; the other, Mistral's Leanstral~\cite{leanstral2026}, is
+specialised for Lean. Each takes the part of the work it handles better: the reasoner
+drafts, the specialist proves.
 
 The split came from noticing where drafting actually breaks. Ask one model to go straight
 from an informal issue to a proved Lean theorem and the failures are almost never in the
 mathematics. They are in the Lean: an identifier it guessed at, a coercion it got wrong,
-an unbound universe, a binder in the wrong place. Deciding what to state, with which
-hypotheses and at what generality, is a different skill from writing it down in Lean and
-closing the goal, so we give the two to different models.
+an unbound universe, a binder in the wrong place. The fix is not to hand the Lean to a
+different model but to give the drafter the feedback a prover gets: the reasoning model
+writes its Lean in an interactive session against the language server, reading each
+elaboration error and fixing it, so it produces Lean that elaborates rather than Lean
+that merely looks right. Proving---a longer, more search-heavy job---we keep with the
+Lean-specialist model trained for it.
 
-The reasoning model does three things: it drafts the \emph{intent} for a statement
-(\S\ref{sec:drafter}), it splits a hard target into lemmas (\S\ref{sec:prove}), and it
-judges whether a draft is faithful (\S\ref{sec:gates}). The Lean model does two: it turns
-an intent into elaborating Lean, and it proves the result.
+The reasoning model does four things: it drafts the \emph{intent} for a statement, it
+writes that intent into elaborating Lean (\S\ref{sec:drafter}), it splits a hard target
+into lemmas (\S\ref{sec:prove}), and it judges whether a draft is faithful
+(\S\ref{sec:gates}). The Lean model does the proving, and runs the two kernel probes that
+try to refute a draft (\S\ref{sec:gates}).
 
 \begin{figure}[p]
   \centering
   \includegraphics[width=0.9\textwidth]{leanstral-architecture.png}
   \caption{The pipeline end to end. Stages 1--7 run unattended on continuous
-  integration; stage~8 is the only human touchpoint. The reasoning model (Magistral) and
-  the Lean model (Leanstral) recur across stages in the roles of \S\ref{sec:engines}.
+  integration; stage~8 is the only human touchpoint. The reasoning model (Claude) and
+  the prover (Leanstral) recur across stages in the roles of \S\ref{sec:engines}.
   The dashed return on the right is the repair cascade (\S\ref{sec:gates}); the two-way
   link between \textsc{prove} and the Lean environment is the live goal-state loop
   (\S\ref{sec:prove}).}
@@ -168,13 +174,14 @@ ending in \lean{sorry} (an \emph{elaborating stub}). Three things happen inside 
 \subsection{Two stages}
 First, \emph{intent}: the reasoning model writes down in prose exactly the theorem to
 formalise (every hypothesis, the whole conclusion, the objects it should be built from,
-and a little naming metadata), and writes no Lean. Second, \emph{formalise}: the Lean
-model turns that into a single elaborating theorem, with a short repair loop that feeds
-each elaboration error back for a fix. This is the two-model split of \S\ref{sec:engines},
-now inside one draft.
+and a little naming metadata), and writes no Lean. Second, \emph{formalise}: the same
+model turns that into a single elaborating theorem in an interactive session against the
+language server (\S\ref{sec:engines}), playing edits and reading each elaboration error
+until the stub is well-typed. Both stages are the reasoning model; the split from the
+prover comes after, at \textsc{prove}.
 
 \subsection{Grounding by retrieval}
-Formalising well means knowing which declarations to name. We ground the Lean model with
+Formalising well means knowing which declarations to name. We ground the drafter with
 premises pulled from the pinned corpus, much as retrieval-augmented provers
 do~\cite{yang2023leandojo}: the declarations' type signatures are indexed, queried by
 embedding similarity, and the closest matches are handed over as signatures the statement
@@ -188,7 +195,7 @@ never blocks it.
 Assembling the module (licence header, imports, the pinned build options, the namespace,
 the statement itself) is mechanical and uses no model call. One thing is worth doing here
 rather than in a prompt: fixing the model's systematic tics with a small deterministic
-pass. The Lean model likes to prepend an \lean{import} line, which is illegal partway
+pass. The drafter likes to prepend an \lean{import} line, which is illegal partway
 through a module, so we strip it. It sometimes writes an explicit universe variable the
 build options forbid, so we rewrite it to the anonymous form. It writes measure-theory
 names bare, the way a file that has already opened those namespaces would, so we open
@@ -317,7 +324,7 @@ does the merge. The pipeline's job is to hand them something worth the call.
 \section{The one idea underneath}\label{sec:principles}
 
 If there is a single idea under all of this, it is to make each decision where it is
-cheapest and safest to make. Reasoning and Lean go to the models trained for them. A
+cheapest and safest to make. Drafting and proving go to the models suited to them. A
 statement's meaning is checked before a prover is paid for, and a bad decomposition before
 its leaves are. Systematic mistakes are fixed in code and judgement calls in prompts. The
 kernel, not a model, decides what counts as proved, and the axiom set is enforced by the
@@ -330,8 +337,8 @@ The thing that limits the system is the drafter, not the prover. Most of what fa
 falls out at the draft and intent stages (feasibility, faithfulness, getting it to
 elaborate), and targets that clear the gates are, comparatively, quite likely to get
 proved. That is the opposite of the usual intuition that proving is the hard part, and it
-says the improvements worth making are in specification, which is where the two-model
-split and the retrieval grounding are aimed.
+says the improvements worth making are in specification, which is where the agentic
+drafter and its retrieval grounding are aimed.
 
 Three limits are worth being plain about. Faithfulness is judged by a model: the gate is a
 net for gross divergence, not a proof of fidelity, and whether a Lean statement really
@@ -350,7 +357,7 @@ faithful, idiomatic mathematics reaches it.
 
 The pipeline stands on Mathlib and on R\'emy Degenne's \lean{BrownianMotion} package;
 without its continuous-time probability the finance layer would have nothing to stand on.
-The two models are Mistral's Magistral and a Lean-specialised model. The library itself is
+The two models are Anthropic's Claude and Mistral's Leanstral. The library itself is
 linked above.
 
 \begin{thebibliography}{9}
@@ -376,10 +383,15 @@ R.~Degenne and contributors.
   server's goal state, diagnostics, and search to an agent.
 \newblock Software.
 
-\bibitem{magistral2025}
+\bibitem{anthropicClaude}
+Anthropic.
+\newblock Claude.
+\newblock \url{https://www.anthropic.com/claude}, 2026.
+
+\bibitem{leanstral2026}
 Mistral AI.
-\newblock Magistral: reasoning models.
-\newblock Technical report, 2025.
+\newblock Leanstral~1.5.
+\newblock \url{https://mistral.ai/news/leanstral-1-5/}, 2026.
 
 \bibitem{wu2022autoform}
 Y.~Wu, A.~Q. Jiang, W.~Li, M.~Rabe, C.~Staats, M.~Jamnik, and C.~Szegedy.
