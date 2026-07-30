@@ -35,6 +35,14 @@ keep-Magistral / frontier-decomposer / hybrid on the A/B scoreboard
 (`docs/research/ab-decomposer.md`, real targets), refinery-minutes-per-merged-PR,
 leaves-closed-per-target per arm, and the actual price sheet. Evidence collection
 starts the day the plan's Phase 2 lands.
+*Update 2026-07-23: largely pre-empted for the DRAFT stage — R decided a frontier
+drafter directly (see §"2026-07-23 — TauCeti/Nexus adoption round"). The 09-30
+gate still owns the PROVE-side economics (Leanstral endpoint pricing).*
+*Update 2026-07-29: Magistral REMOVED entirely — Claude is now the sole general
+reasoner (intent · agentic formalize · faithfulness judge · decompose split);
+Leanstral proves. "keep-Magistral" is off the table; the 09-30 gate is now purely
+Leanstral prove-side pricing. The intent-fidelity gate was also retired (A/B: 0/62
+drift firings + a clean off-arm — no marginal catch over the faithfulness judge).*
 
 Every item is tagged **[no reasoner]** (Leanstral-native or infra-only) or
 **[needs general reasoner]** (requires a *second* engine — a general reasoning
@@ -246,3 +254,150 @@ from R's curated `formal-mathfin` issues — the frontier is the **[no reasoner]
 work above: budget shape (applied), then CI-side verification throughput (D) and
 learned retrieval (E) as the pipeline scales. C and G stay parked unless we ever
 autoformalize un-curated statements.
+
+**RESOLVED + LANDED (R, 2026-07-23 → built 2026-07):** a frontier drafter joins the
+pipe — Claude via the existing claude.ai subscription. See the adoption round
+below (item I). Magistral is now REMOVED entirely: Claude owns intent · agentic
+formalize · faithfulness judge · decompose split; Leanstral proves. The 09-30
+gate's residual scope is Leanstral prove-side economics only.
+
+---
+
+## 2026-07-23 — TauCeti/Nexus adoption round + the frontier-drafter decision
+
+Sources: AlphaProof Nexus ([arXiv 2605.22763](https://arxiv.org/abs/2605.22763) —
+9/353 open Erdős from `formal-conjectures` statements; the decision-relevant
+ablation: frontier-LLM *basic* loop solved all 9, small-model basic loops 0/9,
+specialist prover alone 0/9 — drafter model class dominates architecture) and the
+Tau Ceti review/coordination stack ([TauCetiProject](https://github.com/TauCetiProject),
+Lean FRO-incubated; 10 single-angle adversarial rubrics, contest protocol,
+full-provenance review records, live-queue meta-review). Recon + position:
+memory `project_tauceti_landscape_2026_07_23`. Everything below is mapped against
+SP1–SP3 (done; PRs formal-mathfin#163/#164 validated the defs route e2e) so no
+item re-does shipped work.
+
+**Already covered by SP1–SP3 — external validation, do not re-add:**
+- Vacuity/disproof gates with the statement pin (b078f9f) = Nexus's
+  disproof-as-misformalization-detector (their catches on Erdős #125/#741(i) came
+  exactly this way). Ours is built and statement-pinned. (The separate intent-fidelity
+  gate was retired 2026-07-29 — A/B showed no marginal catch over the faithfulness judge.)
+- `max_turns` + `tokens_per_issue_cap` = their bounded episode budgets (5 prover
+  calls / 90 edits per episode).
+- The depth gate = their #1 prompting-resistant failure mode ("core difficulty
+  offloaded into a sorry'd helper that reiterates the target… explicitly prompting
+  against this behavior failed"). Machine gates over prompt guidance: confirmed.
+- Subset-drop on a killed conjunct = their reroute-to-spec, in lite form.
+- K-parallel independent attempts = item D (CI pool); memory doctrine forbids it
+  locally, unchanged.
+
+**Skipped deliberately:** landrun-style sandboxing (docker containment already
+matches our own-models threat model); anything ulamai (repo stale since
+2026-03-27, solo-maintained, no license grant on file).
+
+### I. Frontier drafter — Claude via subscription [LANDED — Claude is the sole drafter; Magistral removed]
+
+Supersedes the 2026-07-19 "Mistral-only, no Claude in the pipe" constraint, by
+R's direct decision (no A/B): the Nexus ablation matches our funnel exactly —
+every live death is drafter-side (obstruction census: depth-gate 6 +
+no-elaborating-draft 5, prover-max-rounds 0), and the grind-lessons harvest's
+headline was already "every prove that reaches the vibe harness passes."
+
+- **Slot:** the DRAFT stage only — intent + formalize + emit, where all deaths
+  concentrate. One headless `claude -p` session per target produces the
+  elaborating stub from the issue + context pack. **Leanstral keeps PROVE**
+  (vibe ⇄ lean-lsp harness untouched) — it is not the bottleneck, and
+  attribution stays exactly as ruled: `Co-Authored-By: Leanstral` (the prover)
+  on autoform PRs, Claude never attributed. Whether the PR body should disclose
+  a frontier-assisted draft stage = R's call at first merge.
+- **Integration:** `pipeline.toml [drafter] engine = "claude" | "mistral"`, the
+  mistral path kept intact as fallback. Reuse untouched: context packs,
+  `_prelint_stub` + deterministic emit-repair (A15 noncomputable etc. — hygiene
+  is engine-agnostic), the full gate battery (drafter-agnostic by construction —
+  the SP1–SP3 payoff: gates don't care who drafted), manifest/queue/open-pr.
+  Auth = existing claude.ai subscription login (OAuth in `~/.claude`; verify it
+  survives the cron env — no API key, no new secret surface).
+- **Caps handling:** subscription usage windows — on a cap error the tick defers
+  the target (requeue, no obstruction recorded) or falls back to the mistral
+  drafter for that tick. Cron retries absorb it, same as model flakes today.
+- **First validation set:** the live stuck families the Mistral-only drafter died
+  on — #53, #61, #72, #88, #108 (+ #109/#60 unknown-id-despite-retrieval).
+  Success = seeds passing gates and reaching prove; measured by the obstruction
+  census (the standing did-it-help signal), not a synthetic bench.
+- **Watch:** statement fidelity is still gate-enforced (and J below tightens it);
+  a stronger drafter raises the stakes on the fidelity/faithfulness gates, not
+  lowers them.
+
+### J. Statement-integrity pin on the main prove path [no reasoner; small — do with I]
+
+Extend b078f9f's `_probed_conclusion` fidelity guard from the vacuity/disproof
+probes to `run_target`'s REAL goal: count a prove pass only if the winning
+candidate still asserts the stub's statement (exact-statement match or
+elaborated-type hash). Today the gates are pinned but the main path still trusts
+whatever file the prover returns — the same reversion loophole, one level up.
+This is Nexus's mid-loop check that "permits sorry placeholders but verifies that
+the original target theorem statement was not altered." Direct SP1-line
+continuation; becomes more load-bearing the day the drafter/prover gets stronger (I).
+
+### K. Cross-tick lessons-learned + diversity injection [no reasoner]
+
+Nexus episode discipline's missing half here: on a failed tick, write a
+compressed post-mortem into the target's queue entry (obstruction family, last
+error class, approaches tried); the next tick's drafter prompt includes it plus a
+rotating diversity instruction ("decompose unsolved goals" / "combine ideas from
+prior attempts" / "try a completely new approach" — their stochastic-injection
+set). Today `refill-history.jsonl` records outcomes but each retry re-drafts
+nearly blind; the cron already retries across ticks, so this converts existing
+retries into informed ones at prompt-assembly cost only.
+
+### L. Goal/disproof cache + hard timeouts [no reasoner; volume-gated]
+
+Content-hash of the elaborated goal state → cache proof/disproof outcomes across
+attempts and issues (gate probes first: vacuity/disproof re-run from scratch every
+attempt today; Nexus caches disproofs too and substitutes on hit). Plus a hard
+timeout on every prover/daemon call (elab-timeout exists; make it universal) —
+their guard "to prevent the system from stalling on intractable or hallucinated
+goals." Value scales with queue volume and with decompose's leaf count; behind
+I/J/K until the census says otherwise. Synergy with D (CI pool).
+
+### M. Instance-probe gate on the defs route [drafter task; SP4-adjacent]
+
+Nexus's OEIS anti-misformalization guard, transplanted: for each new `def`, the
+draft must include 1–2 concrete-instance `example`s (explicit small vector /
+Finset) evaluating the definition against the issue's intended values, proved by
+`decide`/`norm_num`-class tactics. Catches semantic slips (sign, normalization,
+sup-vs-max, measure choice) that the faithfulness judge and the vacuity/disproof
+probes both miss — exactly the class the #73 maxDD `∀c` episode exposed. Emit
+into the seed next to the defs; gate on their elaboration like any stub content.
+
+### N. Run-record provenance schema [infra; low-medium]
+
+TauCetiData's shape, applied to our telemetry: one record per
+(target × attempt × stage × model) with `prompt_sha`, `diff/candidate_sha`,
+token usage, cost, and content-addressed transcripts; SQLite derived, never
+authored. `runs/*.jsonl` + `refill-history.jsonl` already hold most fields —
+this formalizes them so the obstruction census, the 09-30 price-sheet decision,
+and any future meta-review all read one substrate. Schema files versioned like
+theirs (`schema/*.v1.json`).
+
+### O–Q. [main repo] Review-engine adoptions (home: values-review cadence, not this pipe)
+
+Recorded here so the adoption round has one ledger; execution belongs to
+`formal-mathfin`'s values-review/tests lanes:
+
+- **O. Lens-decomposed adversarial review + contest protocol** — run the 8 lenses
+  as independent single-lens reviewers with TauCeti's verdict semantics
+  (block vs request-changes, blocking-first order) and contest-with-quoted-evidence,
+  scoreboard comment per review. Their 10 rubrics are Apache-licensed prior art;
+  adapt in our idiom, cite the source (external-source-not-template rule).
+- **P. Meta-review on the live queue** — any rubric/lens/prompt change ships with
+  a production-vs-shadow paired judgment (both presentation orders, cross-family
+  judge panel, human escalation on splits). This is the "did the review change
+  help" instrument, and it is live-queue by construction — consistent with the
+  no-synthetic-bench doctrine.
+- **Q. olean-level expose check** — augment
+  `test_mathfin_module_files_expose_public_section` (textual today) with an
+  artifact-level check à la TauCeti's `lake exe module-system` ("checked on the
+  `.olean`, so a stray comment cannot fool it").
+
+**Order:** I (the decision) with J folded in → K → then L/M/N as the census
+directs. O–Q slot into the next values-review session main-repo side.

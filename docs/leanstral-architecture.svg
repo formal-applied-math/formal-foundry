@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="900" height="900" viewBox="0 0 900 900" font-family="'Helvetica Neue',Helvetica,Arial,sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="1170" viewBox="0 0 980 1170" font-family="'Helvetica Neue',Helvetica,Arial,sans-serif">
   <defs>
     <marker id="arw" viewBox="0 0 10 10" refX="7.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M0 0L10 5L0 10z" fill="#8a929e"/>
@@ -6,63 +6,106 @@
     <marker id="arwb" viewBox="0 0 10 10" refX="7.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M0 0L10 5L0 10z" fill="#2f5fd0"/>
     </marker>
+    <marker id="arwr" viewBox="0 0 10 10" refX="7.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#d9611e"/>
+    </marker>
   </defs>
-  <rect width="900" height="900" fill="#ffffff"/>
+  <rect width="980" height="1170" fill="#ffffff"/>
 
-  <text x="450" y="34" text-anchor="middle" font-size="16" font-weight="700" fill="#1b2330">Leanstral — Lean 4 formalization harness</text>
+  <text x="490" y="32" text-anchor="middle" font-size="17" font-weight="700" fill="#1b2330">MathFin autoformalization — issue → PR pipeline</text>
+  <text x="490" y="52" text-anchor="middle" font-size="12" fill="#616a78">autonomous · GitHub Actions cron every 3 days · opens ready-for-review PRs on formal-mathfin</text>
 
-  <!-- 1 TARGET -->
-  <rect x="110" y="56" width="680" height="78" rx="12" fill="#f7f8fa" stroke="#d7dce3"/>
-  <text x="132" y="84" font-size="15" font-weight="700" fill="#1b2330">TARGET</text>
-  <text x="132" y="106" font-size="13.5" fill="#616a78">a Lean 4 stub&#160;&#160;<tspan font-family="'SF Mono',Menlo,Consolas,monospace" fill="#1b2330">theorem … := by sorry</tspan></text>
-  <text x="132" y="124" font-size="13.5" fill="#616a78">+ pointers to the existing modules it should reuse</text>
+  <!-- legend -->
+  <rect x="270" y="64" width="11" height="11" rx="2" fill="#6b4bc7"/>
+  <text x="286" y="73" font-size="12" fill="#616a78"><tspan font-weight="700" fill="#6b4bc7">Claude</tspan> — draft · judge · decompose</text>
+  <rect x="510" y="64" width="11" height="11" rx="2" fill="#d9611e"/>
+  <text x="526" y="73" font-size="12" fill="#616a78"><tspan font-weight="700" fill="#d9611e">Leanstral</tspan> — prove · kernel gates</text>
 
-  <line x1="450" y1="134" x2="450" y2="160" stroke="#8a929e" stroke-width="1.6" marker-end="url(#arw)"/>
+  <!-- on-CI bracket (steps 1-7 run on GitHub Actions; only step 8 is human) -->
+  <line x1="120" y1="98" x2="120" y2="1020" stroke="#b9c2cf" stroke-width="1.3" stroke-dasharray="4 4"/>
+  <line x1="116" y1="98" x2="124" y2="98" stroke="#b9c2cf" stroke-width="1.3"/>
+  <line x1="116" y1="1020" x2="124" y2="1020" stroke="#b9c2cf" stroke-width="1.3"/>
+  <text x="108" y="559" transform="rotate(-90 108 559)" text-anchor="middle" font-size="11" fill="#8a929e">autonomous on GitHub Actions · pipeline.yml · cron / 3 days</text>
 
-  <!-- 2 DOCTRINE -->
-  <rect x="110" y="162" width="680" height="94" rx="12" fill="#f7f8fa" stroke="#d7dce3"/>
-  <text x="132" y="190" font-size="15" font-weight="700" fill="#1b2330">HOUSE DOCTRINE<tspan font-size="12.5" font-weight="400" fill="#8a929e">&#160;&#160;system prompt · injected on every attempt</tspan></text>
-  <text x="132" y="214" font-size="13.5" fill="#616a78">values gate · house idioms · pins · consume-don't-reprove</text>
-  <text x="132" y="232" font-size="13.5" fill="#616a78">per-target context pack (the declarations to build on)</text>
+  <!-- 1 SOURCE -->
+  <rect x="132" y="98" width="716" height="66" rx="12" fill="#f7f8fa" stroke="#d7dce3"/>
+  <circle cx="158" cy="123" r="10" fill="#8a929e"/><text x="158" y="127" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">1</text>
+  <text x="180" y="128" font-size="14.5" font-weight="700" fill="#1b2330">SOURCE<tspan font-size="12.5" font-weight="400" fill="#8a929e">&#160;&#160;GitHub issues on formal-mathfin</tspan></text>
+  <text x="180" y="150" font-size="12.5" fill="#616a78"><tspan font-family="'SF Mono',Menlo,Consolas,monospace" fill="#1b2330" font-size="11.5">status:ready + type:proof</tspan>&#160;&#160;— self-feeds: no queued target ⇒ draft the next ready issue</text>
 
-  <line x1="450" y1="256" x2="450" y2="282" stroke="#8a929e" stroke-width="1.6" marker-end="url(#arw)"/>
+  <line x1="490" y1="164" x2="490" y2="182" stroke="#8a929e" stroke-width="1.6" marker-end="url(#arw)"/>
 
-  <!-- 3 LEANSTRAL -->
-  <rect x="110" y="284" width="680" height="124" rx="12" fill="#fdf3ee" stroke="#eccbb6"/>
-  <text x="132" y="312" font-size="15" font-weight="700" fill="#d9611e">LEANSTRAL<tspan font-size="12.5" font-weight="400" font-family="'SF Mono',Menlo,Consolas,monospace" fill="#a08774">&#160;&#160;labs-leanstral-1-5</tspan></text>
-  <text x="132" y="338" font-size="13.5" fill="#616a78">•&#160;&#160;calibration — text loop → Mistral API&#160;&#160;<tspan font-family="'SF Mono',Menlo,Consolas,monospace" fill="#1b2330" font-size="12.5">reasoning_effort=high</tspan></text>
-  <text x="132" y="362" font-size="13.5" fill="#616a78">•&#160;&#160;production — <tspan font-family="'SF Mono',Menlo,Consolas,monospace" fill="#1b2330" font-size="12.5">vibe ⇄ lean-lsp-mcp</tspan>&#160;&#160;(the trained-for harness)</text>
-  <text x="150" y="384" font-size="12.5" fill="#8a929e">live <tspan font-family="'SF Mono',Menlo,Consolas,monospace">lean_goal</tspan> · hover · diagnostics · <tspan font-family="'SF Mono',Menlo,Consolas,monospace">loogle</tspan> · <tspan font-family="'SF Mono',Menlo,Consolas,monospace">leansearch</tspan></text>
+  <!-- 2 DRAFTER -->
+  <rect x="132" y="182" width="716" height="180" rx="12" fill="#f7f8fa" stroke="#d7dce3"/>
+  <circle cx="158" cy="207" r="10" fill="#8a929e"/><text x="158" y="211" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">2</text>
+  <text x="180" y="212" font-size="14.5" font-weight="700" fill="#1b2330">DRAFTER<tspan font-size="12.5" font-weight="400" fill="#8a929e">&#160;&#160;Claude, two stages → an elaborating Lean stub</tspan></text>
+  <text x="180" y="240" font-size="12.5" fill="#616a78"><tspan font-weight="700" fill="#6b4bc7">intent</tspan> — precise prose statement + objects it must consume + naming meta</text>
+  <text x="180" y="266" font-size="12.5" fill="#616a78"><tspan font-weight="700" fill="#6b4bc7">agentic formalize</tspan> — <tspan font-family="'SF Mono',Menlo,Consolas,monospace" font-size="11.5" fill="#1b2330">claude -p ⇄ lean-lsp MCP</tspan> · self-validates to elaboration</text>
+  <text x="180" y="292" font-size="12.5" fill="#616a78"><tspan font-weight="700" fill="#8a929e">emit</tspan> — mechanical assembly · pre-lint: strip imports · <tspan font-family="'SF Mono',Menlo,Consolas,monospace" font-size="11.5" fill="#1b2330">Type u→Type*</tspan> · <tspan font-family="'SF Mono',Menlo,Consolas,monospace" font-size="11.5" fill="#1b2330">autoImplicit false</tspan></text>
+  <text x="180" y="322" font-size="12" fill="#8a929e">embedding retrieval (<tspan font-family="'SF Mono',Menlo,Consolas,monospace" font-size="11">mistral-embed</tspan>, top-8) grounds the formalize · feasibility census on the intent</text>
+  <text x="180" y="344" font-size="12" fill="#8a929e">route: <tspan font-family="'SF Mono',Menlo,Consolas,monospace" font-size="11">theorem</tspan> · <tspan font-family="'SF Mono',Menlo,Consolas,monospace" font-size="11">defs</tspan> (introduce missing primitives) — a target may honestly formalize a declared subset</text>
 
-  <!-- feedback loop 3 <-> 4 -->
-  <line x1="428" y1="410" x2="428" y2="478" stroke="#8a929e" stroke-width="1.6" marker-end="url(#arw)"/>
-  <line x1="472" y1="478" x2="472" y2="410" stroke="#2f5fd0" stroke-width="1.6" marker-end="url(#arwb)"/>
-  <text x="414" y="440" text-anchor="end" font-size="12" font-family="'SF Mono',Menlo,Consolas,monospace" fill="#616a78">candidate .lean</text>
-  <text x="486" y="440" text-anchor="start" font-size="12" font-family="'SF Mono',Menlo,Consolas,monospace" fill="#2f5fd0">goal states + errors</text>
+  <line x1="490" y1="362" x2="490" y2="380" stroke="#8a929e" stroke-width="1.6" marker-end="url(#arw)"/>
 
-  <!-- 4 LEAN ENV -->
-  <rect x="110" y="482" width="680" height="102" rx="12" fill="#eef3fc" stroke="#c2d1ee"/>
-  <text x="132" y="510" font-size="15" font-weight="700" fill="#2f5fd0">LEAN ENVIRONMENT<tspan font-size="12.5" font-weight="400" fill="#8a929e">&#160;&#160;Docker · memory-capped 6 GB</tspan></text>
-  <text x="132" y="534" font-size="13.5" fill="#616a78">reuses the prebuilt oleans · one Lean process at a time:</text>
-  <text x="132" y="554" font-size="13.5" fill="#616a78"><tspan font-family="'SF Mono',Menlo,Consolas,monospace" fill="#1b2330" font-size="12.5">lean-repl daemon</tspan>&#160;&#160;XOR&#160;&#160;<tspan font-family="'SF Mono',Menlo,Consolas,monospace" fill="#1b2330" font-size="12.5">lean-lsp server</tspan></text>
-  <text x="132" y="574" font-size="12.5" fill="#8a929e">model runs on Mistral's servers → only ~5 GB Lean is local</text>
+  <!-- 3 GATES -->
+  <rect x="132" y="380" width="716" height="96" rx="12" fill="#eaf5ef" stroke="#bfe0cd"/>
+  <circle cx="158" cy="405" r="10" fill="#1c8f5f"/><text x="158" y="409" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">3</text>
+  <text x="180" y="410" font-size="14.5" font-weight="700" fill="#1c8f5f">PRE-PROVE GATES<tspan font-size="12.5" font-weight="400" fill="#8a929e">&#160;&#160;cheap — spend no prover budget on a doomed draft</tspan></text>
+  <text x="180" y="436" font-size="12.5" fill="#616a78">depth | defs + instance probe · triviality (structural, 0 tokens)</text>
+  <text x="180" y="460" font-size="12.5" fill="#616a78">⊢ False · ⊢ ¬Concl (<tspan font-weight="700" fill="#d9611e">Leanstral</tspan>, cached) · faithfulness (<tspan font-weight="700" fill="#6b4bc7">Claude</tspan>) — <tspan font-weight="700" fill="#d9611e">reject → re-draft</tspan> (×2)</text>
 
-  <line x1="450" y1="584" x2="450" y2="610" stroke="#8a929e" stroke-width="1.6" marker-end="url(#arw)"/>
+  <!-- semantic-repair cascade loop (gate reject -> drafter) -->
+  <path d="M848 434 L912 434 L912 250 L848 250" fill="none" stroke="#d9611e" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#arwr)"/>
+  <text x="928" y="342" transform="rotate(90 928 342)" text-anchor="middle" font-size="10.5" fill="#d9611e">re-draft · semantic cascade</text>
 
-  <!-- 5 GATE -->
-  <rect x="110" y="612" width="680" height="104" rx="12" fill="#eaf5ef" stroke="#bfe0cd"/>
-  <text x="132" y="640" font-size="15" font-weight="700" fill="#1c8f5f">ACCEPTANCE GATE</text>
-  <text x="132" y="664" font-size="13.5" fill="#616a78">no errors · no <tspan font-family="'SF Mono',Menlo,Consolas,monospace" fill="#1b2330" font-size="12.5">sorry</tspan></text>
-  <text x="132" y="684" font-size="13.5" fill="#616a78">axioms ⊆ <tspan font-family="'SF Mono',Menlo,Consolas,monospace" fill="#1b2330" font-size="12.5">{propext, Classical.choice, Quot.sound}</tspan></text>
-  <text x="132" y="704" font-size="13.5" fill="#616a78">no forbidden tactics (<tspan font-family="'SF Mono',Menlo,Consolas,monospace" fill="#1b2330" font-size="12.5">native_decide, exact?, apply?</tspan>, …)</text>
+  <line x1="490" y1="476" x2="490" y2="494" stroke="#8a929e" stroke-width="1.6" marker-end="url(#arw)"/>
 
-  <line x1="450" y1="716" x2="450" y2="742" stroke="#8a929e" stroke-width="1.6" marker-end="url(#arw)"/>
+  <!-- 4 PROVE -->
+  <rect x="132" y="494" width="716" height="154" rx="12" fill="#fdf3ee" stroke="#eccbb6"/>
+  <circle cx="158" cy="519" r="10" fill="#d9611e"/><text x="158" y="523" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">4</text>
+  <text x="180" y="524" font-size="14.5" font-weight="700" fill="#d9611e">PROVE<tspan font-size="12.5" font-weight="400" fill="#8a929e">&#160;&#160;Leanstral drives the live goal state</tspan></text>
+  <text x="180" y="552" font-size="12.5" fill="#616a78"><tspan font-weight="700" fill="#2f5fd0">plain</tspan> — <tspan font-family="'SF Mono',Menlo,Consolas,monospace" font-size="11.5" fill="#1b2330">vibe ⇄ lean-lsp-mcp</tspan> · one deep agentic session (turns 60)</text>
+  <text x="180" y="578" font-size="12.5" fill="#616a78"><tspan font-weight="700" fill="#6b4bc7">decompose</tspan> — <tspan font-weight="700" fill="#6b4bc7">Claude</tspan> splits ≤3 leaf lemmas + a main theorem →</text>
+  <text x="180" y="598" font-size="12.5" fill="#616a78">&#160;&#160;&#160;&#160;&#160;skeleton-elaboration gate → prove each leaf (vibe, turns 40) → recompose + full-gate</text>
+  <text x="180" y="628" font-size="12" fill="#8a929e">routed by: force flag · <tspan font-family="'SF Mono',Menlo,Consolas,monospace" font-size="11">decompose</tspan> tag · autonomous failure-escalation (plain fails ⇒ decompose)</text>
 
-  <!-- 6 REFINERY -->
-  <rect x="110" y="744" width="680" height="82" rx="12" fill="#eaf5ef" stroke="#bfe0cd"/>
-  <text x="132" y="772" font-size="15" font-weight="700" fill="#1c8f5f">REFINERY<tspan font-size="12.5" font-weight="400" fill="#8a929e">&#160;&#160;scout, not author</tspan></text>
-  <text x="132" y="795" font-size="13.5" fill="#616a78">8-lens values review → conceptually-right proof →</text>
-  <text x="132" y="813" font-size="13.5" fill="#616a78">a human authors the pull request into the library</text>
+  <!-- feedback loop 4 <-> 5 -->
+  <line x1="466" y1="650" x2="466" y2="712" stroke="#8a929e" stroke-width="1.6" marker-end="url(#arw)"/>
+  <line x1="514" y1="712" x2="514" y2="650" stroke="#2f5fd0" stroke-width="1.6" marker-end="url(#arwb)"/>
+  <text x="452" y="685" text-anchor="end" font-size="11.5" font-family="'SF Mono',Menlo,Consolas,monospace" fill="#616a78">candidate .lean</text>
+  <text x="528" y="685" text-anchor="start" font-size="11.5" font-family="'SF Mono',Menlo,Consolas,monospace" fill="#2f5fd0">goal states + errors</text>
 
-  <text x="450" y="864" text-anchor="middle" font-size="12" font-family="'SF Mono',Menlo,Consolas,monospace" fill="#8a929e">pins:  Lean v4.31.0  ·  Mathlib @fabf563a  ·  BrownianMotion @bdf5ea0c (Degenne)</text>
+  <!-- 5 LEAN ENV -->
+  <rect x="132" y="714" width="716" height="92" rx="12" fill="#eef3fc" stroke="#c2d1ee"/>
+  <circle cx="158" cy="739" r="10" fill="#2f5fd0"/><text x="158" y="743" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">5</text>
+  <text x="180" y="744" font-size="14.5" font-weight="700" fill="#2f5fd0">LEAN ENVIRONMENT<tspan font-size="12.5" font-weight="400" fill="#8a929e">&#160;&#160;Docker · memory-capped 6 GB</tspan></text>
+  <text x="180" y="770" font-size="12.5" fill="#616a78">one Lean process: <tspan font-family="'SF Mono',Menlo,Consolas,monospace" font-size="11.5" fill="#1b2330">lean-repl daemon</tspan> XOR <tspan font-family="'SF Mono',Menlo,Consolas,monospace" font-size="11.5" fill="#1b2330">lean-lsp server</tspan> · the tick flips the slot · reuses oleans</text>
+  <text x="180" y="792" font-size="12" fill="#8a929e">the models run on their providers' servers → only ~5 GB Lean is local</text>
+
+  <line x1="490" y1="806" x2="490" y2="824" stroke="#8a929e" stroke-width="1.6" marker-end="url(#arw)"/>
+
+  <!-- 6 ACCEPT -->
+  <rect x="132" y="824" width="716" height="98" rx="12" fill="#eaf5ef" stroke="#bfe0cd"/>
+  <circle cx="158" cy="849" r="10" fill="#1c8f5f"/><text x="158" y="853" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">6</text>
+  <text x="180" y="854" font-size="14.5" font-weight="700" fill="#1c8f5f">ACCEPTANCE GATE<tspan font-size="12.5" font-weight="400" fill="#8a929e">&#160;&#160;the honesty floor</tspan></text>
+  <text x="180" y="880" font-size="12.5" fill="#616a78">no errors · no <tspan font-family="'SF Mono',Menlo,Consolas,monospace" font-size="11.5" fill="#1b2330">sorry</tspan> · axioms ⊆ <tspan font-family="'SF Mono',Menlo,Consolas,monospace" font-size="11.5" fill="#1b2330">{propext, Classical.choice, Quot.sound}</tspan></text>
+  <text x="180" y="904" font-size="12.5" fill="#616a78">no forbidden tactics · statement-integrity pin · verification ledger (input-hash) · AxiomAudit</text>
+
+  <line x1="490" y1="922" x2="490" y2="940" stroke="#8a929e" stroke-width="1.6" marker-end="url(#arw)"/>
+
+  <!-- 7 AUTO-PR -->
+  <rect x="132" y="940" width="716" height="70" rx="12" fill="#eaf5ef" stroke="#bfe0cd"/>
+  <circle cx="158" cy="965" r="10" fill="#1c8f5f"/><text x="158" y="969" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">7</text>
+  <text x="180" y="970" font-size="14.5" font-weight="700" fill="#1c8f5f">AUTO-PR → formal-mathfin</text>
+  <text x="180" y="992" font-size="12.5" fill="#616a78">opens a ready-for-review PR that closes the issue · body carries refinery notes + DAG · credits Leanstral</text>
+
+  <line x1="490" y1="1010" x2="490" y2="1028" stroke="#8a929e" stroke-width="1.6" marker-end="url(#arw)"/>
+
+  <!-- 8 HUMAN -->
+  <rect x="132" y="1028" width="716" height="70" rx="12" fill="#f7f8fa" stroke="#d7dce3"/>
+  <circle cx="158" cy="1053" r="10" fill="#1b2330"/><text x="158" y="1057" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">8</text>
+  <text x="180" y="1058" font-size="14.5" font-weight="700" fill="#1b2330">REVIEW &amp; MERGE<tspan font-size="12.5" font-weight="400" fill="#8a929e">&#160;&#160;the only human touchpoint</tspan></text>
+  <text x="180" y="1080" font-size="12.5" fill="#616a78">8-lens values review (scout, not author) → conceptually-right proof → merge into the library</text>
+
+  <text x="490" y="1140" text-anchor="middle" font-size="11.5" font-family="'SF Mono',Menlo,Consolas,monospace" fill="#8a929e">Lean v4.32.0 · Mathlib @81a5d257 · BrownianMotion @4d52fa77 (Degenne)  ·  engines: claude-sonnet-5 + labs-leanstral-1-5</text>
 </svg>
