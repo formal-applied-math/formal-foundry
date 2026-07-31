@@ -60,6 +60,28 @@ textbook-autoformalization stream (that design-of-record mode is not on the curr
 roadmap). So every statement is R-curated and faithfulness stays human-at-merge
 (this parks §C).
 
+## Item convention: observed ≠ proposed (2026-07-31)
+
+An item has two parts that are **not** equally reliable, and this file used to write
+them at the same confidence:
+
+- the **finding** — a failure that happened, with the artifact it happened on. Evidence.
+- the **fix** — a mechanism believed to catch it. A hypothesis until traced.
+
+Item R was written as "delete each binder and re-elaborate; anything that still
+compiles was decorative". The finding was solid; the fix was wrong, and wrong in a way
+30 seconds of tracing would have caught — the pipeline already had that pass, and on
+the very drafts cited it does not fire, because both proofs *use* the guard
+(`have hden := h.le`, `field_simp [h]`). It sat here, in the research doc, in a PR body
+and in a GitHub comment as though it were established. Confidence was inherited from
+the finding it was attached to.
+
+So: **a proposed gate carries a `**Reproduction:**` line** naming the concrete artifact
+it fires on and why. If the trace has not been run, tag the heading `[UNTRACED]` and say
+so — that is a perfectly good state for an item to be in, it just is not a plan.
+`test_backlog_format.py` enforces this; tags for work already done (`[BUILT …]`,
+`[LANDED …]`, `[APPLIED …]`, `[DONE …]`) are exempt, since shipped code is its own trace.
+
 ---
 
 ## Already shipped — don't re-do
@@ -233,7 +255,7 @@ informalization and semantic-equivalence judgment are not proving tasks. Parked 
 the same condition as C (un-curated statements; not on the current roadmap).
 Sources: survey #6 (faithfulness metrics), Harmonic's judge (Aristotle).
 
-### H. Variant warm-up (cheap TTRL analogue) — partial reasoner
+### H. Variant warm-up (cheap TTRL analogue) — partial reasoner [UNTRACED]
 
 For a stuck target, generate simplified variants (special case, stronger
 hypotheses, n=1/n=2), prove those first, feed them back as lemmas/context next
@@ -241,6 +263,11 @@ tick. The proving is Leanstral; the *variant generation* wants a general model, 
 this is gated on the same decision as F. Sources:
 [AlphaProof, by an author (Schrittwieser)](https://www.julian.ac/blog/2025/11/13/alphaproof-paper/) (Test-Time RL),
 survey #8.
+
+`[UNTRACED]` per the item convention: the mechanism is taken from the literature, not
+from a failure of ours. Before it becomes a plan, trace it against a real
+`max_rounds` death in `runs/` and say which variant would have unstuck it — otherwise
+we would be building a gate for a problem we have not shown we have.
 
 ---
 
@@ -415,6 +442,23 @@ formal-mathfin#169 (merged).
 
 ### R. Necessity prober [no reasoner; BUILT 2026-07-31 — `probe/strengthen.py`]
 
+**Reproduction:** formal-mathfin#163 `gainToPain_nonneg_of_pain_pos` and #164
+`upCapture_scale_invariant`.
+
+*Traced.* Both guards pass the free filter: nothing else in either signature mentions
+`h`, so dropping it leaves a well-formed statement and the binder reaches the re-prove
+stage. And the discriminating fact — keeping the original proof after the drop FAILS on
+both, because `have hden := h.le` and `field_simp [h]` reference the binder. That is
+what separates this gate from `strengthen_candidate` and from a plain deletion probe,
+and it is what the first writing of this item got wrong.
+
+*Not traced.* Whether the fixed sweep (`positivity`, `simp [gainToPain]`, …) actually
+closes the two reduced goals against the pinned Mathlib. The merged theorems are
+hypothesis-free and their proofs are one-liners, so the goals are certainly provable —
+but "provable" is not "closed by these seven tactics", and that is the claim the sweep
+rests on. Run it against the daemon and record which tactic fires; if neither does, the
+sweep list is the thing to fix, not the design.
+
 **Correction to the first writing of this item.** It said "delete each binder and
 re-elaborate with the same proof term; anything that still compiles was decorative".
 That is the pass the pipeline **already had** — `autoformalize.strengthen_candidate`,
@@ -470,6 +514,12 @@ rule made enforceable.
 
 ### S. Honour the issue's `location:` in emit [BUILT 2026-07-31]
 
+**Reproduction:** issues #161/#162 both carry
+`location: MathFin/Performance/RatiosExtended.lean`; the four emitted stubs carry it in
+their `-- pointers:` header and set `-- main-module:` to a fresh module anyway. With
+`extract_location` + `placement.append`, emit resolves to the named module and
+`splice_into_module` merges into it instead of writing over it.
+
 Both issues named `MathFin/Performance/RatiosExtended.lean`. All four drafts
 minted a *new* one-lemma module instead — two targets, four modules, where zero
 were asked for. The intent stage did capture it (every emitted file carries
@@ -478,6 +528,11 @@ module named after the PR subject. When the issue declares a `location:` naming
 an existing file, append to it; mint a module only when it is absent or missing.
 
 ### T. Ground-truth duplicate check before drafting [BUILT 2026-07-31]
+
+**Reproduction:** on 2026-07-25 `pipeline_state.json` held no `cal-bk-161` attempt while
+formal-mathfin#163 was open with `closes #161` in its body. `pr_claimed` matches that
+body and skips the target; `queue_claimed` catches it from
+`targets/queue/cal-bk-161.entry.json` even with `gh` unavailable.
 
 #161 and #162 each produced two PRs five days apart. `select_issues` filters on
 labels only; `next_target` dedupes against `attempted_issues` — a mutable file
@@ -489,6 +544,12 @@ Note the standing exposure: a passing tick leaves the issue `status:ready` until
 a human merges, so every target awaiting review is re-selectable.
 
 ### U. Stamp provenance at run time; migrate the queued magistral entries [BUILT 2026-07-31]
+
+**Reproduction:** `targets/queue/cal-bk-161.entry.json` carried
+`statement_source: magistral-autoform` on 2026-07-31, two days after magistral left the
+pipeline, with issue #161 still open and therefore re-selectable.
+`sanitize_provenance` rewrites the fields and the prose `formalization_scope` claim at
+the corpus boundary; `test_splice.py` fails if any queued entry names a retired drafter.
 
 `targets/queue/cal-bk-161.entry.json` and `cal-bk-162.entry.json` still carry
 `statement_source: magistral-autoform` / `statement_model: magistral-medium`,
@@ -508,6 +569,12 @@ mechanical, because the drafter is now Claude and standing policy is that Claude
 is never attributed.
 
 ### V. Emit hygiene pass [BUILT 2026-07-31]
+
+**Reproduction:** all four drafts opened `MeasureTheory ProbabilityTheory` and
+`scoped NNReal ENNReal` on targets with no measure theory; #163/#167 added
+`scoped BigOperators`, a no-op on the current Mathlib; #165 put `@[simp]` on two
+`example`s and bound `(S : Type*)` explicitly. `trim_unused_opens` removes the first
+three by elaboration; prelint A16/A17 fix the last two by parse.
 
 Deterministic, all visible in the drafts: prune unused opens from the preamble
 template (`open MeasureTheory ProbabilityTheory` / `open scoped NNReal ENNReal`
