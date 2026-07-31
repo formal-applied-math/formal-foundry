@@ -207,15 +207,76 @@ def due(state: dict, cfg: PipelineConfig, now_epoch: int) -> bool:
     return (now_epoch - last) >= cfg.interval_days * SECONDS_PER_DAY
 
 
-def next_target(candidates: list[dict], state: dict) -> dict | None:
-    """First candidate whose id is not already attempted. `candidates` is the
-    tick-assembled, ordered work list (backlog queue first, then textbook);
-    each item is a dict carrying at least an 'id'."""
+def next_target(candidates: list[dict], state: dict, *, claimed_fn=None) -> dict | None:
+    """First candidate that is neither already attempted nor already claimed.
+
+    `candidates` is the tick-assembled, ordered work list (backlog queue first, then
+    textbook); each item is a dict carrying at least an 'id'.
+
+    Two guards, deliberately of different kinds. `attempted_issues` is the fast path —
+    a set lookup, no I/O — but it lives in a mutable file written *after* the PR is
+    opened, with no transactional link to the work it guards, and it has already needed
+    one repair for exactly that (`e1df178`, "recover run 29615562257's orphaned state").
+    When it lost the 2026-07-20 attempts, targets #161 and #162 were re-drafted five
+    days later and the pipeline opened duplicate PRs for both
+    (formal-mathfin#163/#165, #164/#167).
+
+    `claimed_fn(candidate) -> bool` is the backstop: it asks reality — is there an open
+    PR for this issue, is there already a queue entry — so a target survives a lost
+    state file. Optional, and failures are swallowed: an unreachable GitHub must not
+    stall the tick, since the fast path is still doing its job. Note the standing
+    exposure it covers: a passing tick leaves the issue `status:ready` until a human
+    merges, so every target awaiting review is re-selectable for the whole window."""
     attempted = set(state.get("attempted_issues", []))
     for c in candidates:
-        if c.get("id") not in attempted:
-            return c
+        if c.get("id") in attempted:
+            continue
+        if claimed_fn is not None:
+            try:
+                if claimed_fn(c):
+                    continue
+            except Exception:      # ground truth is a backstop, never a blocker
+                pass
+        return c
     return None
+
+
+def queue_claimed(candidate: dict, queue_dir: str) -> bool:
+    """Is this target already sitting in `targets/queue/`? A drafted-but-unmerged
+    target leaves its `<id>.entry.json` behind, which is durable in the repo in a way
+    `pipeline_state.json` is not."""
+    tid = candidate.get("id") or ""
+    return bool(tid) and os.path.exists(os.path.join(queue_dir, f"{tid}.entry.json"))
+
+
+def pr_claimed(candidate: dict, *, run_fn=None, repo: str = "raphaelrrcoelho/formal-mathfin") -> bool:
+    """Is there an OPEN pull request that already closes this candidate's issue?
+
+    The ground-truth half of the duplicate guard. Asks `gh` for open PRs mentioning the
+    issue number and matches a closing keyword, so a PR that merely references the issue
+    in prose does not block the target. Any failure — no `gh`, no network, unparseable
+    output — returns False: this is a backstop, and a broken lookup must not stop work."""
+    import json
+    import re
+    import subprocess
+
+    num = candidate.get("issue") or candidate.get("number")
+    if num is None:
+        m = re.search(r"(\d+)$", str(candidate.get("id") or ""))
+        if not m:
+            return False
+        num = int(m.group(1))
+    run = run_fn or subprocess.run
+    try:
+        res = run(["gh", "pr", "list", "--repo", repo, "--state", "open",
+                   "--json", "number,body,title", "--limit", "100"],
+                  capture_output=True, text=True, check=False)
+        rows = json.loads((getattr(res, "stdout", "") or "").strip() or "[]")
+    except Exception:
+        return False
+    closes = re.compile(rf"(?i)\b(?:closes|fixes|resolves)\s+#{int(num)}\b")
+    return any(closes.search((r.get("body") or "") + " " + (r.get("title") or ""))
+               for r in rows)
 
 
 def record_attempt(state: dict, target_id: str, tokens: int, outcome: str,

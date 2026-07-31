@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 
@@ -48,7 +49,18 @@ def cmd_plan(args) -> int:
         candidates = queue.get("targets", []) if isinstance(queue, dict) else list(queue)
     except (OSError, ValueError):
         candidates = []
-    target = P.next_target(candidates, state)
+    # backlog T: `attempted_issues` is the fast path, but it is a mutable file written
+    # after the PR is opened — when it lost the 2026-07-20 attempts the pipeline
+    # re-drafted #161/#162 and opened duplicate PRs for both. Ask ground truth as a
+    # backstop: an open PR that closes the issue, or a queue entry already on disk.
+    # Both fail soft (see `next_target`), so a missing `gh` never stalls a tick.
+    # `queue_claimed` is a stat() and always on; `pr_claimed` shells out to `gh`, so
+    # it is opt-outable (GH_GROUND_TRUTH=0) — unit tests run pure, the tick runs full.
+    queue_dir = os.path.dirname(os.path.abspath(args.queue))
+    ask_gh = os.environ.get("GH_GROUND_TRUTH", "1") != "0"
+    target = P.next_target(
+        candidates, state,
+        claimed_fn=lambda c: P.queue_claimed(c, queue_dir) or (ask_gh and P.pr_claimed(c)))
     if target is None:
         return emit({"action": "skip", "reason": "no_unattempted_targets"})
 

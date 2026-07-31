@@ -11,10 +11,10 @@
     "reference": "Stochastic Fubini (Wiener) instance + Vasicek integrated-rate refactor",
     "difficulty": "medium",
     "formalization_status": "full",
-    "formalization_scope": "Full formal proof in MathFin/FixedIncome/WienerFubiniDeterministic.lean (magistral-drafted statement, leanstral proof). Re-export from MathFin. Axioms-clean. Faithful SUBSET of issue #144; deferred to follow-up issues: Refactoring `FixedIncome/VasicekBondPrice.lean`'s integrated-rate step to consume this Fubini instance in place of its hand-rolled computation; Instantiating the identity to the specific Vasicek/Ornstein-Uhlenbeck kernel σ(s,u) = e^{-a(s-u)} and re-deriving `vasicekBondPrice_*` from it; Coverage row, AxiomAudit entry, ledger update, and `docs/bridges.md` update recording this instance.",
+    "formalization_scope": "Full formal proof in MathFin/FixedIncome/WienerFubiniDeterministic.lean (autoformalized statement, leanstral proof). Re-export from MathFin. Axioms-clean. Faithful SUBSET of issue #144; deferred to follow-up issues: Refactoring `FixedIncome/VasicekBondPrice.lean`'s integrated-rate step to consume this Fubini instance in place of its hand-rolled computation; Instantiating the identity to the specific Vasicek/Ornstein-Uhlenbeck kernel σ(s,u) = e^{-a(s-u)} and re-deriving `vasicekBondPrice_*` from it; Coverage row, AxiomAudit entry, ledger update, and `docs/bridges.md` update recording this instance.",
     "provenance": {
-      "statement_source": "magistral-autoform",
-      "statement_model": "magistral-medium",
+      "statement_source": "autoform",
+      "statement_model": "autoform",
       "source": "leanstral-autoform",
       "model": "labs-leanstral-1-5",
       "issue": 144,

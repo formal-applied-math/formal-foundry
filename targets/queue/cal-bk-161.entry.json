@@ -11,10 +11,10 @@
     "reference": "Add the gain-to-pain ratio and prove it is nonnegative",
     "difficulty": "good-first",
     "formalization_status": "full",
-    "formalization_scope": "Full formal proof in MathFin/Performance/PerformanceRatios.lean (magistral-drafted statement, leanstral proof). Re-export from MathFin. Axioms-clean. Introduces definitions: gainToPain (new-defs review class).",
+    "formalization_scope": "Full formal proof in MathFin/Performance/PerformanceRatios.lean (autoformalized statement, leanstral proof). Re-export from MathFin. Axioms-clean. Introduces definitions: gainToPain (new-defs review class).",
     "provenance": {
-      "statement_source": "magistral-autoform",
-      "statement_model": "magistral-medium",
+      "statement_source": "autoform",
+      "statement_model": "autoform",
       "source": "leanstral-autoform",
       "model": "labs-leanstral-1-5",
       "issue": 161,

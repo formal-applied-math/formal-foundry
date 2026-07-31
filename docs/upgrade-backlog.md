@@ -413,7 +413,41 @@ measured gap between what a target asked for and what the pipeline shipped, not 
 projection. All are **[no reasoner]**. The four PRs were consolidated into
 formal-mathfin#169 (merged).
 
-### R. Redundant-hypothesis prober [no reasoner; small — do first]
+### R. Necessity prober [no reasoner; BUILT 2026-07-31 — `probe/strengthen.py`]
+
+**Correction to the first writing of this item.** It said "delete each binder and
+re-elaborate with the same proof term; anything that still compiles was decorative".
+That is the pass the pipeline **already had** — `autoformalize.strengthen_candidate`,
+keyed on the elaborator's unused-variable warnings — and neither it nor a deletion
+probe catches the cases cited below, because in both drafts the proof genuinely *uses*
+the guard (`have hden := h.le`; `field_simp [h]`). No warning fires, and deleting the
+binder while keeping the proof simply breaks it.
+
+The distinction the gate actually has to draw is **used by this proof** vs **needed by
+this theorem**. That requires re-proving without the hypothesis, which is what shipped:
+
+- free filter — drop the binder, elaborate the statement alone with `sorry`. A binder
+  the rest of the signature depends on (`{ι : Type*}` under `(s : Finset ι)`) fails
+  here and never costs anything further.
+- re-prove — a fixed tactic sweep (`positivity` → `simp [defs]` → `unfold; positivity`
+  → `field_simp; ring` → `grind`) on what survives. **Daemon-only and zero tokens**,
+  because the gate phase holds the Lean slot and the vibe harness is down; every tactic
+  in the sweep is one the house rules allow in a merged source.
+- accept only on a full re-gate, greedily, keeping the last gated state — so a
+  strengthened statement is never held to a weaker bar than the original, and a failure
+  anywhere keeps the proved original (fail-open).
+
+Runs after the warning-driven strip, in `vibe_prove._cmd_gate`; `NECESSITY=0` disables.
+It is a strengthening pass, not a rejection: what it emits is a strictly more general
+theorem, so a target that trips it is improved rather than killed. Second-order, the
+same probe shape catches over-strong typeclass assumptions.
+
+**Open follow-up:** the sweep is a fixed tactic list, so it will miss hypotheses whose
+removal needs a real proof. The general form is to feed the reduced statement back as a
+target for the next vibe round; that needs orchestration across the daemon↔lsp flip and
+is not built.
+
+### R′. Original framing, superseded by R above
 
 All 4/4 drafts asserted a hypothesis their own proof never used (`0 < ∑ r⁻` on
 gain-to-pain nonnegativity, `∑ b ≠ 0` on upside-capture homogeneity). Neither
@@ -434,7 +468,7 @@ this asks a syntactic question the elaborator settles. Second-order, it also
 catches over-strong typeclass assumptions — `patterns.md`'s minimal-typeclass
 rule made enforceable.
 
-### S. Honour the issue's `location:` in emit [no reasoner; one line]
+### S. Honour the issue's `location:` in emit [BUILT 2026-07-31]
 
 Both issues named `MathFin/Performance/RatiosExtended.lean`. All four drafts
 minted a *new* one-lemma module instead — two targets, four modules, where zero
@@ -443,7 +477,7 @@ were asked for. The intent stage did capture it (every emitted file carries
 module named after the PR subject. When the issue declares a `location:` naming
 an existing file, append to it; mint a module only when it is absent or missing.
 
-### T. Ground-truth duplicate check before drafting [no reasoner; small]
+### T. Ground-truth duplicate check before drafting [BUILT 2026-07-31]
 
 #161 and #162 each produced two PRs five days apart. `select_issues` filters on
 labels only; `next_target` dedupes against `attempted_issues` — a mutable file
@@ -454,7 +488,7 @@ presence of a `targets/queue/` entry) and skip when either says the work exists.
 Note the standing exposure: a passing tick leaves the issue `status:ready` until
 a human merges, so every target awaiting review is re-selectable.
 
-### U. Stamp provenance at run time; migrate the queued magistral entries [no reasoner]
+### U. Stamp provenance at run time; migrate the queued magistral entries [BUILT 2026-07-31]
 
 `targets/queue/cal-bk-161.entry.json` and `cal-bk-162.entry.json` still carry
 `statement_source: magistral-autoform` / `statement_model: magistral-medium`,
@@ -473,7 +507,7 @@ generated public AI-disclosure file, and `tests/test_formalization_yaml.py`
 mechanical, because the drafter is now Claude and standing policy is that Claude
 is never attributed.
 
-### V. Emit hygiene pass [no reasoner; small]
+### V. Emit hygiene pass [BUILT 2026-07-31]
 
 Deterministic, all visible in the drafts: prune unused opens from the preamble
 template (`open MeasureTheory ProbabilityTheory` / `open scoped NNReal ENNReal`
@@ -486,8 +520,19 @@ module's existing declaration names into the naming step
 implicitly (`gainToPain (S : Type*) (finset_S : Finset S)` forces
 `gainToPain S finset_S r` at every call site).
 
-**Order:** R → S → T → U → V. R first: highest reproduction rate, no existing
-coverage, and it strengthens what it touches rather than only rejecting.
+**Status (2026-07-31): R–V all built.** Where they live:
+
+| item | code | tests |
+|---|---|---|
+| R necessity prober | `probe/strengthen.py`, wired in `vibe_prove._cmd_gate` (`NECESSITY=0` off) | `probe/test_strengthen.py` |
+| S location/splice | `assemble.splice_into_module` + `autoformalize.extract_location` + `-- append:` header | `probe/test_splice.py` |
+| T duplicate backstop | `pipeline_lib.{queue_claimed,pr_claimed}` via `next_target(claimed_fn=…)` (`GH_GROUND_TRUTH=0` off) | `probe/test_pipeline_lib.py` |
+| U provenance | `assemble.sanitize_provenance` at the corpus boundary; 4 queued entries + manifest migrated | `probe/test_splice.py` |
+| V emit hygiene | `autoformalize.trim_unused_opens` (post-gate) + `_prelint_stub` A16/A17 | `probe/test_emit_hygiene.py` |
+
+The main-repo half of U (`tools/formalization_yaml.py`'s hardcoded disclosure) is
+handled separately — see that repo's `tools/formalization_yaml.py`, now derived from
+per-entry provenance rather than pinned to a named pipeline.
 
 **The bar, from the same round.** The best statement design reviewed was not
 ours — formal-mathfin#166, an outside contribution, *derived* its

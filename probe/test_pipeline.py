@@ -8,6 +8,10 @@ import tempfile
 import pipeline as PL
 import pipeline_lib as P
 
+import os
+
+os.environ.setdefault("GH_GROUND_TRUTH", "0")  # unit tests stay pure: no gh, no network
+
 DAY = P.SECONDS_PER_DAY
 
 

@@ -291,6 +291,21 @@ def extract_pointers(body: str) -> list[str]:
 
 
 
+_LOCATION_RE = re.compile(r"(?im)^\s*location:\s*(MathFin/[\w/]+\.lean)")
+
+
+def extract_location(body: str) -> str | None:
+    """The module an issue's `location:` line names, or None if it has no such line.
+
+    R writes these deliberately — "location: MathFin/Performance/RatiosExtended.lean
+    (beside sortinoRatio / informationRatio)" — to say the new result belongs with its
+    siblings rather than in a module of its own. Emit honours it via `placement.append`
+    (backlog S); before that it was captured into the `-- pointers:` header and then
+    silently overridden."""
+    m = _LOCATION_RE.search(body or "")
+    return m.group(1) if m else None
+
+
 def prepare_issues(raw: list[dict], *, max_difficulty: str = "medium") -> list[dict]:
     """Filter+order the raw `gh issue list` output to the tractable
     `status:ready`+`type:proof` queue (via `issues.select_issues`) and enrich each
@@ -988,6 +1003,34 @@ def trim_unused_imports(candidate: str, *, check_fn) -> dict:
 
 
 
+_OPEN_LINE_RE = re.compile(r"(?m)^open(?:[ \t]+scoped)?[ \t]+\S.*\n")
+
+
+def trim_unused_opens(candidate: str, *, check_fn) -> dict:
+    """Drop `open …` / `open scoped …` lines the proved candidate does not need.
+
+    Emit deliberately opens the house preamble (`MeasureTheory ProbabilityTheory`,
+    `scoped NNReal ENNReal`) because at DRAFT time an unused open is harmless while a
+    missing one is a silent bare-name death. By the gate phase that trade is settled —
+    the module has elaborated, so we can just ask. Every draft of #161/#162 shipped
+    both lines on targets with no measure theory in sight, and two also carried
+    `open scoped BigOperators`, a no-op on the current Mathlib.
+
+    Subtractive and fail-open, exactly like `trim_unused_imports`: a removal is kept
+    only if the file still elaborates clean without it. Returns `{candidate, removed}`."""
+    removed: list[str] = []
+    for m in list(_OPEN_LINE_RE.finditer(candidate)):
+        line = m.group(0)
+        if line not in candidate:            # consumed by an earlier accepted trial
+            continue
+        trial = candidate.replace(line, "", 1)
+        r = check_fn(trial)
+        if r and r.get("success") and not r.get("errors") and r.get("sorry_count", 0) == 0:
+            candidate = trial
+            removed.append(line.strip())
+    return {"candidate": candidate, "removed": removed}
+
+
 _GOLF_DECL_RE = re.compile(
     r"^\s*(?:@\[[^\]]*\]\s*)?(?:noncomputable\s+)?(?:theorem|lemma|def|abbrev)\s",
     re.MULTILINE,
@@ -1233,6 +1276,19 @@ def _prelint_stub(stub: str) -> str:
     # (it only forbids code generation, which the library never does) and is lint-clean.
     # `abbrev`/`instance`/`structure` are left alone; an existing modifier is not doubled.
     stub = re.sub(r"(?m)^(private[ \t]+)?def ", r"\1noncomputable def ", stub)
+    # A16: an attribute on an `example` is inert — examples are anonymous, so there is
+    # nothing for `@[simp]` to tag. #165 shipped two of them. Drop the attribute rather
+    # than the example: the example is a real sanity check, the attribute is noise.
+    stub = re.sub(r"(?m)^[ \t]*@\[[^\]]*\][ \t]*\n([ \t]*example\b)", r"\1", stub)
+    # A17: bind the type argument implicitly. `def gainToPain (S : Type*) (s : Finset S)`
+    # (#165) forces `gainToPain S s r` at every call site, where Mathlib writes
+    # `{ι : Type*}` and lets unification recover it from the Finset. Only rewritten when
+    # the type variable is USED by a later binder, which is what makes it inferable.
+    def _implicit_type(m: re.Match) -> str:
+        var = m.group(1)
+        return m.group(0) if not re.search(rf"[({{\[][^)}}\]]*\b{re.escape(var)}\b",
+                                           m.string[m.end():]) else f"{{{var} : Type*}}"
+    stub = re.sub(r"\((\w+) : Type\*\)", _implicit_type, stub)
     bad = _SIGMA_PI_IDENT_RE.search(stub)
     if bad:
         raise ValueError(
@@ -1265,26 +1321,37 @@ def emit_target_files(issue: dict, stub: str, meta: dict) -> tuple[str, dict, di
     stub = _prelint_stub(stub)   # A5 modifier-order fix + A7 Σ/Π-identifier reject
     name, binders, concl = split_statement(stub)
 
-    # main-module placement: a new-object contribution creates its OWN module, so
-    # main_module must be a NEW file. Trusting the drafter's free-text module_name let
-    # it pick an EXISTING module the target also imports as a pointer (#162:
-    # module_name "RatiosExtended" == its own pointer); apply_contribution then
-    # overwrote that module, deleting its theorems (AxiomAuditGen "unknown constant",
-    # PR blocked). Heal deterministically by naming the module for the object it
-    # introduces (def `upCapture` -> module `UpCapture`, like #161 gainToPain ->
-    # GainToPain); reject loudly if it still collides (a module cannot import itself).
+    # main-module placement. When the issue's `location:` names a MathFin module, that
+    # is the answer (backlog S) — #161/#162 both said `Performance/RatiosExtended.lean`,
+    # beside the four ratios that already share an algebraic master, and the pipeline
+    # made four new one-lemma modules instead. `append` tells
+    # `assemble.apply_contribution` to SPLICE rather than write, which is what makes
+    # honouring it safe: the old failure was a whole-file write deleting the existing
+    # module's theorems (#162 -> AxiomAuditGen "unknown constant", PR blocked).
+    #
+    # Absent a location, a new-object contribution creates its OWN module. Trusting the
+    # drafter's free-text module_name let it pick an EXISTING module the target also
+    # imports as a pointer; heal deterministically by naming the module for the object
+    # it introduces (def `upCapture` -> module `UpCapture`), and reject loudly if it
+    # still collides (a module cannot import itself).
+    append = False
+    location = extract_location(issue.get("body") or "")
     module_name = meta["module_name"]
-    main_module = f"MathFin/{section}/{module_name}.lean"
-    if main_module in pointers:
-        primary = new_defs[0].split(".")[-1].strip() if new_defs else ""
-        if primary:
-            module_name = primary[:1].upper() + primary[1:]
-            main_module = f"MathFin/{section}/{module_name}.lean"
+    if location:
+        main_module, append = location, True
+        module_name = os.path.basename(location)[:-len(".lean")]
+    else:
+        main_module = f"MathFin/{section}/{module_name}.lean"
         if main_module in pointers:
-            raise ValueError(
-                f"main-module {main_module} collides with a pointer import; a "
-                "new-object contribution must create a fresh module named for the "
-                "object it introduces (set meta.definitions / meta.module_name).")
+            primary = new_defs[0].split(".")[-1].strip() if new_defs else ""
+            if primary:
+                module_name = primary[:1].upper() + primary[1:]
+                main_module = f"MathFin/{section}/{module_name}.lean"
+            if main_module in pointers:
+                raise ValueError(
+                    f"main-module {main_module} collides with a pointer import; a "
+                    "new-object contribution must create a fresh module named for the "
+                    "object it introduces (set meta.definitions / meta.module_name).")
     header_lines = [
         f"-- pointers: {', '.join(pointers)}",
         f"-- main-module: {main_module}",
@@ -1292,6 +1359,12 @@ def emit_target_files(issue: dict, stub: str, meta: dict) -> tuple[str, dict, di
         f"-- benchmark-id: {benchmark_id}",
         f"-- source-issue: {n}",
     ]
+    if append:
+        # backlog S: the issue's `location:` named an existing module, so open-pr must
+        # SPLICE the proven declarations in rather than write the file (which would
+        # delete what is already there). Rides the header like every other placement
+        # fact, so build_manifest carries it to the queue target.
+        header_lines.append("-- append: true")
     if deferred:
         # this proof is a faithful SUBSET of the issue; the deferred facts ride the
         # header (build_manifest → manifest → open-pr surfaces them as follow-ups).
@@ -1390,6 +1463,7 @@ def emit_target_files(issue: dict, stub: str, meta: dict) -> tuple[str, dict, di
         "benchmark_id": benchmark_id,
         "source_issue": n,
         "deferred": deferred,
+        "append": append,
     }
     return lean_text, entry, placement
 

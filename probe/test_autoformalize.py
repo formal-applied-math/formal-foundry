@@ -803,6 +803,7 @@ def test_emit_placement_dict():
         "benchmark_id": "mf-fi-fra",
         "source_issue": 67,
         "deferred": [],        # full-issue proof carries an empty deferred list
+        "append": False,       # no `location:` in the issue -> a fresh module
     }
 
 

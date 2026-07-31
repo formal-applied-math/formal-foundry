@@ -41,6 +41,9 @@ _META_KEYS = {
     # a `-- deferred: fact a; fact b` header (present only on a SUBSET proof) lists
     # the issue's facts this proof does NOT cover; open-pr surfaces them as follow-ups.
     "deferred": ("deferred", lambda s: [p.strip() for p in s.split(";") if p.strip()]),
+    # backlog S: the issue's `location:` named an EXISTING module, so the candidate's
+    # declarations are spliced into it rather than written over it.
+    "append": ("append", lambda s: s.strip().lower() in ("1", "true", "yes")),
 }
 
 
