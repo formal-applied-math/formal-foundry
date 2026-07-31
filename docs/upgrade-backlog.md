@@ -452,12 +452,24 @@ both, because `have hden := h.le` and `field_simp [h]` reference the binder. Tha
 what separates this gate from `strengthen_candidate` and from a plain deletion probe,
 and it is what the first writing of this item got wrong.
 
-*Not traced.* Whether the fixed sweep (`positivity`, `simp [gainToPain]`, …) actually
-closes the two reduced goals against the pinned Mathlib. The merged theorems are
-hypothesis-free and their proofs are one-liners, so the goals are certainly provable —
-but "provable" is not "closed by these seven tactics", and that is the claim the sweep
-rests on. Run it against the daemon and record which tactic fires; if neither does, the
-sweep list is the thing to fix, not the design.
+*Traced (daemon, v4.32.0) — and it caught a real gap in the shipped sweep.*
+
+| reduced goal | result |
+|---|---|
+| #161 `0 ≤ gainToPain s r` | bare `positivity` **fails** ("failed to prove positivity/nonnegativity"); `unfold gainToPain; positivity` **closes** it |
+| #162 `upCapture up (c • p) b = c * upCapture up p b` | `simp [upCapture]` **leaves** `(∑ c * p x) / ∑ b i = c * ((∑ p i) / ∑ b i)` — the scalar is still inside the sum and the division is unassociated |
+
+So the sweep as first shipped fired on one of the two cases the gate was built for. The
+unfold turns out to be load-bearing (positivity cannot see through a def to the
+`posPart`/`negPart` sums underneath), and the list was missing an ALGEBRA slot carrying
+`← Finset.mul_sum` + `mul_div_assoc` — the two rewrites the merged `upCapture_smul`
+proof uses. Both are generic ring/BigOperators facts, so the slot stays general rather
+than being that proof pasted in. Added, and pinned by
+`test_the_sweep_carries_the_algebra_rewrites_the_trace_showed_it_needs`.
+
+Worth noting what the convention bought here: the design was right and the *tactic list*
+was half-wrong, which no amount of re-reading the design would have surfaced. Running
+the trace cost ~20 minutes of daemon time and changed the shipped code.
 
 **Correction to the first writing of this item.** It said "delete each binder and
 re-elaborate with the same proof term; anything that still compiles was decorative".
