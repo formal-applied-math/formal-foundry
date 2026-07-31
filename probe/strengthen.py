@@ -42,10 +42,25 @@ _SORRY = re.compile(r"\bsorry\b")
 # reduced statement?" is answered by a fixed tactic sweep rather than a model call:
 # zero tokens, no phase flip, and every tactic here is one the house rules allow in a
 # merged source (no `?`-suggestion tactics, no hammer). Ordered cheap → strong.
+#
+# TRACED against the two cases this gate was built for (2026-07-31, daemon, v4.32.0):
+#   #161 `0 ≤ gainToPain s r`         — bare `positivity` FAILS ("failed to prove
+#     positivity/nonnegativity"); `unfold gainToPain; positivity` CLOSES it. The unfold
+#     is load-bearing: positivity cannot see through the def to the two `posPart`/
+#     `negPart` sums underneath.
+#   #162 `upCapture up (c • p) b = c * upCapture up p b` — `simp [upCapture]` leaves
+#     `(∑ c * p x) / ∑ b i = c * ((∑ p i) / ∑ b i)`: it unfolds the `•` but does not pull
+#     the scalar out of the sum or associate the division. Hence the ALGEBRA slot below,
+#     carrying the two rewrites the merged proof needs (`← Finset.mul_sum`,
+#     `mul_div_assoc`). Without it the sweep did not fire on half the cases that
+#     motivated the gate.
+# Both rewrites are generic ring/BigOperators facts, so the slot stays general — it is
+# not the #162 proof pasted in.
 SWEEP_TACTICS = (
     "positivity",
     "simp [{defs}]",
     "unfold {unfold}; positivity",
+    "simp [{defs}, ← Finset.mul_sum, mul_div_assoc]",
     "simp [{defs}]; positivity",
     "field_simp [{defs}]; ring",
     "unfold {unfold}; field_simp; ring",

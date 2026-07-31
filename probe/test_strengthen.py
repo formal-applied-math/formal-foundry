@@ -174,3 +174,20 @@ def test_tactic_sweep_stops_on_daemon_error():
     probe = "theorem foo : p := by sorry\n"
     assert prove(probe)["lean_text"] == probe
     assert len(calls) == 1                        # bailed, did not grind the whole list
+
+
+def test_the_sweep_carries_the_algebra_rewrites_the_trace_showed_it_needs():
+    # traced 2026-07-31: `simp [upCapture]` alone leaves
+    # `(∑ c * p x) / ∑ b i = c * ((∑ p i) / ∑ b i)` — the scalar is still inside the
+    # sum and the division is unassociated, so the sweep needs these two rewrites or it
+    # does not fire on half the cases the gate was built for
+    joined = " ".join(S.SWEEP_TACTICS)
+    assert "Finset.mul_sum" in joined and "mul_div_assoc" in joined
+
+
+def test_the_sweep_unfolds_before_positivity():
+    # traced: bare `positivity` fails on `0 ≤ gainToPain s r` because it cannot see
+    # through the def to the posPart/negPart sums; with the unfold it closes
+    assert any(t.startswith("unfold") and "positivity" in t for t in S.SWEEP_TACTICS)
+    assert S.SWEEP_TACTICS.index("positivity") < next(
+        i for i, t in enumerate(S.SWEEP_TACTICS) if t.startswith("unfold"))
