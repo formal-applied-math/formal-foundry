@@ -133,3 +133,68 @@ def test_config_has_max_turns_default():
     # the vibe ⇄ lean-lsp-mcp harness's depth lever (replaced the retired
     # text-loop's fanout/repair_rounds/tokens_per_attempt knobs).
     assert PipelineConfig().max_turns == 40
+
+
+# --- ground-truth duplicate guard (backlog T) ---------------------------------
+
+def test_next_target_still_skips_attempted_without_a_claim_fn():
+    st = {"attempted_issues": ["cal-bk-161"]}
+    got = P.next_target([{"id": "cal-bk-161"}, {"id": "cal-bk-162"}], st)
+    assert got["id"] == "cal-bk-162"
+
+
+def test_next_target_skips_a_target_an_open_pr_already_claims():
+    # the #161/#162 failure: state lost the attempt, but a PR was already open
+    st = {"attempted_issues": []}
+    got = P.next_target([{"id": "cal-bk-161"}, {"id": "cal-bk-162"}], st,
+                        claimed_fn=lambda c: c["id"] == "cal-bk-161")
+    assert got["id"] == "cal-bk-162"
+
+
+def test_a_broken_ground_truth_lookup_never_stalls_the_tick():
+    def boom(c):
+        raise RuntimeError("gh: network unreachable")
+
+    got = P.next_target([{"id": "cal-bk-161"}], {"attempted_issues": []}, claimed_fn=boom)
+    assert got["id"] == "cal-bk-161"
+
+
+def test_queue_claimed_sees_a_drafted_entry(tmp_path):
+    (tmp_path / "cal-bk-161.entry.json").write_text("{}")
+    assert P.queue_claimed({"id": "cal-bk-161"}, str(tmp_path)) is True
+    assert P.queue_claimed({"id": "cal-bk-999"}, str(tmp_path)) is False
+
+
+class _Res:
+    def __init__(self, stdout):
+        self.stdout = stdout
+
+
+def test_pr_claimed_matches_only_a_closing_reference():
+    rows = '[{"number": 163, "title": "autoform: GainToPain", "body": "closes #161"}]'
+    assert P.pr_claimed({"id": "cal-bk-161"}, run_fn=lambda *a, **k: _Res(rows)) is True
+    assert P.pr_claimed({"id": "cal-bk-162"}, run_fn=lambda *a, **k: _Res(rows)) is False
+
+
+def test_pr_claimed_ignores_a_bare_mention():
+    rows = '[{"number": 9, "title": "x", "body": "related to #161 but not closing it"}]'
+    assert P.pr_claimed({"id": "cal-bk-161"}, run_fn=lambda *a, **k: _Res(rows)) is False
+
+
+def test_pr_claimed_is_false_when_gh_is_unavailable():
+    def boom(*a, **k):
+        raise FileNotFoundError("gh")
+    assert P.pr_claimed({"id": "cal-bk-161"}, run_fn=boom) is False
+    assert P.pr_claimed({"id": "cal-bk-161"},
+                        run_fn=lambda *a, **k: _Res("not json")) is False
+
+
+def test_pr_claimed_reads_the_issue_number_off_the_target_id():
+    seen = {}
+
+    def fake(cmd, **k):
+        seen["cmd"] = cmd
+        return _Res('[{"number": 1, "title": "t", "body": "Closes #162"}]')
+
+    assert P.pr_claimed({"id": "cal-bk-162"}, run_fn=fake) is True
+    assert "--state" in seen["cmd"] and "open" in seen["cmd"]

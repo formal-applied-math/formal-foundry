@@ -18,7 +18,7 @@
       "source_issue": 144,
       "deferred": [
         "Refactoring `FixedIncome/VasicekBondPrice.lean`'s integrated-rate step to consume this Fubini instance in place of its hand-rolled computation",
-        "Instantiating the identity to the specific Vasicek/Ornstein-Uhlenbeck kernel \u03c3(s,u) = e^{-a(s-u)} and re-deriving `vasicekBondPrice_*` from it",
+        "Instantiating the identity to the specific Vasicek/Ornstein-Uhlenbeck kernel σ(s,u) = e^{-a(s-u)} and re-deriving `vasicekBondPrice_*` from it",
         "Coverage row, AxiomAudit entry, ledger update, and `docs/bridges.md` update recording this instance"
       ],
       "benchmark_entry": {
@@ -27,23 +27,23 @@
         "description": "Deterministic-kernel stochastic Fubini: the Bochner integral of `wienerIntegralLp` over a causal kernel family equals `wienerIntegralLp` of the order-swapped kernel.",
         "domain": "mathematical_finance",
         "code": {
-          "lean": "import MathFin.FixedIncome.WienerFubiniDeterministic\n\nopen MathFin\n\n/-- Deterministic-kernel stochastic Fubini: the Bochner integral of `wienerIntegralLp` over a causal kernel family equals `wienerIntegralLp` of the order-swapped kernel. -/\ntheorem mf_foundations_wiener_fubini_deterministic {\u03a9 : Type*} {m\u03a9 : MeasurableSpace \u03a9} {\u03bc : Measure \u03a9} [IsProbabilityMeasure \u03bc]\n    {B : \u211d\u22650 \u2192 \u03a9 \u2192 \u211d} (hB : IsPreBrownianReal B \u03bc) (T : \u211d\u22650)\n    (\u03c3 : \u211d \u2192 Lp \u211d 2 (volume.restrict (Set.Ioc (0 : \u211d) (T : \u211d))))\n    (h\u03c3_causal : \u2200 s \u2208 Set.Ioc (0 : \u211d) (T : \u211d),\n      (\u03c3 s : \u211d \u2192 \u211d) =\u1d50[volume.restrict (Set.Ioc s (T : \u211d))] 0)\n    (h\u03c3_int : Integrable \u03c3 (volume.restrict (Set.Ioc (0 : \u211d) (T : \u211d))))\n    (g : Lp \u211d 2 (volume.restrict (Set.Ioc (0 : \u211d) (T : \u211d))))\n    (hg : (g : \u211d \u2192 \u211d) =\u1d50[volume.restrict (Set.Ioc (0 : \u211d) (T : \u211d))]\n      fun u => \u222b s in Set.Ioc u (T : \u211d), (\u03c3 s : \u211d \u2192 \u211d) u \u2202volume) :\n    \u222b s in Set.Ioc (0 : \u211d) (T : \u211d),\n        WienerIntegralL2.wienerIntegralLp B hB T (\u03c3 s) \u2202volume =\n      WienerIntegralL2.wienerIntegralLp B hB T g :=\n  MathFin.wienerFubini_deterministic hB T \u03c3 h\u03c3_causal h\u03c3_int g hg\n"
+          "lean": "import MathFin.FixedIncome.WienerFubiniDeterministic\n\nopen MathFin\n\n/-- Deterministic-kernel stochastic Fubini: the Bochner integral of `wienerIntegralLp` over a causal kernel family equals `wienerIntegralLp` of the order-swapped kernel. -/\ntheorem mf_foundations_wiener_fubini_deterministic {Ω : Type*} {mΩ : MeasurableSpace Ω} {μ : Measure Ω} [IsProbabilityMeasure μ]\n    {B : ℝ≥0 → Ω → ℝ} (hB : IsPreBrownianReal B μ) (T : ℝ≥0)\n    (σ : ℝ → Lp ℝ 2 (volume.restrict (Set.Ioc (0 : ℝ) (T : ℝ))))\n    (hσ_causal : ∀ s ∈ Set.Ioc (0 : ℝ) (T : ℝ),\n      (σ s : ℝ → ℝ) =ᵐ[volume.restrict (Set.Ioc s (T : ℝ))] 0)\n    (hσ_int : Integrable σ (volume.restrict (Set.Ioc (0 : ℝ) (T : ℝ))))\n    (g : Lp ℝ 2 (volume.restrict (Set.Ioc (0 : ℝ) (T : ℝ))))\n    (hg : (g : ℝ → ℝ) =ᵐ[volume.restrict (Set.Ioc (0 : ℝ) (T : ℝ))]\n      fun u => ∫ s in Set.Ioc u (T : ℝ), (σ s : ℝ → ℝ) u ∂volume) :\n    ∫ s in Set.Ioc (0 : ℝ) (T : ℝ),\n        WienerIntegralL2.wienerIntegralLp B hB T (σ s) ∂volume =\n      WienerIntegralL2.wienerIntegralLp B hB T g :=\n  MathFin.wienerFubini_deterministic hB T σ hσ_causal hσ_int g hg\n"
         },
         "metadata": {
           "chapter": 0,
           "reference": "Stochastic Fubini (Wiener) instance + Vasicek integrated-rate refactor",
           "difficulty": "medium",
           "formalization_status": "full",
-          "formalization_scope": "Full formal proof in MathFin/FixedIncome/WienerFubiniDeterministic.lean (magistral-drafted statement, leanstral proof). Re-export from MathFin. Axioms-clean. Faithful SUBSET of issue #144; deferred to follow-up issues: Refactoring `FixedIncome/VasicekBondPrice.lean`'s integrated-rate step to consume this Fubini instance in place of its hand-rolled computation; Instantiating the identity to the specific Vasicek/Ornstein-Uhlenbeck kernel \u03c3(s,u) = e^{-a(s-u)} and re-deriving `vasicekBondPrice_*` from it; Coverage row, AxiomAudit entry, ledger update, and `docs/bridges.md` update recording this instance.",
+          "formalization_scope": "Full formal proof in MathFin/FixedIncome/WienerFubiniDeterministic.lean (autoformalized statement, leanstral proof). Re-export from MathFin. Axioms-clean. Faithful SUBSET of issue #144; deferred to follow-up issues: Refactoring `FixedIncome/VasicekBondPrice.lean`'s integrated-rate step to consume this Fubini instance in place of its hand-rolled computation; Instantiating the identity to the specific Vasicek/Ornstein-Uhlenbeck kernel σ(s,u) = e^{-a(s-u)} and re-deriving `vasicekBondPrice_*` from it; Coverage row, AxiomAudit entry, ledger update, and `docs/bridges.md` update recording this instance.",
           "provenance": {
-            "statement_source": "magistral-autoform",
-            "statement_model": "magistral-medium",
+            "statement_source": "autoform",
+            "statement_model": "autoform",
             "source": "leanstral-autoform",
             "model": "labs-leanstral-1-5",
             "issue": 144,
             "deferred": [
               "Refactoring `FixedIncome/VasicekBondPrice.lean`'s integrated-rate step to consume this Fubini instance in place of its hand-rolled computation",
-              "Instantiating the identity to the specific Vasicek/Ornstein-Uhlenbeck kernel \u03c3(s,u) = e^{-a(s-u)} and re-deriving `vasicekBondPrice_*` from it",
+              "Instantiating the identity to the specific Vasicek/Ornstein-Uhlenbeck kernel σ(s,u) = e^{-a(s-u)} and re-deriving `vasicekBondPrice_*` from it",
               "Coverage row, AxiomAudit entry, ledger update, and `docs/bridges.md` update recording this instance"
             ]
           }
@@ -70,17 +70,17 @@
         "description": "The gain-to-pain ratio is nonnegative when defined.",
         "domain": "mathematical_finance",
         "code": {
-          "lean": "import MathFin.Performance.PerformanceRatios\n\nopen MathFin\n\n/-- The gain-to-pain ratio is nonnegative when defined. -/\ntheorem mf_performance_gain_to_pain {S : Type*} (finset_S : Finset S) (r : S \u2192 \u211d)\n    (h : 0 < \u2211 s \u2208 finset_S, max (-r s) 0) : 0 \u2264 gainToPain S finset_S r :=\n  MathFin.gainToPain_nonneg_of_denom_pos finset_S r h\n"
+          "lean": "import MathFin.Performance.PerformanceRatios\n\nopen MathFin\n\n/-- The gain-to-pain ratio is nonnegative when defined. -/\ntheorem mf_performance_gain_to_pain {S : Type*} (finset_S : Finset S) (r : S → ℝ)\n    (h : 0 < ∑ s ∈ finset_S, max (-r s) 0) : 0 ≤ gainToPain S finset_S r :=\n  MathFin.gainToPain_nonneg_of_denom_pos finset_S r h\n"
         },
         "metadata": {
           "chapter": 0,
           "reference": "Add the gain-to-pain ratio and prove it is nonnegative",
           "difficulty": "good-first",
           "formalization_status": "full",
-          "formalization_scope": "Full formal proof in MathFin/Performance/PerformanceRatios.lean (magistral-drafted statement, leanstral proof). Re-export from MathFin. Axioms-clean. Introduces definitions: gainToPain (new-defs review class).",
+          "formalization_scope": "Full formal proof in MathFin/Performance/PerformanceRatios.lean (autoformalized statement, leanstral proof). Re-export from MathFin. Axioms-clean. Introduces definitions: gainToPain (new-defs review class).",
           "provenance": {
-            "statement_source": "magistral-autoform",
-            "statement_model": "magistral-medium",
+            "statement_source": "autoform",
+            "statement_model": "autoform",
             "source": "leanstral-autoform",
             "model": "labs-leanstral-1-5",
             "issue": 161,
@@ -111,17 +111,17 @@
         "description": "Upside-capture ratio and its homogeneity.",
         "domain": "mathematical_finance",
         "code": {
-          "lean": "import MathFin.Performance.PerformanceRatiosExtended\n\nopen MathFin\n\n/-- Upside-capture ratio and its homogeneity. -/\ntheorem mf_performance_upside_capture {S : Type*} (up : Finset S) (p : S \u2192 \u211d) (b : S \u2192 \u211d) (c : \u211d)\n    (h : \u2211 i \u2208 up, b i \u2260 0) : upCapture up (c \u2022 p) b = c * upCapture up p b :=\n  MathFin.upCapture_smul up p b c h\n"
+          "lean": "import MathFin.Performance.PerformanceRatiosExtended\n\nopen MathFin\n\n/-- Upside-capture ratio and its homogeneity. -/\ntheorem mf_performance_upside_capture {S : Type*} (up : Finset S) (p : S → ℝ) (b : S → ℝ) (c : ℝ)\n    (h : ∑ i ∈ up, b i ≠ 0) : upCapture up (c • p) b = c * upCapture up p b :=\n  MathFin.upCapture_smul up p b c h\n"
         },
         "metadata": {
           "chapter": 0,
           "reference": "Add the upside-capture ratio and prove positive homogeneity in the portfolio return",
           "difficulty": "small",
           "formalization_status": "full",
-          "formalization_scope": "Full formal proof in MathFin/Performance/PerformanceRatiosExtended.lean (magistral-drafted statement, leanstral proof). Re-export from MathFin. Axioms-clean. Introduces definitions: upCapture (new-defs review class).",
+          "formalization_scope": "Full formal proof in MathFin/Performance/PerformanceRatiosExtended.lean (autoformalized statement, leanstral proof). Re-export from MathFin. Axioms-clean. Introduces definitions: upCapture (new-defs review class).",
           "provenance": {
-            "statement_source": "magistral-autoform",
-            "statement_model": "magistral-medium",
+            "statement_source": "autoform",
+            "statement_model": "autoform",
             "source": "leanstral-autoform",
             "model": "labs-leanstral-1-5",
             "issue": 162,
@@ -150,21 +150,21 @@
       "source_issue": 66,
       "benchmark_entry": {
         "id": "mf-fixedincome-swap",
-        "name": "Formalize the vanilla interest-rate swap value and par swap rate S = (P(0,T\u2080)\u2212P(0,T\u2099))/(\u03b4\u00b7\u03a3 P(0,T\u1d62))",
+        "name": "Formalize the vanilla interest-rate swap value and par swap rate S = (P(0,T₀)−P(0,Tₙ))/(δ·Σ P(0,Tᵢ))",
         "description": "Vanilla interest-rate swap value and par swap rate.",
         "domain": "mathematical_finance",
         "code": {
-          "lean": "import MathFin.FixedIncome.InterestRateSwap\n\nopen MathFin\n\n/-- Vanilla interest-rate swap value and par swap rate. -/\ntheorem mf_fixedincome_swap {\u03b9 : Type*} (r \u03b4 K : \u211d) (T : \u03b9 \u2192 \u211d) (s : Finset \u03b9) (T_0 T_n : \u03b9) (hT0 : T_0 \u2208 s) (hTn : T_n \u2208 s) (h\u03b4 : \u03b4 > 0) (hP : \u2200 i \u2208 s, MathFin.zcb r 0 (T i) > 0) : payer_swap_value (MathFin.zcb r 0 (T T_0)) (MathFin.zcb r 0 (T T_n)) K (annuity \u03b4 (fun i => MathFin.zcb r 0 (T i)) s) = 0 \u2194 K = par_swap_rate (MathFin.zcb r 0 (T T_0)) (MathFin.zcb r 0 (T T_n)) (annuity \u03b4 (fun i => MathFin.zcb r 0 (T i)) s) :=\n  MathFin.payer_swap_value_eq_zero_iff_fixed_rate_eq_par_swap_rate r \u03b4 K T s T_0 T_n hT0 hTn h\u03b4 hP\n"
+          "lean": "import MathFin.FixedIncome.InterestRateSwap\n\nopen MathFin\n\n/-- Vanilla interest-rate swap value and par swap rate. -/\ntheorem mf_fixedincome_swap {ι : Type*} (r δ K : ℝ) (T : ι → ℝ) (s : Finset ι) (T_0 T_n : ι) (hT0 : T_0 ∈ s) (hTn : T_n ∈ s) (hδ : δ > 0) (hP : ∀ i ∈ s, MathFin.zcb r 0 (T i) > 0) : payer_swap_value (MathFin.zcb r 0 (T T_0)) (MathFin.zcb r 0 (T T_n)) K (annuity δ (fun i => MathFin.zcb r 0 (T i)) s) = 0 ↔ K = par_swap_rate (MathFin.zcb r 0 (T T_0)) (MathFin.zcb r 0 (T T_n)) (annuity δ (fun i => MathFin.zcb r 0 (T i)) s) :=\n  MathFin.payer_swap_value_eq_zero_iff_fixed_rate_eq_par_swap_rate r δ K T s T_0 T_n hT0 hTn hδ hP\n"
         },
         "metadata": {
           "chapter": 0,
-          "reference": "Formalize the vanilla interest-rate swap value and par swap rate S = (P(0,T\u2080)\u2212P(0,T\u2099))/(\u03b4\u00b7\u03a3 P(0,T\u1d62))",
+          "reference": "Formalize the vanilla interest-rate swap value and par swap rate S = (P(0,T₀)−P(0,Tₙ))/(δ·Σ P(0,Tᵢ))",
           "difficulty": "small",
           "formalization_status": "full",
-          "formalization_scope": "Full formal proof in MathFin/FixedIncome/InterestRateSwap.lean (magistral-drafted statement, leanstral proof). Re-export from MathFin. Axioms-clean. Introduces definitions: annuity, payer_swap_value, par_swap_rate (new-defs review class).",
+          "formalization_scope": "Full formal proof in MathFin/FixedIncome/InterestRateSwap.lean (autoformalized statement, leanstral proof). Re-export from MathFin. Axioms-clean. Introduces definitions: annuity, payer_swap_value, par_swap_rate (new-defs review class).",
           "provenance": {
-            "statement_source": "magistral-autoform",
-            "statement_model": "magistral-medium",
+            "statement_source": "autoform",
+            "statement_model": "autoform",
             "source": "leanstral-autoform",
             "model": "labs-leanstral-1-5",
             "issue": 66,

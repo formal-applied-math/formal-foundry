@@ -134,7 +134,8 @@ def _cmd_run(args) -> int:
 def _cmd_gate(args) -> int:
     import time
 
-    from autoformalize import golf_candidate, strengthen_candidate, trim_unused_imports
+    from autoformalize import (golf_candidate, strengthen_candidate,
+                                trim_unused_imports, trim_unused_opens)
     from gate import gate as run_gate
     from probe import daemon_check, mistral_chat
     from probe_lib import append_jsonl
@@ -181,6 +182,27 @@ def _cmd_gate(args) -> int:
                         with open(override, "w", encoding="utf-8") as f:
                             json.dump(e2, f, ensure_ascii=False, indent=2)
                 # drop pointer imports the module never needed (elab-verified per
+                # necessity (item R): the pass above drops hypotheses the proof never
+                # USED — elaborator warnings. This one drops hypotheses the theorem
+                # does not NEED, which is a different set: on formal-mathfin#161/#162
+                # all four drafts genuinely consumed their guard (`h.le`,
+                # `field_simp [h]`), so no warning fired, and the statement was true
+                # without it anyway. Re-proves the reduced statement with a tactic
+                # sweep — the gate phase owns the Lean slot and the vibe harness is
+                # down, so this stays daemon-only and costs zero prover tokens.
+                if os.environ.get("NECESSITY", "1") != "0":
+                    from strengthen import tactic_sweep_prover, unnecessary_hypotheses
+                    defs = list((target.get("new_defs") or []))
+                    nec = unnecessary_hypotheses(
+                        candidate, target["sorry_name"], check_fn=daemon_check,
+                        prove_fn=tactic_sweep_prover(daemon_check, defs),
+                        regate_fn=lambda c: run_gate(c, target["sorry_name"],
+                                                     check_fn=daemon_check),
+                        log=lambda m: print(f"[vibe-gate] {target['id']}: {m}", flush=True))
+                    if nec["changed"]:
+                        candidate = nec["candidate"]
+                        summary["unnecessary_hypotheses"] = nec["dropped"]
+                # drop pointer imports the module never needed (elab-verified per
                 # removal); one full re-gate guards against instance-resolution
                 # drift, reverting the trim wholesale if anything changed.
                 t = trim_unused_imports(candidate, check_fn=daemon_check)
@@ -192,6 +214,19 @@ def _cmd_gate(args) -> int:
                         summary["trimmed_imports"] = t["removed"]
                         print(f"[vibe-gate] {target['id']}: trimmed unused "
                               f"import(s) {t['removed']}", flush=True)
+                # item V: the house preamble is opened unconditionally at emit (a
+                # missing open is a silent bare-name death, an unused one is not).
+                # The module has elaborated by now, so the trade is settled — prune
+                # what it demonstrably does not use, same subtractive shape.
+                o = trim_unused_opens(candidate, check_fn=daemon_check)
+                if o["removed"]:
+                    g4 = run_gate(o["candidate"], target["sorry_name"],
+                                  check_fn=daemon_check)
+                    if g4["passed"]:
+                        candidate = o["candidate"]
+                        summary["trimmed_opens"] = o["removed"]
+                        print(f"[vibe-gate] {target['id']}: trimmed unused "
+                              f"open(s) {o['removed']}", flush=True)
                 # golf: the prover polishes its own accepted proof to the house
                 # register (proof-only edits enforced by signature equality + a
                 # full re-gate; fail-open). GOLF=0 disables the experiment.

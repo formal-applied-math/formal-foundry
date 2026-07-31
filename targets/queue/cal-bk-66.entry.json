@@ -11,10 +11,10 @@
     "reference": "Formalize the vanilla interest-rate swap value and par swap rate S = (P(0,T₀)−P(0,Tₙ))/(δ·Σ P(0,Tᵢ))",
     "difficulty": "small",
     "formalization_status": "full",
-    "formalization_scope": "Full formal proof in MathFin/FixedIncome/InterestRateSwap.lean (magistral-drafted statement, leanstral proof). Re-export from MathFin. Axioms-clean. Introduces definitions: annuity, payer_swap_value, par_swap_rate (new-defs review class).",
+    "formalization_scope": "Full formal proof in MathFin/FixedIncome/InterestRateSwap.lean (autoformalized statement, leanstral proof). Re-export from MathFin. Axioms-clean. Introduces definitions: annuity, payer_swap_value, par_swap_rate (new-defs review class).",
     "provenance": {
-      "statement_source": "magistral-autoform",
-      "statement_model": "magistral-medium",
+      "statement_source": "autoform",
+      "statement_model": "autoform",
       "source": "leanstral-autoform",
       "model": "labs-leanstral-1-5",
       "issue": 66,

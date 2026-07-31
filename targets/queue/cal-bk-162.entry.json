@@ -11,10 +11,10 @@
     "reference": "Add the upside-capture ratio and prove positive homogeneity in the portfolio return",
     "difficulty": "small",
     "formalization_status": "full",
-    "formalization_scope": "Full formal proof in MathFin/Performance/PerformanceRatiosExtended.lean (magistral-drafted statement, leanstral proof). Re-export from MathFin. Axioms-clean. Introduces definitions: upCapture (new-defs review class).",
+    "formalization_scope": "Full formal proof in MathFin/Performance/PerformanceRatiosExtended.lean (autoformalized statement, leanstral proof). Re-export from MathFin. Axioms-clean. Introduces definitions: upCapture (new-defs review class).",
     "provenance": {
-      "statement_source": "magistral-autoform",
-      "statement_model": "magistral-medium",
+      "statement_source": "autoform",
+      "statement_model": "autoform",
       "source": "leanstral-autoform",
       "model": "labs-leanstral-1-5",
       "issue": 162,
