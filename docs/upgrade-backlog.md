@@ -401,3 +401,96 @@ Recorded here so the adoption round has one ledger; execution belongs to
 
 **Order:** I (the decision) with J folded in → K → then L/M/N as the census
 directs. O–Q slot into the next values-review session main-repo side.
+
+---
+
+## 2026-07-31 — open-PR review round: the shipped artifacts, read back
+
+Evidence: `docs/research/2026-07-31-pr-review-harvest.md`. Source is the four
+autoform PRs standing open on `formal-mathfin` (#163/#164/#165/#167 for issues
+#161/#162), read against the issues that seeded them. Every item below is a
+measured gap between what a target asked for and what the pipeline shipped, not a
+projection. All are **[no reasoner]**. The four PRs were consolidated into
+formal-mathfin#169 (merged).
+
+### R. Redundant-hypothesis prober [no reasoner; small — do first]
+
+All 4/4 drafts asserted a hypothesis their own proof never used (`0 < ∑ r⁻` on
+gain-to-pain nonnegativity, `∑ b ≠ 0` on upside-capture homogeneity). Neither
+issue asked for it — #161 even names the closing lemmas — so this is drafter
+invention. Both conclusions hold unconditionally, because in Lean `x / 0 = 0` and
+`mul_div_assoc` carries no side condition. **Every existing gate passed it**: a
+weaker theorem type-checks exactly as happily as a strong one, so kernel,
+axioms, and judge are all blind here.
+
+Build: after the proof elaborates, delete each signature binder in turn and
+re-elaborate with the same proof term. Anything that still compiles was
+decorative — drop it, re-run, emit the stronger statement. Model-free, seconds
+per target on the daemon.
+
+Not a re-litigation of the retired intent-fidelity gate (284e41f): that one asked
+a semantic question two models can agree on while both miss an inert hypothesis;
+this asks a syntactic question the elaborator settles. Second-order, it also
+catches over-strong typeclass assumptions — `patterns.md`'s minimal-typeclass
+rule made enforceable.
+
+### S. Honour the issue's `location:` in emit [no reasoner; one line]
+
+Both issues named `MathFin/Performance/RatiosExtended.lean`. All four drafts
+minted a *new* one-lemma module instead — two targets, four modules, where zero
+were asked for. The intent stage did capture it (every emitted file carries
+`-- pointers: MathFin/Performance/RatiosExtended.lean`); emit overrode it with a
+module named after the PR subject. When the issue declares a `location:` naming
+an existing file, append to it; mint a module only when it is absent or missing.
+
+### T. Ground-truth duplicate check before drafting [no reasoner; small]
+
+#161 and #162 each produced two PRs five days apart. `select_issues` filters on
+labels only; `next_target` dedupes against `attempted_issues` — a mutable file
+written *after* the PR is opened, with no transactional link to the work it
+guards, and already repaired once for this class of loss (`e1df178`). Add a
+ground-truth query before drafting (open PRs referencing the issue, plus the
+presence of a `targets/queue/` entry) and skip when either says the work exists.
+Note the standing exposure: a passing tick leaves the issue `status:ready` until
+a human merges, so every target awaiting review is re-selectable.
+
+### U. Stamp provenance at run time; migrate the queued magistral entries [no reasoner]
+
+`targets/queue/cal-bk-161.entry.json` and `cal-bk-162.entry.json` still carry
+`statement_source: magistral-autoform` / `statement_model: magistral-medium`,
+baked in at enqueue. Magistral left on 2026-07-29; both entries are still queued
+and both issues still open, so a re-pick emits a magistral claim for a
+Claude-drafted artifact — a falsified record one tick away. `cal-bk-56` already
+uses the generic `"autoform"`, so the convention moved and the old entries were
+never migrated. Fix both halves: migrate the stale entries, and have the
+producing stage stamp provenance from the resolved model id rather than the
+target carrying it.
+
+**Main-repo half — R's decision, not a patch.** `tools/formalization_yaml.py`
+(:164, :238, :240) hardcodes "statement specified by Magistral" into the
+generated public AI-disclosure file, and `tests/test_formalization_yaml.py`
+(:113-115) asserts it. Accurate for today's corpus, false for the next entry. Not
+mechanical, because the drafter is now Claude and standing policy is that Claude
+is never attributed.
+
+### V. Emit hygiene pass [no reasoner; small]
+
+Deterministic, all visible in the drafts: prune unused opens from the preamble
+template (`open MeasureTheory ProbabilityTheory` / `open scoped NNReal ENNReal`
+in all four, on targets with no measure theory; `open scoped BigOperators`, a
+no-op on the current Mathlib, in two); lint attributes on `example`
+(`PerformanceRatios.lean` puts `@[simp]` on two, inert); feed the destination
+module's existing declaration names into the naming step
+(`upCapture_scale_invariant` named a homogeneity claim after the three genuinely
+*invariant* sibling lemmas in the same namespace); bind type arguments
+implicitly (`gainToPain (S : Type*) (finset_S : Finset S)` forces
+`gainToPain S finset_S r` at every call site).
+
+**Order:** R → S → T → U → V. R first: highest reproduction rate, no existing
+coverage, and it strengthens what it touches rather than only rejecting.
+
+**The bar, from the same round.** The best statement design reviewed was not
+ours — formal-mathfin#166, an outside contribution, *derived* its
+denominator-nonvanishing condition from `zcb_pos` instead of assuming it,
+leaving one hypothesis. That is the exact inverse of R's failure mode, and it is
+what the drafter's statement stage should be aiming at.
