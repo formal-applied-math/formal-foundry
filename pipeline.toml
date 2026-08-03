@@ -5,13 +5,17 @@
 # the cap is charged whether or not the attempt spends it, so the allowance is a
 # hard ceiling on issues/month, not an estimate).
 #
-# Sizing: allowance 8M / cap 500k → ≤16 issues/month; at 1 issue / 3 days that's
-# ~10/month, so the ceiling protects against runaway/manual triggers without
-# binding normal cadence. difficulty:hard issues escalate to escalate_hard_cap.
+# Sizing: allowance 16M / cap 500k → ≤32 issues/month, which clears the DAILY
+# cadence (2026-08-03, was 1 issue / 3 days → the old 8M sized ~10/month and would
+# now have bound mid-month). The ceiling exists to stop a runaway/manual trigger,
+# not to bind normal cadence. NOTE it is currently inert either way: the live vibe
+# path reports `"tokens": 0` (`vibe_prove.py`), so `record` charges 0 and
+# `can_afford` never trips — real token capture is harvest item T2.
+# difficulty:hard issues escalate to escalate_hard_cap.
 
 [pipeline]
-interval_days = 3
-monthly_token_allowance = 8000000
+interval_days = 1
+monthly_token_allowance = 16000000
 tokens_per_issue_cap = 500000
 escalate_hard_cap = 2000000
 max_issues_per_tick = 1

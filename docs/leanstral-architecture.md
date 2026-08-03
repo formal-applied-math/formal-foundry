@@ -1,6 +1,6 @@
 # MathFin autoformalization pipeline — architecture
 
-An autonomous **issue → PR** pipeline: a GitHub Actions cron (every 3 days) picks a
+An autonomous **issue → PR** pipeline: a GitHub Actions cron (daily) picks a
 `status:ready`+`type:proof` issue on **formal-mathfin**, drafts a faithful Lean stub,
 proves it with **Leanstral**, gates it kernel-clean, and opens a ready-for-review PR
 that closes the issue. Two engines carry it — **Claude** owns everything up to the

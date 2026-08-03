@@ -1,7 +1,7 @@
 """Token-paced scheduling logic for the autoformalizer pipeline (pure, stdlib).
 
 The GitHub Actions cron fires `pipeline-tick.sh` on a fixed cadence (one issue
-every 3 days). Each tick asks this library three questions, all pure functions
+per day). Each tick asks this library three questions, all pure functions
 of a config + a small JSON state so they are unit-testable with no Lean / GitHub:
 
   1. Is it due?              `due(state, cfg, now_epoch)`
@@ -30,11 +30,20 @@ except ModuleNotFoundError:  # pragma: no cover
 
 SECONDS_PER_DAY = 86400
 
+# The cron fires at a fixed wall-clock minute, but `last_tick_epoch` is stamped when
+# the run RECORDS — i.e. fire time PLUS the run's duration (live ticks take 45-85 min;
+# the job's ceiling is 120). Measured against a whole number of days the next firing
+# therefore lands just SHORT of the interval and skips, silently halving the cadence:
+# a daily cron would tick every other day. Give the due check the job's full timeout
+# as slack. A same-interval manual re-fire is still guarded, and `--force` bypasses
+# the check outright.
+DUE_GRACE_SECONDS = 4 * 3600
+
 
 @dataclasses.dataclass(frozen=True)
 class PipelineConfig:
-    interval_days: int = 3
-    monthly_token_allowance: int = 8_000_000
+    interval_days: int = 1
+    monthly_token_allowance: int = 16_000_000
     tokens_per_issue_cap: int = 500_000
     escalate_hard_cap: int = 2_000_000
     max_issues_per_tick: int = 1
@@ -199,12 +208,13 @@ def can_afford(state: dict, cfg: PipelineConfig, difficulty: str | None = None) 
 
 
 def due(state: dict, cfg: PipelineConfig, now_epoch: int) -> bool:
-    """Has interval_days elapsed since the last tick? (Guards manual+scheduled
-    double-fires; a zero last_tick — fresh state — is always due.)"""
+    """Has interval_days (less DUE_GRACE_SECONDS) elapsed since the last tick?
+    (Guards manual+scheduled double-fires; a zero last_tick — fresh state — is
+    always due.)"""
     last = int(state.get("last_tick_epoch", 0))
     if last <= 0:
         return True
-    return (now_epoch - last) >= cfg.interval_days * SECONDS_PER_DAY
+    return (now_epoch - last) >= cfg.interval_days * SECONDS_PER_DAY - DUE_GRACE_SECONDS
 
 
 def next_target(candidates: list[dict], state: dict, *, claimed_fn=None) -> dict | None:
