@@ -36,6 +36,29 @@ Per issue `#N` (worked example: `cal-bk-88.*` for #88):
 Author the stub statement to state EXACTLY the issue's formula — no vacuity, no
 weaker restatement. Faithfulness is R's to confirm at merge; author conservatively.
 
+Faithful is not sufficient: the statement must also be WORTH proving. Two ways a
+faithful stub is still empty, both to reject at authoring time:
+
+- **Instantiating a ∀-quantified corpus lemma.** If the target's proof is
+  `MathFin.foo a b c` and `foo` binds those arguments with no hypothesis on them,
+  the "theorem" is an application, not a result.
+- **Restating a Mathlib lemma in finance names.** Search first (`scripts/loogle.sh`)
+  and consume the library lemma instead; that is the coherence-first rule in
+  `CLAUDE.md`, and it applies to autoformalized statements exactly as to hand-authored
+  ones.
+
+Retired on this bar:
+
+- **#128** (Merton risk-neutral compensation, retired 2026-08-03). Its two theorems
+  were one of each: `merton_lognormal_spot_recombination` instantiated
+  `MathFin.integral_mertonSpot (S_0 k : ℝ)` at a concrete `k`, and the compensator
+  identity `E[e^Y−1] = e^{m+δ²/2}−1` is Mathlib's
+  `ProbabilityTheory.mgf_id_gaussianReal` (with `integrable_exp_mul_gaussianReal`
+  for the side condition), both in `Mathlib.Probability.Distributions.Gaussian.Real`.
+  The stub also carried two theorems where the shape above allows exactly one.
+  The non-vacuous version of #128 needs jumps as actual random variables rather than
+  `mertonSpot`'s abstract `k`, which is a corpus development, not a stub.
+
 ## Validate + activate (needs the daemon; does NOT spend Leanstral tokens)
 
 ```bash
