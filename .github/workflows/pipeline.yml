@@ -1,6 +1,6 @@
 name: autoformalizer pipeline
 
-# One token-paced tick every 3 days: pick a queued target, prove it with
+# One token-paced tick per day: pick a queued target, prove it with
 # Leanstral, and on a pass open a ready-for-review PR on formal-mathfin that
 # closes the source issue (fully hands-off; R reviews + merges).
 # Secrets:
@@ -13,7 +13,7 @@ name: autoformalizer pipeline
 
 on:
   schedule:
-    - cron: "17 6 */3 * *"        # every 3 days, off-minute (not :00)
+    - cron: "17 6 * * *"          # daily, off-minute (not :00)
   workflow_dispatch:
     inputs:
       force:
