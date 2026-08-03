@@ -51,7 +51,7 @@ def test_plan_skips_attempted_and_picks_next():
 
 def test_plan_skips_when_not_due():
     st = dict(P.new_state("2026-07"), last_tick_epoch=1_700_000_000)
-    dec = _plan([{"id": "x"}], st, now_epoch=1_700_000_000 + 3600)  # 1h into a daily interval
+    dec = _plan([{"id": "x"}], st, now_epoch=1_700_000_000 + 3600)  # 1h into a 2-day interval
     assert dec["action"] == "skip" and dec["reason"] == "not_due"
 
 
@@ -70,7 +70,7 @@ def test_plan_skips_when_budget_exhausted():
     # month must match the plan clock (epoch 1.7e9 = 2023-11 UTC) or roll_month
     # would reset the spent counter for a new month.
     st = P.new_state("2023-11")
-    st["tokens_spent_this_month"] = 15_800_000  # <500k left of the 16M default
+    st["tokens_spent_this_month"] = 7_800_000  # <500k left of the 8M default
     dec = _plan([{"id": "x"}], st)
     assert dec["action"] == "skip" and dec["reason"] == "budget_exhausted"
 

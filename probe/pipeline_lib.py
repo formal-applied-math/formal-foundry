@@ -1,7 +1,7 @@
 """Token-paced scheduling logic for the autoformalizer pipeline (pure, stdlib).
 
 The GitHub Actions cron fires `pipeline-tick.sh` on a fixed cadence (one issue
-per day). Each tick asks this library three questions, all pure functions
+every 2 days). Each tick asks this library three questions, all pure functions
 of a config + a small JSON state so they are unit-testable with no Lean / GitHub:
 
   1. Is it due?              `due(state, cfg, now_epoch)`
@@ -33,8 +33,8 @@ SECONDS_PER_DAY = 86400
 # The cron fires at a fixed wall-clock minute, but `last_tick_epoch` is stamped when
 # the run RECORDS — i.e. fire time PLUS the run's duration (live ticks take 45-85 min;
 # the job's ceiling is 120). Measured against a whole number of days the next firing
-# therefore lands just SHORT of the interval and skips, silently halving the cadence:
-# a daily cron would tick every other day. Give the due check the job's full timeout
+# therefore lands just SHORT of the interval and skips, silently halving the cadence
+# (a 2-day cron would tick every 4th day). Give the due check the job's full timeout
 # as slack. A same-interval manual re-fire is still guarded, and `--force` bypasses
 # the check outright.
 DUE_GRACE_SECONDS = 4 * 3600
@@ -42,8 +42,8 @@ DUE_GRACE_SECONDS = 4 * 3600
 
 @dataclasses.dataclass(frozen=True)
 class PipelineConfig:
-    interval_days: int = 1
-    monthly_token_allowance: int = 16_000_000
+    interval_days: int = 2
+    monthly_token_allowance: int = 8_000_000
     tokens_per_issue_cap: int = 500_000
     escalate_hard_cap: int = 2_000_000
     max_issues_per_tick: int = 1
