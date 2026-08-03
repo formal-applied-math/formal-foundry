@@ -5,17 +5,19 @@
 # the cap is charged whether or not the attempt spends it, so the allowance is a
 # hard ceiling on issues/month, not an estimate).
 #
-# Sizing: allowance 16M / cap 500k → ≤32 issues/month, which clears the DAILY
-# cadence (2026-08-03, was 1 issue / 3 days → the old 8M sized ~10/month and would
-# now have bound mid-month). The ceiling exists to stop a runaway/manual trigger,
-# not to bind normal cadence. NOTE it is currently inert either way: the live vibe
-# path reports `"tokens": 0` (`vibe_prove.py`), so `record` charges 0 and
-# `can_afford` never trips — real token capture is harvest item T2.
+# Cadence: 1 issue / 2 days (2026-08-03, was 3). The binding constraint is the
+# 2000-min/month Actions quota, not tokens — ~15 ticks at 46-85 min each leaves
+# about half the quota for hands-on workflow_dispatch runs, which measured 85% of
+# the spend. Sizing: allowance 8M / cap 500k → ≤16 issues/month, just clear of the
+# ~15 the cadence can produce, so the ceiling stops a runaway without binding
+# normal cadence. NOTE it is inert in practice: the live vibe path reports
+# `"tokens": 0` (`vibe_prove.py`), so `record` charges 0 and `can_afford` never
+# trips — real token capture is harvest item T2.
 # difficulty:hard issues escalate to escalate_hard_cap.
 
 [pipeline]
-interval_days = 1
-monthly_token_allowance = 16000000
+interval_days = 2
+monthly_token_allowance = 8000000
 tokens_per_issue_cap = 500000
 escalate_hard_cap = 2000000
 max_issues_per_tick = 1

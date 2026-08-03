@@ -11,7 +11,7 @@ DAY = P.SECONDS_PER_DAY
 
 def test_defaults():
     c = PipelineConfig()
-    assert c.interval_days == 1
+    assert c.interval_days == 2
     assert c.tokens_per_issue_cap == 500_000
     assert c.escalate_hard_cap == 2_000_000
     assert c.max_issues_per_tick == 1
@@ -25,12 +25,12 @@ def test_load_config_from_toml():
         c = PipelineConfig.load(p)
         assert c.interval_days == 7
         assert c.tokens_per_issue_cap == 250_000
-        assert c.monthly_token_allowance == 16_000_000  # default preserved
+        assert c.monthly_token_allowance == 8_000_000  # default preserved
 
 
 def test_load_config_missing_returns_defaults():
-    assert PipelineConfig.load(None).interval_days == 1
-    assert PipelineConfig.load("/no/such/file.toml").interval_days == 1
+    assert PipelineConfig.load(None).interval_days == 2
+    assert PipelineConfig.load("/no/such/file.toml").interval_days == 2
 
 
 def test_decompose_config_defaults_off_and_loads():
@@ -86,16 +86,19 @@ def test_due_respects_interval_and_fresh_state():
 
 def test_due_tolerates_the_run_duration_of_a_fixed_time_cron():
     """A fixed-minute cron + a stamp taken at RECORD time (fire + run duration)
-    puts the next firing just UNDER the interval — without slack a daily cron
-    ticks every other day. Live durations are 45-85 min; the job ceiling is 120."""
-    cfg = PipelineConfig(interval_days=1)
-    fire = 1_000_000                                   # yesterday's cron minute
-    for run_minutes in (46, 85, 120):                  # stamp = fire + duration
-        stamped = dict(P.new_state("2026-08"), last_tick_epoch=fire + run_minutes * 60)
-        assert P.due(stamped, cfg, now_epoch=fire + DAY), f"skipped after {run_minutes}min run"
-    # still guards a same-day manual re-fire (that is what --force is for)
-    justran = dict(P.new_state("2026-08"), last_tick_epoch=fire)
-    assert not P.due(justran, cfg, now_epoch=fire + 3600)
+    puts the next firing just UNDER the interval — without slack the cron skips
+    it and the cadence silently halves. Live durations are 45-85 min; the job
+    ceiling is 120. Holds at any interval, so it survives a cadence change."""
+    fire = 1_000_000                                   # the previous cron minute
+    for interval in (1, 2, 3):
+        cfg = PipelineConfig(interval_days=interval)
+        for run_minutes in (46, 85, 120):              # stamp = fire + duration
+            stamped = dict(P.new_state("2026-08"), last_tick_epoch=fire + run_minutes * 60)
+            assert P.due(stamped, cfg, now_epoch=fire + interval * DAY), \
+                f"interval={interval}d skipped after a {run_minutes}min run"
+        # an off-cadence firing is still guarded (that is what --force is for)
+        justran = dict(P.new_state("2026-08"), last_tick_epoch=fire)
+        assert not P.due(justran, cfg, now_epoch=fire + interval * DAY - 5 * 3600)
 
 
 def test_next_target_skips_attempted():

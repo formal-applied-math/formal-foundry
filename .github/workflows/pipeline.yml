@@ -1,6 +1,6 @@
 name: autoformalizer pipeline
 
-# One token-paced tick per day: pick a queued target, prove it with
+# One token-paced tick every 2 days: pick a queued target, prove it with
 # Leanstral, and on a pass open a ready-for-review PR on formal-mathfin that
 # closes the source issue (fully hands-off; R reviews + merges).
 # Secrets:
@@ -13,7 +13,13 @@ name: autoformalizer pipeline
 
 on:
   schedule:
-    - cron: "17 6 * * *"          # daily, off-minute (not :00)
+    # every 2 days, off-minute (not :00). Sized to the 2000-min/month Actions
+    # quota: ~15 ticks at 46-85 min leaves ~half the quota for hands-on
+    # workflow_dispatch runs, which are the larger share of the spend.
+    # `*/2` on day-of-month restarts at the 1st, so a 31-day month fires on
+    # consecutive days — the due check absorbs that (the 1st is <44h after
+    # the 31st's stamp, so it skips for seconds and resyncs on the 3rd).
+    - cron: "17 6 */2 * *"
   workflow_dispatch:
     inputs:
       force:
