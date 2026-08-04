@@ -79,13 +79,13 @@ fi
 echo "[decompose] proving leaves via vibe ⇄ lean-lsp-mcp (max_turns=$TURNS)…" >&2
 set +e
 python3 vibe_prove.py run --manifest "$LEAFMAN" --arm decompose \
-  --max-turns "$TURNS" --run-tag "$TAG" --main-repo "$MAIN"
+  --max-turns "$TURNS" --run-tag "$TAG" --main-repo "$MAIN" --config "$CFG"
 echo "[decompose] flipping the Lean slot back to the daemon for the leaf gates…" >&2
 docker compose -f "$BASE" -f "$LSP" stop lean-lsp >/dev/null 2>&1
 docker compose -f "$BASE" -p docker up -d lean-repl >/dev/null 2>&1
 python3 wait_daemon.py || echo "[decompose] WARNING: daemon not ready; gates may fail" >&2
 python3 vibe_prove.py gate --manifest "$LEAFMAN" --arm decompose \
-  --run-tag "$TAG" --main-repo "$MAIN"
+  --run-tag "$TAG" --main-repo "$MAIN" --config "$CFG"
 set -e
 
 # 3. recompose (daemon up): assemble proved leaves + main, full gate → candidate.

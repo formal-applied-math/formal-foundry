@@ -40,9 +40,14 @@ def scratch_paths(main_repo: str, target_id: str) -> tuple[str, str]:
     return host, rel
 
 
-def build_vibe_task(stub_relpath: str, sorry_name: str, context_pack: str = "") -> str:
+def build_vibe_task(stub_relpath: str, sorry_name: str, context_pack: str = "",
+                    state_hints: str = "") -> str:
     """The `-p` task for vibe. leanstral-vibe.sh prepends the house doctrine, so this
-    is the per-target instruction + the consume-don't-reprove pointer pack only."""
+    is the per-target instruction + the consume-don't-reprove pointer pack only.
+
+    `state_hints` is the proof-state cache's contribution: `goal -> tactic` pairs that
+    closed the same state while proving a DIFFERENT target. Empty unless states have
+    actually recurred across targets, so an unproven cache stays silent."""
     parts = [
         f"TASK: The file {stub_relpath} contains `theorem {sorry_name}` with a single `sorry`.",
         f"Prove it. Use `lean_goal` on {stub_relpath} to read the proof state, then edit that "
@@ -54,7 +59,36 @@ def build_vibe_task(stub_relpath: str, sorry_name: str, context_pack: str = "") 
     ]
     if context_pack:
         parts.append("\n── EXISTING RESULTS TO CONSUME (do not reprove) ──\n" + context_pack)
+    if state_hints:
+        parts.append("\n── PROOF STATES ALREADY SEEN (a tactic that closed each; verify, "
+                     "do not trust) ──\n" + state_hints)
     return "\n".join(parts)
+
+
+def record_proof_states(candidate: str, *, target_id: str, check_fn, cache,
+                        log_path: str, log=lambda _m: None) -> dict:
+    """Extract the accepted proof's intermediate states and record them.
+
+    Runs in the gate phase, which already owns the Lean slot, and strictly AFTER the
+    candidate passed. It is measurement plus cache fill, never a verdict: any failure
+    (dead daemon, unparseable proof, a raising socket) degrades to zero states rather
+    than turning a green target red.
+
+    Writes one JSONL row per sighting for offline analysis, and returns the counts the
+    tick's summary row carries.
+    """
+    from proof_states import extract_states
+    from probe_lib import append_jsonl
+    try:
+        pairs = extract_states(candidate, check_fn=check_fn, log=log)
+    except Exception as exc:                            # never fail a passing target
+        log(f"state extraction failed: {type(exc).__name__}: {exc}")
+        return {"states": 0, "new_states": 0}
+    for pair in pairs:
+        append_jsonl(log_path, {"target": target_id, "key": pair["key"],
+                                "state": pair["state"], "tactic": pair["tactic"],
+                                "step": pair["step"]})
+    return {"states": len(pairs), "new_states": cache.ingest(pairs, target=target_id)}
 
 
 def read_back(host_path: str) -> str | None:
@@ -66,7 +100,7 @@ def read_back(host_path: str) -> str | None:
 
 
 def run_vibe_target(target: dict, *, main_repo: str, context_pack: str, max_turns: int,
-                    vibe_script: str, run_fn=subprocess.run) -> str | None:
+                    vibe_script: str, run_fn=subprocess.run, state_hints: str = "") -> str | None:
     """Materialize the stub → one headless vibe session (CWD=main_repo) → capture the
     edited file → delete the scratch. Returns the captured file content (or None).
     `run_fn` is injected (subprocess.run) so this is unit-testable without vibe/docker.
@@ -77,7 +111,7 @@ def run_vibe_target(target: dict, *, main_repo: str, context_pack: str, max_turn
     with open(host, "w", encoding="utf-8") as f:
         f.write(target["statement"])
     try:
-        task = build_vibe_task(rel, target["sorry_name"], context_pack)
+        task = build_vibe_task(rel, target["sorry_name"], context_pack, state_hints)
         run_fn([vibe_script, "--agent", "lean", "--auto-approve",
                 "--max-turns", str(max_turns), "-p", task],
                cwd=main_repo, check=False)
@@ -112,16 +146,35 @@ def _run_dir():
     return foundry_root, d
 
 
+def _state_cache(run_dir: str, config_path: str | None):
+    """The proof-state cache, or None when `[autoformalize].state_cache` is off.
+    Persisted next to gate-cache.json so the tick's persist step commits it and the
+    store accumulates across ticks."""
+    from pipeline_lib import AutoformalizeConfig
+    if not AutoformalizeConfig.load(config_path).state_cache:
+        return None
+    from state_cache import StateCache
+    return StateCache(os.path.join(run_dir, "state-cache.json"))
+
+
 def _cmd_run(args) -> int:
     from house_context import extract_signatures
     foundry_root, run_dir = _run_dir()
     vibe_script = os.path.join(foundry_root, "scripts", "leanstral-vibe.sh")
+    cache = _state_cache(run_dir, getattr(args, "config", None))
+    # Cross-target `goal -> tactic` pairs. Empty string until states have recurred, so
+    # a cold or unproductive cache changes the prompt not at all.
+    state_hints = cache.suggestions() if cache is not None else ""
+    if state_hints:
+        print(f"[vibe-run] state cache: offering {state_hints.count('-- goal:')} "
+              f"cross-target suggestion(s)", flush=True)
     for target, root in _iter_targets(args.manifest, args.only):
         target["statement"] = open(os.path.join(root, target["file"]), encoding="utf-8").read()
         pointers = target.get("pointers", [])
         context_pack = extract_signatures(args.main_repo, pointers) if pointers else ""
         cand = run_vibe_target(target, main_repo=args.main_repo, context_pack=context_pack,
-                               max_turns=args.max_turns, vibe_script=vibe_script)
+                               max_turns=args.max_turns, vibe_script=vibe_script,
+                               state_hints=state_hints)
         cand_path = os.path.join(run_dir, f"{args.run_tag}-{target['id']}.candidate")
         with open(cand_path, "w", encoding="utf-8") as f:
             f.write(cand or "")
@@ -141,6 +194,7 @@ def _cmd_gate(args) -> int:
     from probe_lib import append_jsonl
     _, run_dir = _run_dir()
     summary_log = os.path.join(run_dir, f"{args.run_tag}-summary.jsonl")
+    state_cache = _state_cache(run_dir, getattr(args, "config", None))
     for target, _root in _iter_targets(args.manifest, args.only):
         cand_path = os.path.join(run_dir, f"{args.run_tag}-{target['id']}.candidate")
         candidate = read_back(cand_path)
@@ -247,6 +301,19 @@ def _cmd_gate(args) -> int:
                 win = os.path.join(run_dir, f"{args.run_tag}-{target['id']}.lean")
                 with open(win, "w", encoding="utf-8") as f:
                     f.write(candidate)
+                # Proof-state recording: the candidate is final and gated, and this
+                # phase owns the Lean slot. Strictly additive — it cannot change the
+                # verdict already written above.
+                if state_cache is not None:
+                    counts = record_proof_states(
+                        candidate, target_id=target["id"], check_fn=daemon_check,
+                        cache=state_cache,
+                        log_path=os.path.join(run_dir, "proof-states.jsonl"),
+                        log=lambda m: print(f"[vibe-gate] {target['id']}: {m}", flush=True))
+                    summary.update(proof_states=counts["states"],
+                                   new_proof_states=counts["new_states"])
+                    print(f"[vibe-gate] {target['id']}: recorded {counts['states']} "
+                          f"proof state(s), {counts['new_states']} new", flush=True)
             else:
                 summary["outcome"] = "fail_gate"
                 summary["gate_reason"] = g["reason"]
@@ -254,6 +321,32 @@ def _cmd_gate(args) -> int:
         print(f"[vibe-gate] {target['id']}: {summary['outcome']}"
               + (f" ({summary.get('gate_reason')})" if summary.get("gate_reason") else ""),
               flush=True)
+    return 0
+
+
+def _cmd_states(args) -> int:
+    """The measurement, read straight off the store. `cross_target_states` is the number
+    that decides whether consuming the cache is justified: states reached while proving
+    two or more DIFFERENT targets are reusable work; everything else is a proof
+    revisiting its own goal."""
+    from state_cache import StateCache
+    _, run_dir = _run_dir()
+    cache = StateCache(os.path.join(run_dir, "state-cache.json"))
+    report = cache.report()
+    if args.json:
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+        return 0
+    print("proof-state recurrence")
+    print("======================")
+    print(f"distinct states      : {report['distinct_states']}")
+    print(f"total sightings      : {report['total_sightings']}")
+    print(f"recurring (>1 sight) : {report['recurring_states']}")
+    print(f"CROSS-TARGET states  : {report['cross_target_states']}")
+    if not report["distinct_states"]:
+        print("\nstore empty — run some ticks with [autoformalize].state_cache = true")
+    elif not report["cross_target_states"]:
+        print("\nno state has been reached by two different targets yet, so there is no "
+              "reusable work to serve. suggestions() stays silent until there is.")
     return 0
 
 
@@ -269,10 +362,18 @@ def main() -> int:
     # A/B scoreboard arm (Task 2.6): the plain cron path is "cron"; the decompose driver
     # passes "decompose" for its leaf runs. Both Mistral — there is no centaur/claude arm.
     common.add_argument("--arm", default="cron", choices=["cron", "decompose"])
+    # pipeline.toml, for `[autoformalize].state_cache`. Absent ⇒ the feature is off and
+    # both phases behave byte-identically to before it existed.
+    common.add_argument("--config", default=None)
     pr = sub.add_parser("run", parents=[common], help="LSP phase: headless vibe → .candidate")
     pr.add_argument("--max-turns", type=int, default=40)
     sub.add_parser("gate", parents=[common], help="daemon phase: verify .candidate → .lean + summary")
+    rp = sub.add_parser("states", help="proof-state recurrence report (no daemon, no tokens)")
+    rp.add_argument("--config", default=None)
+    rp.add_argument("--json", action="store_true", help="emit the raw report dict")
     args = ap.parse_args()
+    if args.cmd == "states":
+        return _cmd_states(args)
     return _cmd_run(args) if args.cmd == "run" else _cmd_gate(args)
 
 
