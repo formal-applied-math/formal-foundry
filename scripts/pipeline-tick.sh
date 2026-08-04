@@ -132,14 +132,14 @@ else
   #   Phase B (daemon UP): gate the candidate → runs/$TAG-$ID.lean + summary row.
   set +e
   python3 vibe_prove.py run --manifest "$QUEUE" --only "$ID" \
-    --max-turns "$TURNS" --run-tag "$TAG" --main-repo "$MAIN"
+    --max-turns "$TURNS" --run-tag "$TAG" --main-repo "$MAIN" --config "$CFG"
   echo "[tick] flipping the Lean slot back to the daemon for the gate…" >&2
   docker compose -f "$BASE" -f "$LSP" stop lean-lsp >/dev/null 2>&1
   docker compose -f "$BASE" -p docker up -d lean-repl >/dev/null 2>&1
   # Probe the port until the daemon actually serves — NOT `docker logs | grep READY:`,
   # which matches the stale READY from before the restart and races the cold load.
   python3 wait_daemon.py || echo "[tick] WARNING: daemon not ready after probes; gate may fail" >&2
-  python3 vibe_prove.py gate --manifest "$QUEUE" --only "$ID" --run-tag "$TAG" --main-repo "$MAIN"
+  python3 vibe_prove.py gate --manifest "$QUEUE" --only "$ID" --run-tag "$TAG" --main-repo "$MAIN" --config "$CFG"
   set -e
   # Autonomous escalation (the standing rule): the plain path couldn't close it → escalate the
   # SAME target to decompose. Its summary row (written last) supersedes the plain one at step 3.

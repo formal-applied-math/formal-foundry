@@ -100,6 +100,13 @@ class AutoformalizeConfig:
     # the cached verdict on a hit, across attempts + ticks. Off by default (the census is
     # not yet volume-bound); enable once the queue is large enough to pay back.
     gate_cache: bool = False
+    # The same content-addressing one level down: record the INTERMEDIATE states of an
+    # accepted proof and the tactic that advanced each. Two phases in one switch — it
+    # measures first (recording is unconditional once on, and costs the gate phase one
+    # elaboration per tactic step on a daemon it already owns), and only CONSUMES once
+    # states have actually recurred across targets, since `StateCache.suggestions()`
+    # renders nothing until then. Off by default until the recurrence number comes back.
+    state_cache: bool = False
 
     @staticmethod
     def load(path: str | None) -> "AutoformalizeConfig":

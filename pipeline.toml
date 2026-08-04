@@ -73,6 +73,17 @@ triviality_gate = true     # splice `first | rfl | simp` over the sorry at draft
                            # cal-bk-67 class, caught before prove-compute instead of at open-pr)
 # NOTE: the intent-fidelity gate was RETIRED 2026-07-29 (A/B: drift fired 0/62 in telemetry +
 # a clean off-arm run — it never caught anything the issue->stub faithfulness judge missed).
+state_cache = true         # the same content-addressing one level DOWN: record the intermediate
+                           # states of an accepted proof plus the tactic that advanced each, keyed
+                           # by a normalized goal (metavariable numbering and inaccessible-name
+                           # daggers collapsed — a raw hash of goal text almost never hits).
+                           # ON here to MEASURE: the gate phase extracts states from every pass, on
+                           # a daemon it already owns, and writes runs/state-cache.json +
+                           # runs/proof-states.jsonl. Consumption is self-gating — suggestions()
+                           # renders only states two DIFFERENT targets reached, so until that
+                           # number is nonzero the prover's prompt is unchanged. Read it with
+                           # `python3 vibe_prove.py states`. If cross-target recurrence stays 0
+                           # after a few ticks, this is ceremony and comes back out.
 gate_cache = true          # item L: content-address the adversarial gate goals (vacuity/disproof)
                            # and substitute the cached verdict on a hit — 0 tokens, no daemon
                            # call — across attempts + ticks (the persist step commits runs/, so

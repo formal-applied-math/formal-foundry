@@ -68,6 +68,32 @@ its target escalates that same target to the split. Whether decomposition earns 
 tokens is tracked on the live queue in
 [`docs/research/ab-decomposer.md`](docs/research/ab-decomposer.md).
 
+**Cadence, and what actually constrains it.** One tick every `interval_days` (currently
+**2**, cron `17 6 */2 * *`). The binding constraint is not tokens but the **2000-min/month
+Actions quota on a private repo**: a productive tick costs 46–85 min, so ~15 ticks/month
+leaves about half the quota for hands-on `workflow_dispatch` runs, which measured **85% of
+the spend** over the last 30 days. Note the due check carries
+`DUE_GRACE_SECONDS` slack — `last_tick_epoch` is stamped when a run *records*, i.e. the
+cron minute plus the run's duration, so a whole-day threshold would put the next firing
+just short of the interval and silently halve the cadence.
+
+**What the loop remembers between ticks.** Two content-addressed stores under `runs/`,
+both committed by the persist step and both dropped wholesale on a Mathlib/Lean pin bump:
+
+- `gate-cache.json` (`[autoformalize].gate_cache`) — addresses whole adversarial gate
+  goals (vacuity ⊢ False, disproof ⊢ ¬C) and substitutes the cached verdict on a hit, so
+  a stuck issue that keeps redrafting the same statement stops re-paying for the probes.
+- `state-cache.json` (`[autoformalize].state_cache`) — the same idea one level down:
+  after a proof passes, the gate phase replays it prefix by prefix on the daemon it
+  already owns, reads the goal at a spliced `sorry`, and records each
+  `(state → the tactic that advanced it)` under a **normalized** key (metavariable
+  numbering and inaccessible-name daggers collapsed; a raw hash of goal text almost never
+  hits). This is currently a **measurement**: consumption is self-gating, since only
+  states reached by two *different* targets are ever offered to the prover, so until
+  cross-target recurrence is nonzero the prompt is unchanged. Read it with
+  `python3 vibe_prove.py states`; if the number stays zero, the feature is ceremony and
+  comes back out.
+
 Full diagram: [`docs/leanstral-architecture.md`](docs/leanstral-architecture.md).
 How the prover agents are equipped (context pack, loop, lean-lsp-mcp harness, PR
 activation): [`docs/PROVER_SETUP.md`](docs/PROVER_SETUP.md). Why this shape is the
@@ -96,16 +122,16 @@ Decomposition mechanics: [`docs/superpowers/specs/2026-07-18-decomposer-design.m
 
 | Path | What |
 |---|---|
-| `probe/` | the pipeline: `probe.py` (metered prover loop) · `autoformalize.py` + `af_parse`/`af_prompts`/`af_routing`/`af_drafting`/`af_gates` (the issue→stub refill: Claude intent + agentic formalize + kernel/judge gates, split into focused modules re-exported through `autoformalize`) · `pipeline.py` + `pipeline_lib.py` (cadence + token budgeting) · `house_context.py` (system-prompt assembly, injects the live `docs/patterns.md`) · `build_manifest.py` (elaborate-with-sorry target validation) · `assemble.py` (corpus entry assembly) · `scout_index.py` (main-repo declaration index) · `issues.py` (issue sync) + tests |
-| `scripts/` | shell entrypoints: `pipeline-tick.sh` (the cron prove step) · `open-pr.sh` (assemble + open the PR) · `contribute.sh` (manual contribution packet) · `leanstral-vibe.sh` (hands-on vibe + lean-lsp path) · `build-index.sh` (build the scout index) |
-| `targets/` | `queue/` — validated targets (stub `.lean` + `.entry.json` sidecar + `manifest.json`, seeded from `status:ready`+`type:proof` issues) · `informal/` — informal statements |
+| `probe/` | the pipeline (34 test modules, 511 tests, all daemon-free): `probe.py` (metered prover loop) · `vibe_prove.py` (the live prove path: headless vibe ⇄ lean-lsp, then the daemon-phase gate) · `autoformalize.py` + `af_parse`/`af_prompts`/`af_routing`/`af_drafting`/`af_gates` (the issue→stub refill, split into focused modules re-exported through `autoformalize`) · `decompose.py` + `decompose_tick.py` (the lemma-DAG path) · `gate.py` (the kernel-grade candidate gate) · `strengthen.py` (drop hypotheses the theorem does not need) · `gate_cache.py` · `state_cache.py` + `proof_states.py` (proof-state addressing + recurrence measurement) · `pipeline.py` + `pipeline_lib.py` (cadence + token budgeting) · `house_context.py` (system-prompt assembly, injects the live `docs/patterns.md`) · `build_manifest.py` (elaborate-with-sorry target validation) · `assemble.py` (corpus entry assembly) · `scout_index.py` + `embed.py` (declaration index + embedding retrieval) · `issues.py` (issue sync) |
+| `scripts/` | shell entrypoints: `pipeline-tick.sh` (the cron prove step) · `decompose-tick.sh` (the lemma-DAG tick) · `open-pr.sh` (assemble + open the PR) · `contribute.sh` (manual contribution packet) · `leanstral-vibe.sh` (hands-on vibe + lean-lsp path) · `slot-switch.sh` (the daemon ⇄ lean-lsp flip) · `build-index.sh` / `build-embeddings.sh` (scout index + embedding cache) |
+| `targets/` | `queue/` — validated targets (stub `.lean` + `.entry.json` sidecar + `manifest.json`, seeded from `status:ready`+`type:proof` issues). Its [`README`](targets/queue/README.md) carries the authoring bar, including the two ways a *faithful* stub is still empty: instantiating an already-∀-quantified corpus lemma, and restating a Mathlib lemma in finance names. · `informal/` — informal statements |
 | `index/` | the scout index of the main repo: `const_dep.jsonl`, `types.jsonl`, `PIN` |
 | `scout-lake/` | a minimal Lake project used to build the index against the pins |
 | `runs/` | per-tick telemetry JSONL + candidate `.lean` files |
 | `reports/` | calibration reports |
 | `docs/` | `overview.md` · `leanstral-architecture.md` · `PROVER_SETUP.md` · `research/` · `superpowers/` (specs + plans) |
 | `pipeline.toml` · `pipeline_state.json` | cadence + token-budget config; spent-budget/attempt state |
-| `.github/workflows/pipeline.yml` | the scheduled cron (one tick every `interval_days`) |
+| `.github/workflows/pipeline.yml` | the scheduled cron (one tick every `interval_days`, currently 2 days) |
 
 ## Runbook
 
@@ -137,7 +163,17 @@ On a pass, the scheduled workflow assembles the proof and — **only with the
 [#120](https://github.com/raphaelrrcoelho/formal-mathfin/pull/120), contango,
 opened 2026-07-11). Without the token it stops at candidate-notify and opens no
 PR. **An opened PR is a *proposal*, not a finished contribution** — it passes CI
-but is unmerged, R reviews it under the 8-lens bar and revises before merge (both
-early autoform PRs are currently CONFLICTING as `main` moved on). A green,
-opened, or even conflicting PR is not proof of quality; the merge is. Activation +
-the PAT scoping: [`docs/PROVER_SETUP.md`](docs/PROVER_SETUP.md).
+but is unmerged, and R reviews it under the 8-lens bar and revises before merge.
+A green or opened PR is not proof of quality; the merge is.
+
+**Where the loop actually stands.** Four autoformalized proofs have been merged into
+the corpus (closing #66, #85, #161, #162) — counted mechanically from the `provenance`
+markers in the corpus by `formal-mathfin`'s `formalization.yaml` generator, never
+hand-asserted. The review round that landed them also **closed four autoform duplicates**
+and surfaced the failure mode worth knowing about: 4 of 4 drafts asserted a division
+hypothesis their theorem did not need, and every automated gate passed them, because the
+prompt forbade *dropping* a hypothesis and never forbade *adding* one. A guard the proof
+genuinely consumes can still be unnecessary, and neither an unused-variable warning nor a
+deletion probe finds it — only dropping it and re-proving does. That check now runs in
+`strengthen.py`. Activation + the PAT scoping:
+[`docs/PROVER_SETUP.md`](docs/PROVER_SETUP.md).
