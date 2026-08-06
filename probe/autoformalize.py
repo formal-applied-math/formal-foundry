@@ -4,7 +4,7 @@ Turns the next `status:ready`+`type:proof` GitHub issue into a *validated* queue
 target (stub `.lean` + `.entry.json` + manifest row) so the existing prover always
 has something to prove. Two engines: Claude drafts the statement, formalizes it
 agentically (`claude -p` + the lean-lsp MCP, self-validating to elaboration), and
-judges faithfulness + roundtrips; the Leanstral leaf-prover runs the kernel gates
+judges faithfulness; the Leanstral leaf-prover runs the kernel gates
 (hypothesis-rejection, disproof) and the proof itself.
 
 Design of record: docs/superpowers/specs/2026-07-12-issue-to-stub-autoformalizer-design.md,
