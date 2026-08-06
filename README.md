@@ -77,8 +77,9 @@ the spend** over the last 30 days. Note the due check carries
 cron minute plus the run's duration, so a whole-day threshold would put the next firing
 just short of the interval and silently halve the cadence.
 
-**What the loop remembers between ticks.** Two content-addressed stores under `runs/`,
-both committed by the persist step and both dropped wholesale on a Mathlib/Lean pin bump:
+**What the loop remembers between ticks.** Three stores under `runs/`, all committed
+by the persist step and all dropped wholesale on a Mathlib/Lean pin bump (the first two
+content-addressed, the third keyed by target):
 
 - `gate-cache.json` (`[autoformalize].gate_cache`) — addresses whole adversarial gate
   goals (vacuity ⊢ False, disproof ⊢ ¬C) and substitutes the cached verdict on a hit, so
@@ -93,6 +94,20 @@ both committed by the persist step and both dropped wholesale on a Mathlib/Lean 
   cross-target recurrence is nonzero the prompt is unchanged. Read it with
   `python3 vibe_prove.py states`; if the number stays zero, the feature is ceremony and
   comes back out.
+- `experience.json` (`[autoformalize].experience`) — a per-target **rolling notebook** of
+  FAILED attempts (item K). The cron already retries a target across ticks, but each retry
+  re-walks the same dead ends: the summary log records that attempt 3 died `fail_gate` and
+  nothing carries *what was tried* into attempt 4. On a failure the gate phase folds that
+  attempt into the target's notebook — feeding the summariser the prior notebook plus the
+  new attempt and taking its reply as the REPLACEMENT, so the block stays bounded instead
+  of growing into the prompt — and the next tick renders it into the prover task, last,
+  behind the premises, with a rotating diversity instruction. Silent on a cold store, and
+  fail-open at every step (no key, a raising model, a corrupt file all degrade to a
+  mechanical digest), because this hangs off the failure path and must never *be* a
+  failure. Shape adapted from Axiomatic AI's `ExperienceProcessor`
+  ([harvest](docs/research/2026-08-06-axiomatic-harvest.md)). Also a measurement: read it
+  with `python3 vibe_prove.py experience`; if `retried targets` stays zero then no attempt
+  has ever read a notebook and it comes back out.
 
 Full diagram: [`docs/leanstral-architecture.md`](docs/leanstral-architecture.md).
 How the prover agents are equipped (context pack, loop, lean-lsp-mcp harness, PR
@@ -122,7 +137,7 @@ Decomposition mechanics: [`docs/superpowers/specs/2026-07-18-decomposer-design.m
 
 | Path | What |
 |---|---|
-| `probe/` | the pipeline (34 test modules, 511 tests, all daemon-free): `probe.py` (metered prover loop) · `vibe_prove.py` (the live prove path: headless vibe ⇄ lean-lsp, then the daemon-phase gate) · `autoformalize.py` + `af_parse`/`af_prompts`/`af_routing`/`af_drafting`/`af_gates` (the issue→stub refill, split into focused modules re-exported through `autoformalize`) · `decompose.py` + `decompose_tick.py` (the lemma-DAG path) · `gate.py` (the kernel-grade candidate gate) · `strengthen.py` (drop hypotheses the theorem does not need) · `gate_cache.py` · `state_cache.py` + `proof_states.py` (proof-state addressing + recurrence measurement) · `pipeline.py` + `pipeline_lib.py` (cadence + token budgeting) · `house_context.py` (system-prompt assembly, injects the live `docs/patterns.md`) · `build_manifest.py` (elaborate-with-sorry target validation) · `assemble.py` (corpus entry assembly) · `scout_index.py` + `embed.py` (declaration index + embedding retrieval) · `issues.py` (issue sync) |
+| `probe/` | the pipeline (35 test modules, 533 tests, all daemon-free): `probe.py` (metered prover loop) · `vibe_prove.py` (the live prove path: headless vibe ⇄ lean-lsp, then the daemon-phase gate) · `autoformalize.py` + `af_parse`/`af_prompts`/`af_routing`/`af_drafting`/`af_gates` (the issue→stub refill, split into focused modules re-exported through `autoformalize`) · `decompose.py` + `decompose_tick.py` (the lemma-DAG path) · `gate.py` (the kernel-grade candidate gate) · `strengthen.py` (drop hypotheses the theorem does not need) · `gate_cache.py` · `state_cache.py` + `proof_states.py` (proof-state addressing + recurrence measurement) · `experience.py` (the cross-tick rolling notebook of failed attempts) · `pipeline.py` + `pipeline_lib.py` (cadence + token budgeting) · `house_context.py` (system-prompt assembly, injects the live `docs/patterns.md`) · `build_manifest.py` (elaborate-with-sorry target validation) · `assemble.py` (corpus entry assembly) · `scout_index.py` + `embed.py` (declaration index + embedding retrieval) · `issues.py` (issue sync) |
 | `scripts/` | shell entrypoints: `pipeline-tick.sh` (the cron prove step) · `decompose-tick.sh` (the lemma-DAG tick) · `open-pr.sh` (assemble + open the PR) · `contribute.sh` (manual contribution packet) · `leanstral-vibe.sh` (hands-on vibe + lean-lsp path) · `slot-switch.sh` (the daemon ⇄ lean-lsp flip) · `build-index.sh` / `build-embeddings.sh` (scout index + embedding cache) |
 | `targets/` | `queue/` — validated targets (stub `.lean` + `.entry.json` sidecar + `manifest.json`, seeded from `status:ready`+`type:proof` issues). Its [`README`](targets/queue/README.md) carries the authoring bar, including the two ways a *faithful* stub is still empty: instantiating an already-∀-quantified corpus lemma, and restating a Mathlib lemma in finance names. · `informal/` — informal statements |
 | `index/` | the scout index of the main repo: `const_dep.jsonl`, `types.jsonl`, `PIN` |

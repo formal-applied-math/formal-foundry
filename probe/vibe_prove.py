@@ -41,13 +41,19 @@ def scratch_paths(main_repo: str, target_id: str) -> tuple[str, str]:
 
 
 def build_vibe_task(stub_relpath: str, sorry_name: str, context_pack: str = "",
-                    state_hints: str = "") -> str:
+                    state_hints: str = "", experience: str = "") -> str:
     """The `-p` task for vibe. leanstral-vibe.sh prepends the house doctrine, so this
     is the per-target instruction + the consume-don't-reprove pointer pack only.
 
     `state_hints` is the proof-state cache's contribution: `goal -> tactic` pairs that
     closed the same state while proving a DIFFERENT target. Empty unless states have
-    actually recurred across targets, so an unproven cache stays silent."""
+    actually recurred across targets, so an unproven cache stays silent.
+
+    `experience` is the rolling notebook for THIS target (item K) — what previous ticks
+    tried and how they died. Empty on a target's first attempt, so a cold memory leaves
+    the task byte-identical. It goes LAST, after the premises: it is the weakest-authority
+    block in the prompt (a record of failures, not a source of truth), and the statement
+    plus the context pack must not be read through it."""
     parts = [
         f"TASK: The file {stub_relpath} contains `theorem {sorry_name}` with a single `sorry`.",
         f"Prove it. Use `lean_goal` on {stub_relpath} to read the proof state, then edit that "
@@ -62,6 +68,8 @@ def build_vibe_task(stub_relpath: str, sorry_name: str, context_pack: str = "",
     if state_hints:
         parts.append("\n── PROOF STATES ALREADY SEEN (a tactic that closed each; verify, "
                      "do not trust) ──\n" + state_hints)
+    if experience:
+        parts.append(experience)
     return "\n".join(parts)
 
 
@@ -100,7 +108,8 @@ def read_back(host_path: str) -> str | None:
 
 
 def run_vibe_target(target: dict, *, main_repo: str, context_pack: str, max_turns: int,
-                    vibe_script: str, run_fn=subprocess.run, state_hints: str = "") -> str | None:
+                    vibe_script: str, run_fn=subprocess.run, state_hints: str = "",
+                    experience: str = "") -> str | None:
     """Materialize the stub → one headless vibe session (CWD=main_repo) → capture the
     edited file → delete the scratch. Returns the captured file content (or None).
     `run_fn` is injected (subprocess.run) so this is unit-testable without vibe/docker.
@@ -111,7 +120,8 @@ def run_vibe_target(target: dict, *, main_repo: str, context_pack: str, max_turn
     with open(host, "w", encoding="utf-8") as f:
         f.write(target["statement"])
     try:
-        task = build_vibe_task(rel, target["sorry_name"], context_pack, state_hints)
+        task = build_vibe_task(rel, target["sorry_name"], context_pack, state_hints,
+                               experience)
         run_fn([vibe_script, "--agent", "lean", "--auto-approve",
                 "--max-turns", str(max_turns), "-p", task],
                cwd=main_repo, check=False)
@@ -157,11 +167,40 @@ def _state_cache(run_dir: str, config_path: str | None):
     return StateCache(os.path.join(run_dir, "state-cache.json"))
 
 
+def _experience_store(run_dir: str, config_path: str | None):
+    """The per-target rolling notebook, or None when `[autoformalize].experience` is off.
+    Persisted next to the other two stores so the tick's persist step commits it and the
+    memory accumulates across ticks (it is worthless within one)."""
+    from pipeline_lib import AutoformalizeConfig
+    if not AutoformalizeConfig.load(config_path).experience:
+        return None
+    from experience import ExperienceStore
+    return ExperienceStore(os.path.join(run_dir, "experience.json"))
+
+
+def _summarizer():
+    """The chat backend that rolls a notebook, or None to use the mechanical digest.
+
+    Leanstral is already the tick's authenticated model, and this is a short prose call —
+    no new secret, no new dependency. `EXPERIENCE_LLM=0` forces the mechanical path, which
+    is what the tests and any keyless run take.
+    """
+    if os.environ.get("EXPERIENCE_LLM", "1") == "0":
+        return None
+    api_key = os.environ.get("MISTRAL_API_KEY")
+    if not api_key:
+        return None
+    from probe import mistral_chat
+    # Small, cheap, and deterministic-ish: this is bookkeeping, not proving.
+    return lambda msgs: mistral_chat(msgs, api_key=api_key, max_tokens=800, temperature=0.2)
+
+
 def _cmd_run(args) -> int:
     from house_context import extract_signatures
     foundry_root, run_dir = _run_dir()
     vibe_script = os.path.join(foundry_root, "scripts", "leanstral-vibe.sh")
     cache = _state_cache(run_dir, getattr(args, "config", None))
+    memory = _experience_store(run_dir, getattr(args, "config", None))
     # Cross-target `goal -> tactic` pairs. Empty string until states have recurred, so
     # a cold or unproductive cache changes the prompt not at all.
     state_hints = cache.suggestions() if cache is not None else ""
@@ -172,9 +211,13 @@ def _cmd_run(args) -> int:
         target["statement"] = open(os.path.join(root, target["file"]), encoding="utf-8").read()
         pointers = target.get("pointers", [])
         context_pack = extract_signatures(args.main_repo, pointers) if pointers else ""
+        notebook = memory.render(target["id"]) if memory is not None else ""
+        if notebook:
+            print(f"[vibe-run] {target['id']}: carrying {memory.attempts(target['id'])} "
+                  f"prior attempt(s) of experience", flush=True)
         cand = run_vibe_target(target, main_repo=args.main_repo, context_pack=context_pack,
                                max_turns=args.max_turns, vibe_script=vibe_script,
-                               state_hints=state_hints)
+                               state_hints=state_hints, experience=notebook)
         cand_path = os.path.join(run_dir, f"{args.run_tag}-{target['id']}.candidate")
         with open(cand_path, "w", encoding="utf-8") as f:
             f.write(cand or "")
@@ -195,6 +238,8 @@ def _cmd_gate(args) -> int:
     _, run_dir = _run_dir()
     summary_log = os.path.join(run_dir, f"{args.run_tag}-summary.jsonl")
     state_cache = _state_cache(run_dir, getattr(args, "config", None))
+    memory = _experience_store(run_dir, getattr(args, "config", None))
+    summarizer = _summarizer() if memory is not None else None
     for target, _root in _iter_targets(args.manifest, args.only):
         cand_path = os.path.join(run_dir, f"{args.run_tag}-{target['id']}.candidate")
         candidate = read_back(cand_path)
@@ -205,6 +250,7 @@ def _cmd_gate(args) -> int:
         summary = {"target": target["id"], "stream": target.get("stream", ""),
                    "ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "harness": "vibe",
                    "arm": getattr(args, "arm", "cron"), "tokens": 0}
+        attempt_errors: list = []                 # gate errors, for the experience notebook
         if not candidate:
             summary["outcome"] = "error"          # infra miss (no capture) → retryable
         elif "sorry" in candidate:
@@ -317,6 +363,19 @@ def _cmd_gate(args) -> int:
             else:
                 summary["outcome"] = "fail_gate"
                 summary["gate_reason"] = g["reason"]
+                attempt_errors = g.get("errors") or []
+        # item K: fold this attempt into the target's notebook so the NEXT tick starts
+        # informed. Failures only — a pass ends the target. `error` is excluded too: a
+        # missing capture is an infra miss with no proof lesson in it, and recording it
+        # would burn a diversity rotation on noise. Strictly after the verdict is
+        # written, and fail-open inside `record`, so memory cannot change an outcome.
+        if memory is not None and summary["outcome"] in ("max_rounds", "fail_gate"):
+            memory.record(target["id"],
+                          {"outcome": summary["outcome"],
+                           "reason": summary.get("gate_reason", ""),
+                           "errors": attempt_errors},
+                          summarize_fn=summarizer)
+            summary["experience_attempts"] = memory.attempts(target["id"])
         append_jsonl(summary_log, summary)
         print(f"[vibe-gate] {target['id']}: {summary['outcome']}"
               + (f" ({summary.get('gate_reason')})" if summary.get("gate_reason") else ""),
@@ -350,6 +409,32 @@ def _cmd_states(args) -> int:
     return 0
 
 
+def _cmd_experience(args) -> int:
+    """Is the notebook earning its tokens? `retried_targets` is the number that decides:
+    memory only pays on a target the cron attempts more than once, so if every target is
+    one-and-done the feature is ceremony and comes back out (same bar as `states`)."""
+    from experience import ExperienceStore
+    _, run_dir = _run_dir()
+    store = ExperienceStore(os.path.join(run_dir, "experience.json"))
+    report = store.report()
+    if args.json:
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+        return 0
+    print("experience memory")
+    print("=================")
+    print(f"targets carried   : {report['targets']}")
+    print(f"retried targets   : {report['retried_targets']}")
+    print(f"total attempts    : {report['total_attempts']}")
+    print(f"deepest chain     : {report['max_attempts']}")
+    print(f"stored characters : {report['chars']}")
+    if not report["targets"]:
+        print("\nstore empty — run some ticks with [autoformalize].experience = true")
+    elif not report["retried_targets"]:
+        print("\nno target has failed twice yet, so no attempt has ever READ a notebook. "
+              "The memory is write-only until that number moves.")
+    return 0
+
+
 def main() -> int:
     import argparse
     ap = argparse.ArgumentParser(description="vibe ⇄ lean-lsp-mcp prove harness (two phases)")
@@ -371,9 +456,13 @@ def main() -> int:
     rp = sub.add_parser("states", help="proof-state recurrence report (no daemon, no tokens)")
     rp.add_argument("--config", default=None)
     rp.add_argument("--json", action="store_true", help="emit the raw report dict")
+    xp = sub.add_parser("experience", help="experience-memory report (no daemon, no tokens)")
+    xp.add_argument("--json", action="store_true", help="emit the raw report dict")
     args = ap.parse_args()
     if args.cmd == "states":
         return _cmd_states(args)
+    if args.cmd == "experience":
+        return _cmd_experience(args)
     return _cmd_run(args) if args.cmd == "run" else _cmd_gate(args)
 
 

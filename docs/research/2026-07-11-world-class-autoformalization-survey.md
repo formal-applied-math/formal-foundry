@@ -128,6 +128,14 @@ build ~2 GB); opt-in **REPL-backed `lean_multi_attempt` (~5x faster,
 maintainer estimate)** for cheap candidate fan-out. REFUTED (0-3): the claim
 that Ax-Prover/Numina-Lean-Agent/MerLean/M2F build on it — our choice stands on
 its own merits, not on lab adoption.
+**CORRECTED 2026-08-06 (Ax-Prover only):** that refutation does not survive
+reading their code. Ax-Prover's Lean tool surface is `lean_diagnostic_messages` /
+`lean_goal` / `lean_leansearch` / `lean_loogle` — lean-lsp-mcp's tool names,
+exactly. Whether they vendor the package or reimplement its interface is still
+unconfirmed, so the correct verdict is *same tool surface, provenance
+unconfirmed*, not "does not build on it". The other three are untouched, and the
+conclusion (our harness choice stands on its own merits) is unaffected.
+See [`2026-08-06-axiomatic-harvest.md`](2026-08-06-axiomatic-harvest.md).
 
 **Statement-side faithfulness** [mixed]: typecheck acceptance is an
 insufficient gate [verified]; concrete tools: BEqL/BEq+ symbolic equivalence,
