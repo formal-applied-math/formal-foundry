@@ -192,7 +192,7 @@ Sources: [Autoformalization with LLMs (Wu 2022)](https://arxiv.org/abs/2205.1261
 AlphaProof disprove-and-retire ([Nature](https://www.nature.com/articles/s41586-025-09833-y)),
 DeepSeek-Prover-V2 hypothesis rejection ([2504.21801](https://arxiv.org/abs/2504.21801)).
 
-### D. Verification throughput — infra; CI-side (survey #1's unaddressed half)
+### D. Verification throughput — infra; CI-side [LANDED — `probe/verify_pool.py` + `batch-verify.yml`]
 
 pass@k samples k candidates but verification serializes through the one lean-repl
 daemon (forced locally by the memory doctrine — one Lean process). The batch-verify
@@ -207,6 +207,20 @@ This is what makes a higher `fanout` — and the decomposition loop's parallel
 leaf-proving + faster corpus `ledger verify --exec` sweeps — affordable (plan
 Phase 3.1). Sources: [Kimina Lean Server](https://huggingface.co/blog/AI-MO/kimina-prover-rl),
 [lean-lsp-mcp](https://github.com/oOo0oOo/lean-lsp-mcp).
+
+**Shipped** as `probe/verify_pool.py` (a generic pool scheduling tasks across
+reusable workers that hold a warm Lean env; order-preserving, and an OOM/crash
+recycles the worker and retries up to `max_recycle`) driven by
+`.github/workflows/batch-verify.yml`, **`workflow_dispatch` only** — never on the
+cron, because N Lean processes overcommit a small box. It parallelizes
+elaboration/verification (the leaf gate, the `ledger verify` sweep), NOT the
+agentic prove, which keeps its single lean-lsp slot. The real Lean worker path is
+CI-only by construction and cannot be exercised on the dev box; the scheduling and
+recycle logic is unit-tested with fakes (`test_verify_pool.py`).
+Corroborated externally 2026-08-06: Axiomatic run `max_concurrent_builds: 12` with
+no sample-level fan-out at all — parallelism in builds, not in sampling, is the
+same call we made ([harvest](research/2026-08-06-axiomatic-harvest.md)).
+This entry was missing its LANDED marker until that harvest; the code predates it.
 
 ### E. Learned premise retrieval — next rung on the context packs
 
