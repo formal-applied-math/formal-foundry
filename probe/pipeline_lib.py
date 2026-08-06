@@ -70,7 +70,9 @@ class AutoformalizeConfig:
     """Config for the issue->stub refill phase (the `[autoformalize]` block).
 
     The tick runs `refill` when the queue has no unattempted target: claude
-    drafts+judges+roundtrips a stub from the next ready issue, leanstral gates it.
+    drafts+judges a stub from the next ready issue, leanstral gates it. (No
+    roundtrip back-translation — that is backlog item G, still unbuilt; both
+    docstrings claimed it until 2026-08-06.)
     `enabled=false` reverts the pipeline to a hand-seeded queue.
     """
     enabled: bool = True

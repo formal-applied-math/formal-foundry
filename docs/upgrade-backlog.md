@@ -84,6 +84,44 @@ so — that is a perfectly good state for an item to be in, it just is not a pla
 
 ---
 
+## Status of every lettered item (swept against the code 2026-08-06)
+
+This backlog had drifted badly behind the repo: of the 17 lettered items, **nine
+were carried as pending while already being built**. The drift is not cosmetic —
+it cost a wrong read of an external signal during the Axiomatic harvest (item D's
+CI verify pool was written up as an outstanding lever when `verify_pool.py` has
+shipped it for weeks), and an unbuilt roundtrip was being *claimed* by two module
+docstrings. Every row below was checked against the named file, not against a
+memory of the last session.
+
+| | Item | Status | Where |
+|---|---|---|---|
+| A | Harness config | done | `docs/PROVER_SETUP.md` |
+| B/B′ | Budget shape + depth retune | applied | `pipeline.toml` |
+| C | Statement-side kernel filters | **landed** | `autoformalize.vacuity` / `.disproof` |
+| D | Verification throughput | **landed** | `probe/verify_pool.py` + `batch-verify.yml` |
+| E | Learned premise retrieval | **landed** | `probe/embed.py`, `retrieval_backend` |
+| F | Subgoal decomposition | **landed** | `probe/decompose.py`, `[decompose]` |
+| G | Roundtrip + judge | **partial** | judge built; **roundtrip unbuilt** |
+| H | Variant warm-up | **not built** | — (correctly pending) |
+| I | Frontier drafter | landed | Claude is the sole drafter |
+| J | Statement-integrity pin | **landed** | `gate.gate(statement=…)` |
+| K | Cross-tick lessons-learned | **landed** | `probe/experience.py` |
+| L | Goal/disproof cache + timeouts | **landed** | `probe/gate_cache.py` |
+| M | Instance-probe gate | **landed** | `af_gates.instance_probe_rejection` |
+| N | Run-record provenance schema | **landed** | `schema/run_record.v1.json` |
+| O–Q | Review-engine adoptions | main repo | not this pipe |
+| R–V | 07-31 review round | built | see each entry |
+
+**Genuinely open: H, and the roundtrip half of G.** Both were already gated on
+the same condition (un-curated statements, not on the current roadmap), so the
+practical effect of this sweep is not new work — it is that the next harvest
+reads a backlog that means what it says.
+
+**Keeping it honest**: a LANDED marker is only worth as much as the check behind
+it. Each one above names the file that implements it; add the marker in the same
+commit as the code, and when an item is partial, say which half.
+
 ## Already shipped — don't re-do
 
 Grounding the survey's backlog against the code, these are done:
@@ -155,7 +193,7 @@ no longer exist (comments only).
   40. Record the call + its real-queue evidence here.
 - Sources: [Leanstral 1.5](https://mistral.ai/news/leanstral-1-5/), survey #2.
 
-### C. Statement-side faithfulness filters — Leanstral-native; DESIGNED, ready to build
+### C. Statement-side faithfulness filters [LANDED — `autoformalize.vacuity`/`disproof`]
 
 The two *cheap, kernel-grade* filters from survey #6. Both are **proving** tasks,
 so Leanstral does them with no new model:
@@ -165,6 +203,14 @@ so Leanstral does them with no new model:
   contradictory (the theorem is vacuously true) → retire the target.
 - **Disproof / disprove-and-retire** — attempt to prove `¬ Concl` (AlphaProof's
   negation transition). If it succeeds, the statement is false as written → retire.
+
+**Shipped**: `autoformalize.vacuity` / `autoformalize.disproof`, run as the kernel
+gate battery in the refill phase, with the b078f9f statement pin
+(`af_gates._probed_conclusion`) blocking the reverted-goal false positive and
+`gate_cache` (item L) substituting a cached verdict on a repeat. Note the scope
+of THIS item is only the two kernel-grade probes; the LLM-mediated checks
+(back-translation roundtrip, multi-variant drafting) were always item G and the
+survey's item 6, and the roundtrip half of those is still unbuilt — see G.
 
 **Design** — a new `probe/faithfulness.py`, reusing `mistral_chat` + `daemon_check`
 from `probe.py`:
@@ -222,7 +268,7 @@ no sample-level fan-out at all — parallelism in builds, not in sampling, is th
 same call we made ([harvest](research/2026-08-06-axiomatic-harvest.md)).
 This entry was missing its LANDED marker until that harvest; the code predates it.
 
-### E. Learned premise retrieval — next rung on the context packs
+### E. Learned premise retrieval [LANDED — `probe/embed.py`, `retrieval_backend = "embedding"`]
 
 The current packs use static `const_dep` graph closure. A BM25/embedding retriever
 over `index/types.jsonl` would surface library lemmas R *didn't* name in a target's
@@ -239,7 +285,7 @@ These require a general reasoning model *above* Leanstral. Kept here, designed, 
 the day we decide to add one there is no re-discovery. All must respect the hard
 rule: any model sees only public-corpus + fresh-textbook statements.
 
-### F. Subgoal decomposition (Draft-Sketch-Prove) — the biggest capability jump
+### F. Subgoal decomposition (Draft-Sketch-Prove) [LANDED — `probe/decompose.py`, `[decompose] enabled`]
 
 The single largest capability step (survey #3), and what the most productive ops in
 existence run on ([Gauss](https://www.math.inc/gauss), Aristotle).
@@ -260,7 +306,7 @@ existence run on ([Gauss](https://www.math.inc/gauss), Aristotle).
   [DeepSeek-Prover-V2 (2504.21801)](https://arxiv.org/abs/2504.21801),
   [Aristotle (2510.01346)](https://arxiv.org/abs/2510.01346), Gauss (above).
 
-### G. Roundtrip + judge faithfulness — the general-model half of (C)
+### G. Roundtrip + judge faithfulness [PARTIAL — judge BUILT; roundtrip NOT built]
 
 Beyond the two kernel-grade filters in C, the LLM-mediated faithfulness checks:
 formalize → informalize → re-formalize → equivalence-check, and an LLM
@@ -268,6 +314,22 @@ faithfulness judge that filters unaligned statements. **Why the reasoner:**
 informalization and semantic-equivalence judgment are not proving tasks. Parked on
 the same condition as C (un-curated statements; not on the current roadmap).
 Sources: survey #6 (faithfulness metrics), Harmonic's judge (Aristotle).
+
+**Half shipped, half not, and the docstrings lied about it.** The judge IS built
+(`af_drafting.judge_faithfulness` + `af_prompts.JUDGE_SYSTEM`, called at
+`autoformalize.py:372`, failing CLOSED on an unparseable verdict). The
+**roundtrip is not**: there is no informalize step, no re-formalize, no
+equivalence check, and no prompt for any of them — yet `autoformalize.py`'s module
+docstring said the drafter "judges faithfulness + roundtrips" and
+`AutoformalizeConfig`'s said it "drafts+judges+roundtrips". Both corrected
+2026-08-06. A docstring claiming a faithfulness check that does not exist is the
+worst class of drift in this repo: the whole gate battery's value is that you can
+read off what was actually checked.
+
+**What is actually left here**: formalize → informalize → re-formalize →
+equivalence-check. Still gated on the same condition (un-curated statements),
+so still not scheduled — but now it is unbuilt-and-labelled rather than
+unbuilt-and-claimed.
 
 ### H. Variant warm-up (cheap TTRL analogue) — partial reasoner [UNTRACED]
 
@@ -415,7 +477,7 @@ reproducible in tests. Off by default; ON in `pipeline.toml` to MEASURE.
 **Kill criterion:** `python3 vibe_prove.py experience` — if `retried targets`
 stays 0, no attempt has ever read a notebook and this comes back out.
 
-### L. Goal/disproof cache + hard timeouts [no reasoner; volume-gated]
+### L. Goal/disproof cache + hard timeouts [LANDED — `probe/gate_cache.py`, `gate_cache = true`]
 
 Content-hash of the elaborated goal state → cache proof/disproof outcomes across
 attempts and issues (gate probes first: vacuity/disproof re-run from scratch every
@@ -425,7 +487,7 @@ their guard "to prevent the system from stalling on intractable or hallucinated
 goals." Value scales with queue volume and with decompose's leaf count; behind
 I/J/K until the census says otherwise. Synergy with D (CI pool).
 
-### M. Instance-probe gate on the defs route [drafter task; SP4-adjacent]
+### M. Instance-probe gate on the defs route [LANDED — `af_gates.instance_probe_rejection`]
 
 Nexus's OEIS anti-misformalization guard, transplanted: for each new `def`, the
 draft must include 1–2 concrete-instance `example`s (explicit small vector /
@@ -435,7 +497,7 @@ sup-vs-max, measure choice) that the faithfulness judge and the vacuity/disproof
 probes both miss — exactly the class the #73 maxDD `∀c` episode exposed. Emit
 into the seed next to the defs; gate on their elaboration like any stub content.
 
-### N. Run-record provenance schema [infra; low-medium]
+### N. Run-record provenance schema [LANDED — `schema/run_record.v1.json` + `probe/provenance.py`]
 
 TauCetiData's shape, applied to our telemetry: one record per
 (target × attempt × stage × model) with `prompt_sha`, `diff/candidate_sha`,
