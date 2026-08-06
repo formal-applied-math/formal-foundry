@@ -59,9 +59,16 @@ runtime:
 Two details worth reading twice. `max_tool_calling_iterations: 1` — a *tight*
 tool budget per node; they buy iterations, not tool sprawl. And
 `max_concurrent_builds: 12` — their parallelism lives in **builds**, not in
-sampling. That is item D (the CI verify pool) confirmed from the outside, and it
-is the one thing our one-Lean-process memory doctrine structurally cannot do on
-the local box.
+sampling.
+
+That second one is **item D, which we already built** — `probe/verify_pool.py`
+(a recycling pool of warm `lake env lean` workers) driven by the
+`workflow_dispatch`-only `batch-verify.yml`, deliberately off the cron because N
+Lean processes overcommit a small box. So this is external corroboration of a
+shipped design, not a new lever: the one-Lean-process memory doctrine holds
+locally and the parallelism lives on CI, which is exactly where their 12
+concurrent builds put it. Nothing to do here — the backlog entry was simply
+missing its LANDED marker, and this harvest is where that was noticed.
 
 ## The numbers
 
