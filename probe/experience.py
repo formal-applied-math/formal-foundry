@@ -180,26 +180,44 @@ class ExperienceStore:
         self._save()
         return rolled
 
-    def render(self, target: str) -> str:
+    def forget(self, target: str) -> None:
+        """Drop `target`'s notebook, if it has one.
+
+        A target that succeeded has no next attempt to inform, and if it ever regresses
+        it should start clean rather than inherit the notes of attempts that eventually
+        worked — those read as ruled-out approaches when one of them was the answer.
+        """
+        if self._entries.pop(target, None) is not None:
+            self._save()
+
+    def render(self, target: str, *, nudge: bool = True) -> str:
         """The prompt block for `target`, or `""` when there is nothing to say.
 
         Empty on a cold store, so a target on its first attempt gets a prompt identical
         to the pre-memory one — the same silent-until-useful discipline as
         `StateCache.suggestions()`.
+
+        `nudge=False` omits the rotating diversity instruction, for callers that already
+        supply one. The DRAFT path is such a caller: `af_routing.render_prior_lessons`
+        has owned the rotation there since before this store existed, and two rotations
+        in one prompt would sooner or later contradict each other.
         """
         notebook = self.get(target).strip()
         if not notebook:
             return ""
         if len(notebook) > MAX_EXPERIENCE_CHARS:
             notebook = "[...earlier attempts elided...]\n" + notebook[-MAX_EXPERIENCE_CHARS:]
+        block = ("\n── LESSONS FROM PREVIOUS ATTEMPTS AT THIS TARGET ──\n"
+                 "These are notes from earlier ticks that failed. Do not repeat a ruled-out "
+                 "approach; the notes are a record, not a specification — the theorem "
+                 "statement above still governs.\n"
+                 f"{notebook}")
+        if not nudge:
+            return block
         # attempts-1 so the first retry reads instruction 0 rather than skipping it.
-        nudge = DIVERSITY_INSTRUCTIONS[(self.attempts(target) - 1) % len(DIVERSITY_INSTRUCTIONS)]
-        return ("\n── LESSONS FROM PREVIOUS ATTEMPTS AT THIS TARGET ──\n"
-                "These are notes from earlier ticks that failed. Do not repeat a ruled-out "
-                "approach; the notes are a record, not a specification — the theorem "
-                "statement above still governs.\n"
-                f"{notebook}\n"
-                f"THIS ATTEMPT: {nudge}")
+        rotation = DIVERSITY_INSTRUCTIONS[
+            (self.attempts(target) - 1) % len(DIVERSITY_INSTRUCTIONS)]
+        return f"{block}\nTHIS ATTEMPT: {rotation}"
 
     def report(self) -> dict:
         """Whether the memory is earning its tokens: targets carried, and how deep the

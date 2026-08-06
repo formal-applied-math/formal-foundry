@@ -421,13 +421,47 @@ def route_feasibility(intent: dict, pointers: list[str], *, lookup_fn) -> dict:
 
 
 
+def _record_refill_experience(store, rec: dict, *, summarize_fn=None) -> None:
+    """Fold one failed refill record into its issue's rolling notebook (item K, draft side).
+
+    Skips the non-verdict families for the same reason `load_prior_lessons` does — a win, a
+    budget cutoff, or retryable infra has no lesson in it, and recording one would burn a
+    rotation on noise. A seeded issue additionally has its notebook RETIRED: the issue is
+    off the queue, and a later regression should start from a clean sheet rather than
+    inherit the notes of the attempts that eventually succeeded.
+
+    Never raises. This runs on the failure path of a tick that is already going badly.
+    """
+    if store is None:
+        return
+    try:
+        issue = rec.get("issue")
+        if issue is None:
+            return
+        key = f"issue-{issue}"
+        family = rec.get("family")
+        if family in _LESSON_SKIP:
+            store.forget(key)
+            return
+        history = rec.get("history") or []
+        last = history[-1] if history else {}
+        store.record(key, {"outcome": rec.get("outcome", ""),
+                           "reason": last.get("gate", ""),
+                           "errors": [last.get("detail", "")] if last.get("detail") else [],
+                           "notes": f"family: {family}" if family else ""},
+                     summarize_fn=summarize_fn)
+    except Exception:      # noqa: BLE001 — memory must never fail a tick
+        pass
+
+
 def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn, intent_fn=None,
            agentic_formalize_fn=None, slot_switch_fn=None,
            queue_dir: str, budget: int, max_issues: int = 1,
            max_attempt_issues: int = 3, gate_budget: int = 20_000, formalize_rounds: int = 3,
            proactive_fn=None, depth_gate: bool = True, triviality_gate: bool = True,
            semantic_rounds: int = 2, system_prompt=None,
-           feasibility_fn=None, gate_cache=None, log=lambda m: None) -> dict:
+           feasibility_fn=None, gate_cache=None, experience=None, summarize_fn=None,
+           log=lambda m: None) -> dict:
     """Draft + gate + stage up to `max_issues` targets from `issues`.
 
     For each candidate (up to `max_attempt_issues`): intent (`reason_fn`, Claude
@@ -457,6 +491,16 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn, int
         # attempt's intent prompt alongside this tick's own intra-tick `feedback`.
         _lesson = issue.get("prior_lessons")
         lesson_note = render_prior_lessons(_lesson) if _lesson else None
+        # `render_prior_lessons` is derived FRESH from refill-history each tick and keeps
+        # only the latest record: after four failed ticks the drafter sees tick 4's gate
+        # names and its last_detail (≤200 chars), and ticks 1-3 are gone. The rolling
+        # notebook is the accumulating half — it carries what each earlier tick actually
+        # tried, bounded by re-summarisation rather than by truncation. `nudge=False`:
+        # `render_prior_lessons` already owns the diversity rotation here.
+        if experience is not None:
+            _nb = experience.render(f"issue-{n}", nudge=False)
+            if _nb:
+                lesson_note = f"{lesson_note}\n{_nb}" if lesson_note else _nb
         history, feedback, staged = [], None, False
         tele = {"advised_bundle": False, "lint_repaired": 0, "retrieval_backend": None,
                 "prose_slop": 0}  # H11; prose_slop (SP4): AI-slop markers in the drafted docstring
@@ -584,6 +628,7 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn, int
             rec = {"issue": n, "attempts": attempt, "outcome": outcome, "history": history,
                    "arch": ROUTING_ARCH, "telemetry": tele}
             rec["family"] = classify_refill(rec)
+            _record_refill_experience(experience, rec, summarize_fn=summarize_fn)
             attempted.append(rec)
         except ClaudeCapError as e:   # item I: subscription cap under [drafter] on_cap="defer"
             log(f"#{n}: claude drafter cap — deferring (requeue, no obstruction)")
@@ -811,6 +856,19 @@ def main() -> int:
     if gate_cache is not None:
         print("[refill] gate cache ON", file=sys.stderr)
 
+    # item K, draft side: the rolling notebook, sharing the store the prove path writes
+    # (one file, disjoint key spaces — `issue-<n>` here, target ids there). This is where
+    # the obstruction census says the failures are: 19 of 22 obstructions are drafter-side.
+    experience = summarize_fn = None
+    if cfg.experience:
+        from experience import ExperienceStore
+        experience = ExperienceStore(os.path.join(_foundry_root(), "runs", "experience.json"))
+        if os.environ.get("EXPERIENCE_LLM", "1") != "0" and os.environ.get("MISTRAL_API_KEY"):
+            _key = os.environ["MISTRAL_API_KEY"]
+            summarize_fn = lambda msgs: mistral_chat(  # noqa: E731
+                msgs, api_key=_key, max_tokens=800, temperature=0.2)
+        print("[refill] experience memory ON", file=sys.stderr)
+
     res = refill(issues, reason_fn=judge_fn, intent_fn=draft_intent_fn, prove_fn=prove_fn,
                  agentic_formalize_fn=agentic_fn, slot_switch_fn=slot_switch_fn, check_fn=daemon_check,
                  context_fn=context_fn, queue_dir=queue_dir, budget=budget,
@@ -819,6 +877,7 @@ def main() -> int:
                  depth_gate=depth_gate, triviality_gate=triviality_gate,
                  semantic_rounds=semantic_rounds, system_prompt=prove_system,
                  feasibility_fn=feasibility_fn, gate_cache=gate_cache,
+                 experience=experience, summarize_fn=summarize_fn,
                  log=lambda m: print(f"[refill] {m}", file=sys.stderr))
     if gate_cache is not None:
         print(f"[refill] gate cache stats: {gate_cache.stats}", file=sys.stderr)
