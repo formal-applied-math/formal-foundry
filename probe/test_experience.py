@@ -196,3 +196,73 @@ def test_summarizer_is_none_without_a_key_or_when_disabled(monkeypatch):
     assert vp._summarizer() is not None
     monkeypatch.setenv("EXPERIENCE_LLM", "0")
     assert vp._summarizer() is None
+
+
+# --- draft-side wiring (item K's other half; 19 of 22 obstructions live here) -------
+
+import autoformalize as af
+
+
+def _rec(issue, family, gate="depth", detail="type consumes no pointer def"):
+    return {"issue": issue, "outcome": gate, "family": family,
+            "history": [{"attempt": 1, "gate": gate, "detail": detail}]}
+
+
+def test_refill_failure_is_folded_into_the_issue_notebook(tmp_path):
+    store = xp.ExperienceStore(str(tmp_path / "e.json"))
+    af._record_refill_experience(store, _rec(53, "depth_exhausted"))
+    assert store.attempts("issue-53") == 1
+    assert "depth" in store.get("issue-53")
+    assert "depth_exhausted" in store.get("issue-53")
+
+
+def test_non_verdict_families_teach_nothing_and_are_skipped(tmp_path):
+    """Same rule load_prior_lessons uses: a win, a budget cutoff or retryable infra has
+    no lesson in it, and recording one would burn a diversity rotation on noise."""
+    store = xp.ExperienceStore(str(tmp_path / "e.json"))
+    for family in ("budget", "infra", "infra_indeterminate"):
+        af._record_refill_experience(store, _rec(60, family))
+    assert store.attempts("issue-60") == 0
+
+
+def test_a_seeded_issue_retires_its_notebook(tmp_path):
+    """Once the issue is off the queue its notes are stale; a later regression should
+    start clean rather than inherit approaches that eventually worked."""
+    store = xp.ExperienceStore(str(tmp_path / "e.json"))
+    af._record_refill_experience(store, _rec(72, "depth_exhausted"))
+    assert store.attempts("issue-72") == 1
+    af._record_refill_experience(store, _rec(72, "seeded"))
+    assert store.get("issue-72") == ""
+    assert xp.ExperienceStore(str(tmp_path / "e.json")).get("issue-72") == ""
+
+
+def test_recording_never_raises_on_a_broken_store(tmp_path):
+    class Exploding:
+        def record(self, *_a, **_k):
+            raise RuntimeError("disk gone")
+
+        def forget(self, *_a, **_k):
+            raise RuntimeError("disk gone")
+
+    af._record_refill_experience(Exploding(), _rec(88, "depth_exhausted"))   # must not raise
+    af._record_refill_experience(None, _rec(88, "depth_exhausted"))          # off ⇒ no-op
+
+
+def test_draft_render_omits_the_nudge_so_rotations_do_not_collide(tmp_path):
+    """`af_routing.render_prior_lessons` has owned the diversity rotation on the draft
+    path since before this store existed; two rotations in one prompt would contradict."""
+    store = xp.ExperienceStore(str(tmp_path / "e.json"))
+    store.record("issue-53", {"outcome": "depth"})
+    drafted = store.render("issue-53", nudge=False)
+    assert "THIS ATTEMPT:" not in drafted
+    assert all(d not in drafted for d in xp.DIVERSITY_INSTRUCTIONS)
+    assert "THIS ATTEMPT:" in store.render("issue-53")      # prove path still nudges
+
+
+def test_draft_and_prove_key_spaces_are_disjoint(tmp_path):
+    """One file, two writers: `issue-<n>` from refill, target ids from the prove gate."""
+    store = xp.ExperienceStore(str(tmp_path / "e.json"))
+    af._record_refill_experience(store, _rec(53, "depth_exhausted"))
+    store.record("cal-bk-144", {"outcome": "max_rounds"})
+    assert store.report()["targets"] == 2
+    assert store.attempts("issue-53") == 1 and store.attempts("cal-bk-144") == 1

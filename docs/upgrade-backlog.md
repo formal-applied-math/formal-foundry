@@ -106,7 +106,7 @@ memory of the last session.
 | H | Variant warm-up | **not built** | — (correctly pending) |
 | I | Frontier drafter | landed | Claude is the sole drafter |
 | J | Statement-integrity pin | **landed** | `gate.gate(statement=…)` |
-| K | Cross-tick lessons-learned | **landed** | `probe/experience.py` |
+| K | Cross-tick lessons-learned | **landed** (both halves) | draft: `af_routing.load_prior_lessons` + `probe/experience.py`; prove: `probe/experience.py` |
 | L | Goal/disproof cache + timeouts | **landed** | `probe/gate_cache.py` |
 | M | Instance-probe gate | **landed** | `af_gates.instance_probe_rejection` |
 | N | Run-record provenance schema | **landed** | `schema/run_record.v1.json` |
@@ -450,7 +450,7 @@ on purpose. Independently corroborated 2026-08-06: Axiomatic's Reviewer node
 enforces the same two rules, statement-identical plus no `sorry` **in the proposed
 body only** — this is field-standard practice, not local overengineering.
 
-### K. Cross-tick lessons-learned + diversity injection [LANDED 2026-08-06 — `probe/experience.py`]
+### K. Cross-tick lessons-learned + diversity injection [LANDED — both halves; see below]
 
 Nexus episode discipline's missing half here: on a failed tick, write a
 compressed post-mortem into the target's queue entry (obstruction family, last
@@ -476,6 +476,27 @@ Diversity instruction is a deterministic rotation, not a sample — same effect,
 reproducible in tests. Off by default; ON in `pipeline.toml` to MEASURE.
 **Kill criterion:** `python3 vibe_prove.py experience` — if `retried targets`
 stays 0, no attempt has ever read a notebook and this comes back out.
+
+**Correction, same day.** The DRAFT half of this item was already built and I
+missed it: `af_routing.load_prior_lessons` + `render_prior_lessons` have fed a
+cross-tick post-mortem and a rotating `_DIVERSITY` nudge into the intent prompt
+since before the harvest. So `experience.py` shipped the *prove* half of an item
+whose own text specifies the drafter — the smaller half, on the census (3 of 22
+obstructions are prove-side; all 3 are `cal-bk-144` retried three times).
+
+What the harvest genuinely adds on the draft side is **accumulation**.
+`load_prior_lessons` is stateless and derived fresh each tick, and its loop
+OVERWRITES per issue: after four failed ticks the drafter sees tick 4's gate
+names plus its `last_detail` truncated to 200 chars, and ticks 1–3 are gone.
+That is exactly the repeat-offender case the census shows (#53, #72, #73, #108
+each die across several families and ticks). The rolling notebook now runs
+alongside it, keyed `issue-<n>` in the same store, bounded by re-summarisation
+rather than truncation, with `nudge=False` so `render_prior_lessons` keeps
+sole ownership of the diversity rotation. Non-verdict families are skipped on
+the same `_LESSON_SKIP` rule, and a seeded issue has its notebook retired so a
+later regression starts clean.
+
+Both halves are now live; the draft side is where the failures are.
 
 ### L. Goal/disproof cache + hard timeouts [LANDED — `probe/gate_cache.py`, `gate_cache = true`]
 
