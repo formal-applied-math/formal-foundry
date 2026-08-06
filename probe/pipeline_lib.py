@@ -107,6 +107,11 @@ class AutoformalizeConfig:
     # states have actually recurred across targets, since `StateCache.suggestions()`
     # renders nothing until then. Off by default until the recurrence number comes back.
     state_cache: bool = False
+    # item K: a per-target rolling notebook of FAILED attempts, folded across ticks and
+    # rendered into the next attempt's prover task. Converts the retries the cron already
+    # performs into informed ones; costs one small summariser call per failure and nothing
+    # at all on the pass path. Off by default ⇒ prompts stay byte-identical.
+    experience: bool = False
 
     @staticmethod
     def load(path: str | None) -> "AutoformalizeConfig":

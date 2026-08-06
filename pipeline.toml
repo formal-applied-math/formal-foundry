@@ -90,6 +90,19 @@ gate_cache = true          # item L: content-address the adversarial gate goals 
                            # runs/gate-cache.json survives run to run). safe: a refutation is
                            # deterministic (the statement pin blocks a reverted-goal false
                            # positive); CACHE_GENERATION invalidates on a Mathlib/Lean pin bump.
+experience = true          # item K: a per-target rolling notebook of FAILED attempts, folded
+                           # across ticks and rendered into the next attempt's prover task ("what
+                           # was tried, how it died, what is ruled out"), plus a rotating diversity
+                           # instruction. The cron ALREADY retries targets across ticks; today each
+                           # retry re-walks the same dead ends, so this converts existing retries
+                           # into informed ones. Rolling, not appended — each failure re-summarises
+                           # the prior notebook with the new attempt, so the block stays bounded
+                           # (4000 chars) instead of crowding out the context pack. Fail-open at
+                           # every step: no key / a raising model / a corrupt store all degrade to
+                           # a mechanical digest or to no memory, never to a red tick. ON here to
+                           # MEASURE. Read it with `python3 vibe_prove.py experience`: if
+                           # `retried targets` stays 0, no attempt has ever read a notebook and
+                           # this is write-only ceremony that comes back out.
 
 # Lemma-DAG decomposition (Phase 2 — docs/superpowers/specs/2026-07-18-decomposer-design.md).
 # The drafter (Claude) SPLITS a hard target into a few named leaf lemmas + a

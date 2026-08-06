@@ -354,7 +354,7 @@ headline was already "every prove that reaches the vibe harness passes."
   a stronger drafter raises the stakes on the fidelity/faithfulness gates, not
   lowers them.
 
-### J. Statement-integrity pin on the main prove path [no reasoner; small — do with I]
+### J. Statement-integrity pin on the main prove path [LANDED — `gate.gate(statement=…)`]
 
 Extend b078f9f's `_probed_conclusion` fidelity guard from the vacuity/disproof
 probes to `run_target`'s REAL goal: count a prove pass only if the winning
@@ -365,7 +365,16 @@ This is Nexus's mid-loop check that "permits sorry placeholders but verifies tha
 the original target theorem statement was not altered." Direct SP1-line
 continuation; becomes more load-bearing the day the drafter/prover gets stronger (I).
 
-### K. Cross-tick lessons-learned + diversity injection [no reasoner]
+**Shipped**: `gate.gate(..., statement=stub)` compares `_probed_signature` of the
+accepted candidate against the original stub and rejects `statement_altered`;
+`vibe_prove._cmd_gate` reads the stub back off the queue to supply it, failing
+open to the kernel bar if the scratch file is gone. Deliberately passed as `None`
+by the post-accept transforms (strengthen / necessity), which change the signature
+on purpose. Independently corroborated 2026-08-06: Axiomatic's Reviewer node
+enforces the same two rules, statement-identical plus no `sorry` **in the proposed
+body only** — this is field-standard practice, not local overengineering.
+
+### K. Cross-tick lessons-learned + diversity injection [LANDED 2026-08-06 — `probe/experience.py`]
 
 Nexus episode discipline's missing half here: on a failed tick, write a
 compressed post-mortem into the target's queue entry (obstruction family, last
@@ -375,6 +384,22 @@ prior attempts" / "try a completely new approach" — their stochastic-injection
 set). Today `refill-history.jsonl` records outcomes but each retry re-drafts
 nearly blind; the cron already retries across ticks, so this converts existing
 retries into informed ones at prompt-assembly cost only.
+
+**Shipped** as `probe/experience.py` + wiring in both `vibe_prove` phases, after
+the Axiomatic harvest supplied the missing mechanism
+([`docs/research/2026-08-06-axiomatic-harvest.md`](research/2026-08-06-axiomatic-harvest.md)).
+Their `ExperienceProcessor` answers the question this item left open — *how* to
+carry lessons without the note growing into the prompt-eating log that killed the
+idea the first time. The answer is a **rolling** summary: the summariser is fed
+the prior notebook plus the new attempt and returns the REPLACEMENT, so the block
+stays bounded (4000 chars) while nothing worth keeping is dropped. Recorded on
+failures only (`max_rounds`/`fail_gate`; an `error` is an infra miss with no proof
+lesson), rendered LAST in the prover task behind the premises (weakest authority),
+silent on a cold store, fail-open to a mechanical digest at every step.
+Diversity instruction is a deterministic rotation, not a sample — same effect,
+reproducible in tests. Off by default; ON in `pipeline.toml` to MEASURE.
+**Kill criterion:** `python3 vibe_prove.py experience` — if `retried targets`
+stays 0, no attempt has ever read a notebook and this comes back out.
 
 ### L. Goal/disproof cache + hard timeouts [no reasoner; volume-gated]
 
