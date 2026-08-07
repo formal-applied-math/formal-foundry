@@ -1,0 +1,23 @@
+{
+  "id": "mf-blackscholes-better-of-two",
+  "name": "Better-of-two (rainbow, K=0) option closed form via Margrabe",
+  "description": "Closed-form discounted price of the better-of-two (K=0 rainbow) option via max(S1,S2) = S2 + (S1-S2)+ and the Margrabe exchange-option price.",
+  "domain": "mathematical_finance",
+  "code": {
+    "lean": "import MathFin.BlackScholes.BetterOfTwoOption\n\nopen MathFin\n\n/-- Closed-form discounted price of the better-of-two (K=0 rainbow) option via max(S1,S2) = S2 + (S1-S2)+ and the Margrabe exchange-option price. -/\ntheorem mf_blackscholes_better_of_two {Ω : Type*} {mΩ : MeasurableSpace Ω} {Q : Measure Ω}\n    [IsProbabilityMeasure Q] {S1T S2T : Ω → ℝ} (hS1T : Measurable S1T)\n    (hS2T : Measurable S2T) {S1_0 S2_0 r σ T : ℝ} (hσ : σ ≠ 0) (hT : 0 < T)\n    (hintS2 : Integrable S2T Q)\n    (hintEx : Integrable (fun ω => max (S1T ω - S2T ω) 0) Q)\n    (hmart : Real.exp (-r * T) * ∫ ω, S2T ω ∂Q = S2_0)\n    (hmargrabe : Real.exp (-r * T) * ∫ ω, max (S1T ω - S2T ω) 0 ∂Q\n      = margrabePrice S1_0 S2_0 σ T) :\n    Real.exp (-r * T) * ∫ ω, max (S1T ω) (S2T ω) ∂Q\n      = S2_0 + margrabePrice S1_0 S2_0 σ T :=\n  MathFin.betterOfTwo_price hS1T hS2T hσ hT hintS2 hintEx hmart hmargrabe\n"
+  },
+  "metadata": {
+    "chapter": 0,
+    "reference": "Better-of-two (rainbow, K=0) option closed form via Margrabe",
+    "difficulty": "medium",
+    "formalization_status": "full",
+    "formalization_scope": "Full formal proof in MathFin/BlackScholes/BetterOfTwoOption.lean (autoformalized statement, leanstral proof). Re-export from MathFin. Axioms-clean.",
+    "provenance": {
+      "statement_source": "autoform",
+      "statement_model": "autoform",
+      "source": "leanstral-autoform",
+      "model": "labs-leanstral-1-5",
+      "issue": 57
+    }
+  }
+}
