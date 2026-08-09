@@ -1,0 +1,26 @@
+{
+  "id": "mf-credit-cva-unilateral",
+  "name": "Basic unilateral CVA = (1−R)·∫₀ᵀ EE(u)·e^(−ru)·h(u)·S(u) du",
+  "description": "Unilateral CVA as a recovery-adjusted exposure integral against the hazard default density, with closed form for constant exposure and hazard.",
+  "domain": "mathematical_finance",
+  "code": {
+    "lean": "import MathFin.FixedIncome.CVA\n\nopen MathFin\n\n/-- Unilateral CVA as a recovery-adjusted exposure integral against the hazard default density, with closed form for constant exposure and hazard. -/\ntheorem mf_credit_cva_unilateral {E₀ R r h₀ T : ℝ} (hrh : r + h₀ ≠ 0) :\n    cva (fun _ => E₀) R r (fun _ => h₀) T =\n      (1 - R) * E₀ * (h₀ / (r + h₀)) * (1 - Real.exp (-(r + h₀) * T)) :=\n  MathFin.cva_const_const hrh\n"
+  },
+  "metadata": {
+    "chapter": 0,
+    "reference": "Basic unilateral CVA = (1−R)·∫₀ᵀ EE(u)·e^(−ru)·h(u)·S(u) du",
+    "difficulty": "medium",
+    "formalization_status": "full",
+    "formalization_scope": "Full formal proof in MathFin/FixedIncome/CVA.lean (autoformalized statement, leanstral proof). Re-export from MathFin. Axioms-clean. Introduces definitions: {'name': 'cva', 'signature': '(EE : ℝ → ℝ) → (R r : ℝ) → (h : ℝ → ℝ) → (T : ℝ) → ℝ', 'meaning': 'Unilateral CVA: (1-R) times the integral over [0,T] of expected exposure times discount times default density h(u)·S(u).', 'built_from': ['MathFin.hazardSurvival', 'Real.exp', 'intervalIntegral notation ∫ u in a..b, f u']} (new-defs review class).",
+    "provenance": {
+      "statement_source": "autoform",
+      "statement_model": "autoform",
+      "source": "leanstral-autoform",
+      "model": "labs-leanstral-1-5",
+      "issue": 98,
+      "new_defs": [
+        "{'name': 'cva', 'signature': '(EE : ℝ → ℝ) → (R r : ℝ) → (h : ℝ → ℝ) → (T : ℝ) → ℝ', 'meaning': 'Unilateral CVA: (1-R) times the integral over [0,T] of expected exposure times discount times default density h(u)·S(u).', 'built_from': ['MathFin.hazardSurvival', 'Real.exp', 'intervalIntegral notation ∫ u in a..b, f u']}"
+      ]
+    }
+  }
+}
