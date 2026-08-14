@@ -309,7 +309,9 @@ def cache_path(index_dir: str, model: str) -> str:
 
 def make_embedding_retrieve_fn(index: "EmbeddingIndex", k: int, embed_fn):
     """A drop-in `retrieve_fn(query: str) -> str` over `index` — same shape as
-    loogle_candidates, but ranks the WHOLE MathFin corpus by cosine similarity."""
+    loogle_candidates, but ranks the whole premise corpus by cosine similarity:
+    ours plus the Mathlib neighbourhoods MathFin reaches, unlike loogle
+    pin-accurate."""
     def retrieve(query: str) -> str:
         return index.retrieve(query, k, embed_fn)
     return retrieve

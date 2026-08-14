@@ -788,8 +788,39 @@ fine for a once-per-draft call. A prefilter would have traded real recall (it
 drops premises that share no tokens with the query, which is precisely what
 embeddings are for) against a cost that does not exist.
 
-**Open — the numbers are unmeasured.** The slice size is whatever the frontier
-turns out to be; nobody has run it yet. `index_filter` prints the frontier size
-and kept/total per file on every run, and `embed --dry-run` breaks the corpus
-down by namespace, so the first `build-index.yml` run answers it. Tune `DEFAULT_ALLOW` / revisit the float32
-sidecar only against those numbers.
+**Measured 2026-08-14** (run 31770423695, `main_commit=2af6a91`, Lean v4.32.0):
+
+| | records | embeddable premises |
+|---|---|---|
+| MathFin | 3,672 | 1,960 |
+| BrownianMotion | 1,613 | 782 |
+| Mathlib | 102,985 | 65,399 |
+| **total** | **108,270** across 1,150 modules | **68,141** |
+
+Against ~2.8k before, so the index grew ~38x and the premise corpus is now 96%
+Mathlib. The engineering holds at that size: the sidecar is ~279 MB (inline JSON
+would have been ~1.4 GB), and the cosine scan extrapolates to ~2.9s/query —
+still a once-per-draft cost, still no case for the prefilter.
+
+**The policy does NOT hold, and this is the follow-up.** The biggest modules
+admitted are `Mathlib.Algebra.Group.Defs` (1,183), `Analysis.Normed.Ring.Basic`
+(774), `Order.WithBot` (655), `GroupTheory.GroupAction.Hom` (647),
+`Order.CompleteBooleanAlgebra` (565) — the algebraic and order-theoretic
+foundations, pulled in because every proof transitively reaches `Mul`, `Zero`,
+`le_refl`. That is not where the next mathfin theorem lives, and it is 96% of
+what an embed run would pay for. "Any reached constant promotes its whole
+module" is too coarse a frontier.
+
+Candidate refinements, in order of appeal, none yet tried:
+
+1. **weight the frontier** — promote a module only above a threshold of
+   *distinct* MathFin constants reaching it, so `Order.WithBot` (reached
+   incidentally) drops out while `MeasureTheory.Integral.*` stays;
+2. **exclude an algebra/order core** the way `Init.*` is already excluded —
+   cruder, and risks dropping genuinely-used order lemmas;
+3. **rank rather than filter** — keep the slice, bias retrieval toward modules
+   with more MathFin reach.
+
+Until one lands, `embed --max-premises` is the blunt lever. Nothing auto-embeds:
+`autoformalize.build_retrieve_fns` only *loads* an existing cache and falls back
+when absent, so merging this costs nothing until someone runs `embed.py`.
