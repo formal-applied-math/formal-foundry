@@ -52,6 +52,8 @@ class ScoutIndex:
         self._types: list[dict] | None = None
         self._tactics: list[dict] | None = None
         self._const_dep: list[dict] | None = None
+        self._types_by_name_cache: dict[str, dict] | None = None
+        self._dep_of_cache: dict[str, list[str]] | None = None
 
     @property
     def available(self) -> bool:
@@ -72,6 +74,21 @@ class ScoutIndex:
         if self._const_dep is None:
             self._const_dep = _load_jsonl(os.path.join(self.index_dir or "", "const_dep.jsonl"))
         return self._const_dep
+
+    def _types_by_name(self) -> dict[str, dict]:
+        """name -> types record, built once. Since the index carries the Mathlib
+        neighborhoods (index_filter), a per-call linear scan is no longer free:
+        `_index_pack` calls `signature_of` once per closure constant."""
+        if self._types_by_name_cache is None:
+            self._types_by_name_cache = {r["name"]: r for r in self._t() if r.get("name")}
+        return self._types_by_name_cache
+
+    def _dep_of(self) -> dict[str, list[str]]:
+        """name -> direct deps, built once (see `_types_by_name`)."""
+        if self._dep_of_cache is None:
+            self._dep_of_cache = {r["name"]: list(r.get("deps") or [])
+                                  for r in self._cd() if r.get("name")}
+        return self._dep_of_cache
 
     def signatures(self, modules: list[str], max_per_module: int = 40
                    ) -> dict[str, list[tuple[str, str, str | None]]]:
@@ -110,25 +127,22 @@ class ScoutIndex:
 
     def dependencies(self, name: str) -> list[str]:
         """Direct constant dependencies of `name` (empty if unknown)."""
-        for r in self._cd():
-            if r.get("name") == name:
-                return list(r.get("deps") or [])
-        return []
+        return list(self._dep_of().get(name, []))
 
     def signature_of(self, name: str) -> tuple[str, str, str | None] | None:
         """(module, type, docString) for a constant by name, or None if the
         types index does not know it."""
-        for r in self._t():
-            if r.get("name") == name:
-                return (r.get("module", ""), r.get("type", ""), r.get("docString"))
-        return None
+        r = self._types_by_name().get(name)
+        if r is None:
+            return None
+        return (r.get("module", ""), r.get("type", ""), r.get("docString"))
 
     def dependency_closure(self, names: list[str], depth: int = 2) -> list[str]:
         """BFS over const_dep from `names` up to `depth` hops; the reachable
         constants excluding the seeds, in discovery order. This is the cross-file
         premise reach a context pack should surface (miniCTX: in-file context
         alone misses the cross-file dependencies)."""
-        dep_of = {r.get("name"): list(r.get("deps") or []) for r in self._cd()}
+        dep_of = self._dep_of()
         seen, frontier, order = set(names), list(names), []
         for _ in range(depth):
             nxt = []

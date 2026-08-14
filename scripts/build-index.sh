@@ -18,8 +18,8 @@
 # cap) so it is opt-in via SCOUT_TACTICS=1.
 set -euo pipefail
 FOUNDRY="$(cd "$(dirname "$0")/.." && pwd)"
-MAIN="${MAIN_REPO:-/home/rapha/code/automated_proofs_quantfin}"
-IMAGE="${MATHFIN_IMAGE:-ghcr.io/raphaelrrcoelho/mathfin-verify:latest}"
+MAIN="${MAIN_REPO:-/mnt/c/Users/rapha/Documents/Code/formal-mathfin}"
+IMAGE="${MATHFIN_IMAGE:-ghcr.io/formal-applied-math/mathfin-verify:latest}"
 REV="289c1f1f88a4"                       # lean_scout on Lean v4.32.0
 INDEX="$FOUNDRY/index"
 mkdir -p "$INDEX"
@@ -59,15 +59,16 @@ EOF
     fi
   '
 
-# 2. Filter to MathFin.* records — the only ones the context packs ever query.
+# 2. Slice to MathFin + the Mathlib neighborhoods MathFin actually reaches.
 #    `--imports MathFin` extracts the whole transitive closure (~771k records /
-#    ~850 MB, mostly Mathlib/core internals); MathFin itself is ~2.8k. Keeping
-#    only MathFin.* shrinks the index ~275x so the adapter loads in ~0.03s.
-for f in types const_dep tactics; do
-  [ -f "$INDEX/$f.jsonl" ] || continue
-  grep '"module":"MathFin' "$INDEX/$f.jsonl" > "$INDEX/$f.filtered" \
-    && mv "$INDEX/$f.filtered" "$INDEX/$f.jsonl"
-done
+#    ~850 MB, mostly Mathlib/core internals). This step used to keep ONLY
+#    MathFin.* (~2.8k, a 275x shrink) for a 0.03s adapter load — but the
+#    embedding retrieval in probe/embed.py reads types.jsonl, so that filter is
+#    why the drafter's semantic search had never seen a Mathlib lemma, leaving
+#    an off-pin public loogle as its only Mathlib channel. index_filter keeps
+#    the middle: ours in full, plus every Mathlib module hosting a constant a
+#    MathFin proof depends on. See probe/index_filter.py for the reasoning.
+python3 "$FOUNDRY/probe/index_filter.py" "$INDEX"
 
 # 3. Stamp the pin so staleness is detectable.
 {

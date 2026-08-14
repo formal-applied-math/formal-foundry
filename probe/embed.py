@@ -1,5 +1,12 @@
 """Embedding premise retrieval over the pin-accurate lean_scout `types.jsonl`.
 
+Since 2026-08-14 that index carries MathFin AND the Mathlib neighbourhoods a
+MathFin proof actually reaches (`index_filter.py`), so this is the drafter's
+first pin-accurate semantic view of Mathlib — previously its only Mathlib
+channel was an off-pin public loogle. The corpus is ~an order of magnitude
+bigger as a result, which is why the vectors live in a binary sidecar rather
+than inline JSON (see `vectors_path`).
+
 stdlib-only (mirrors scout_index.py / probe.py): urllib for the Mistral
 `/v1/embeddings` call, pure-Python cosine ranking. Design:
 docs/superpowers/specs/2026-07-16-embedding-retrieval-prove-probe-design.md.
@@ -7,6 +14,7 @@ docs/superpowers/specs/2026-07-16-embedding-retrieval-prove-probe-design.md.
 from __future__ import annotations
 
 import argparse
+import array
 import hashlib
 import json
 import math
@@ -83,7 +91,7 @@ _PREMISE_EQNUM = re.compile(r"\.eq_\d+$")
 def _is_usable_premise(name: str) -> bool:
     """False for a Lean-internal / auto-generated name (private decl, simp/proof/
     match internal, structure eliminator, numbered equation lemma) — none of which
-    the model can reference. True for a real, citable MathFin lemma or def."""
+    the model can reference. True for a real, citable library lemma or def (MathFin or Mathlib)."""
     if not name or name.startswith("_private."):
         return False
     if any(m in name for m in _PREMISE_INTERNAL_INFIX):
@@ -148,17 +156,84 @@ def top_k(query_vec: list[float], matrix: list[list[float]], k: int) -> list[int
     return [i for _, i in scored[:k]]
 
 
+def top_k_flat(query_vec: list[float], flat: "array.array", dim: int, k: int,
+               norms: list[float] | None = None) -> list[int]:
+    """`top_k` over a flat float32 store — same ranking, without materializing
+    the matrix as Python lists (see `vectors_path` for why that matters)."""
+    if not dim or not len(flat):
+        return []
+    nq = math.sqrt(sum(x * x for x in query_vec))
+    if nq == 0.0:
+        return []
+    scored: list[tuple[float, int]] = []
+    for i in range(len(flat) // dim):
+        row = flat[i * dim:(i + 1) * dim]          # C-level slice of the array
+        nr = norms[i] if norms is not None else math.sqrt(sum(y * y for y in row))
+        s = 0.0 if nr == 0.0 else sum(x * y for x, y in zip(query_vec, row)) / (nq * nr)
+        scored.append((s, i))
+    scored.sort(key=lambda t: (-t[0], t[1]))
+    return [i for _, i in scored[:k]]
+
+
+def vectors_path(cache_file: str) -> str:
+    """Binary sidecar holding the vectors of `cache_file` as raw float32.
+
+    Kept OUT of the JSON now that the corpus spans Mathlib too. Measured on this
+    box at 1024 dims: inline JSON floats run ~1.0 GB on disk and ~8s to parse at
+    50k premises, and materializing them as Python float objects costs ~1.2 GB
+    of RAM — on a box whose whole doctrine is that it has no headroom to spare.
+    The same vectors are ~205 MB as one `array('f')`, loaded in one read."""
+    base = cache_file[:-5] if cache_file.endswith(".json") else cache_file
+    return base + ".f32"
+
+
 class EmbeddingIndex:
     """Vectors for a premise corpus + cosine top-k retrieval. Build once per pin
     (vectors cached to disk keyed by (model, corpus_hash)); query embeds one text
-    and ranks locally."""
+    and ranks locally.
+
+    Vectors are held flat as float32. The precision loss is well under the gap
+    between adjacent cosine scores, and it halves both the file and the resident
+    set relative to float64."""
 
     def __init__(self, premises: list[dict], *, model: str):
         self.premises = premises
         self.model = model
         self.texts = [premise_text(p) for p in premises]
         self.hash = corpus_hash(self.texts, model)
-        self.vectors: list[list[float]] | None = None
+        self._flat: "array.array | None" = None
+        self._dim = 0
+        self._norms: list[float] | None = None
+
+    # `vectors` stays a plain attribute to callers; the store underneath is flat.
+    @property
+    def vectors(self) -> list[list[float]] | None:
+        """Row view, materialized on demand. Prefer `retrieve` on a large corpus
+        — this rebuilds the whole matrix as Python lists."""
+        if self._flat is None:
+            return None
+        d = self._dim
+        if not d:
+            return []
+        return [list(self._flat[i * d:(i + 1) * d]) for i in range(len(self._flat) // d)]
+
+    @vectors.setter
+    def vectors(self, rows: list[list[float]] | None) -> None:
+        if rows is None:
+            self._flat, self._dim, self._norms = None, 0, None
+            return
+        self._dim = len(rows[0]) if rows else 0
+        self._flat = array.array("f", (x for row in rows for x in row))
+        self._norms = None
+
+    def _row_norms(self) -> list[float]:
+        """Row norms, computed once — halves the per-query scan."""
+        if self._norms is None:
+            d, flat = self._dim, self._flat
+            self._norms = [] if (not d or flat is None) else [
+                math.sqrt(sum(y * y for y in flat[i * d:(i + 1) * d]))
+                for i in range(len(flat) // d)]
+        return self._norms
 
     def build(self, embed_fn) -> "EmbeddingIndex":
         """Embed the corpus. `embed_fn(list[str]) -> list[list[float]]`."""
@@ -166,9 +241,17 @@ class EmbeddingIndex:
         return self
 
     def save(self, path: str) -> None:
+        """Metadata to `path`, vectors to its `.f32` sidecar."""
+        if self._flat is None:
+            raise ValueError("nothing to save — build() first")
+        with open(vectors_path(path), "wb") as f:
+            self._flat.tofile(f)
         with open(path, "w", encoding="utf-8") as f:
             json.dump({"model": self.model, "corpus_hash": self.hash,
-                       "vectors": self.vectors}, f)
+                       "dim": self._dim, "count": len(self._flat) // self._dim
+                       if self._dim else 0,
+                       "byteorder": sys.byteorder,
+                       "vectors_file": os.path.basename(vectors_path(path))}, f)
 
     @classmethod
     def load(cls, path: str, premises: list[dict], model: str) -> "EmbeddingIndex | None":
@@ -182,18 +265,42 @@ class EmbeddingIndex:
             return None
         if blob.get("model") != model or blob.get("corpus_hash") != idx.hash:
             return None
-        idx.vectors = blob.get("vectors")
-        if idx.vectors is None:
+        inline = blob.get("vectors")
+        if inline is not None:                     # pre-sidecar cache; still valid
+            idx.vectors = inline
+            return idx
+        dim, count = blob.get("dim"), blob.get("count")
+        if not dim or not count:
             return None
+        # float32 is written in native order; a cache moved across architectures
+        # would decode to noise, so treat a mismatch as stale rather than trust it.
+        if blob.get("byteorder") != sys.byteorder:
+            return None
+        flat = array.array("f")
+        try:
+            with open(vectors_path(path), "rb") as f:
+                flat.fromfile(f, dim * count)
+        except (OSError, EOFError, ValueError):
+            return None
+        idx._flat, idx._dim = flat, dim
         return idx
 
     def retrieve(self, query: str, k: int, embed_fn) -> str:
         """Top-k premises for `query` as `name : type` lines ('' if not built)."""
-        if not self.vectors:
+        if self._flat is None or not self._dim:
             return ""
         qv = embed_fn([query])[0]
-        idxs = top_k(qv, self.vectors, k)
+        idxs = top_k_flat(qv, self._flat, self._dim, k, norms=self._row_norms())
         return "\n".join(self.texts[i] for i in idxs)
+
+
+def corpus_composition(premises: list[dict]) -> dict[str, int]:
+    """{top-level module namespace: count} — what an embed run would spend on."""
+    out: dict[str, int] = {}
+    for p in premises:
+        ns = (p.get("module") or "?").split(".", 1)[0] or "?"
+        out[ns] = out.get(ns, 0) + 1
+    return dict(sorted(out.items(), key=lambda kv: -kv[1]))
 
 
 def cache_path(index_dir: str, model: str) -> str:
@@ -202,7 +309,9 @@ def cache_path(index_dir: str, model: str) -> str:
 
 def make_embedding_retrieve_fn(index: "EmbeddingIndex", k: int, embed_fn):
     """A drop-in `retrieve_fn(query: str) -> str` over `index` — same shape as
-    loogle_candidates, but ranks the WHOLE MathFin corpus by cosine similarity."""
+    loogle_candidates, but ranks the whole premise corpus by cosine similarity:
+    ours plus the Mathlib neighbourhoods MathFin reaches, unlike loogle
+    pin-accurate."""
     def retrieve(query: str) -> str:
         return index.retrieve(query, k, embed_fn)
     return retrieve
@@ -215,18 +324,39 @@ def build_cli(argv=None) -> int:
     ap.add_argument("--index-dir", default=None)
     ap.add_argument("--model", default=DEFAULT_EMBED_MODEL)
     ap.add_argument("--batch", type=int, default=256)
+    ap.add_argument("--max-premises", type=int, default=None,
+                    help="cap the corpus (own-namespace records are kept first)")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="report the corpus composition and exit without calling the API")
     args = ap.parse_args(argv)
 
     from scout_index import default_index_dir
     index_dir = args.index_dir or default_index_dir()
-    api_key = os.environ.get("MISTRAL_API_KEY")
-    if not api_key:
-        print("MISTRAL_API_KEY not set", file=sys.stderr)
-        return 2
     premises = load_premises(index_dir)
     if not premises:
         print(f"no types.jsonl under {index_dir}", file=sys.stderr)
         return 1
+
+    # The index now spans Mathlib, so the corpus size is a real API spend and a
+    # real resident set. Say what it is BEFORE paying for it.
+    comp = corpus_composition(premises)
+    print(f"corpus: {len(premises)} premises "
+          + ", ".join(f"{ns}={n}" for ns, n in comp.items()), file=sys.stderr)
+    if args.max_premises is not None and len(premises) > args.max_premises:
+        own = [p for p in premises if (p.get("module") or "").startswith("MathFin")]
+        rest = [p for p in premises if not (p.get("module") or "").startswith("MathFin")]
+        premises = (own + rest)[:args.max_premises]
+        print(f"capped to {len(premises)} (--max-premises); "
+              f"{len(own)} own records kept first", file=sys.stderr)
+    if args.dry_run:
+        print(f"dry run — {len(premises)} premises would be embedded in "
+              f"{(len(premises) + args.batch - 1) // args.batch} batches", file=sys.stderr)
+        return 0
+
+    api_key = os.environ.get("MISTRAL_API_KEY")
+    if not api_key:
+        print("MISTRAL_API_KEY not set", file=sys.stderr)
+        return 2
 
     idx = EmbeddingIndex(premises, model=args.model)
 
@@ -242,7 +372,9 @@ def build_cli(argv=None) -> int:
     idx.build(embed_fn)
     out_path = cache_path(index_dir, args.model)
     idx.save(out_path)
-    print(f"wrote {out_path} ({len(premises)} premises, model={args.model})")
+    mb = os.path.getsize(vectors_path(out_path)) / 1e6
+    print(f"wrote {out_path} + {os.path.basename(vectors_path(out_path))} "
+          f"({len(premises)} premises, {mb:.1f} MB, model={args.model})")
     return 0
 
 

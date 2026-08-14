@@ -83,7 +83,7 @@ jobs:
           fi
 
       - name: Pull the pinned verify image
-        run: docker pull ghcr.io/raphaelrrcoelho/mathfin-verify:latest
+        run: docker pull ghcr.io/formal-applied-math/mathfin-verify:latest
 
       - name: Setup Python                # needed by build-embeddings (host-side) + the tick
         uses: actions/setup-python@v5

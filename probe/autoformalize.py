@@ -683,8 +683,12 @@ def _foundry_root() -> str:
 
 def build_retrieve_fns(*, backend, main_repo, index_dir, k, embed_model, api_key):
     """(reactive_retrieve_fn, proactive_fn). Embedding backend ranks the whole
-    MathFin corpus; proactive_fn retrieves on the intent STATEMENT. Falls open to
-    loogle (reactive only) when the embedding cache is absent."""
+    premise corpus — MathFin, BrownianMotion, and the Mathlib neighbourhoods
+    MathFin reaches (`index_filter`); proactive_fn retrieves on the intent
+    STATEMENT. Falls open to loogle (reactive only) when the cache is absent.
+
+    LOADS a cache, never builds one: an absent cache degrades to loogle rather
+    than silently spending an embed run on ~68k premises."""
     loogle_fn = lambda nm: loogle_candidates(nm, main_repo=main_repo)  # noqa: E731
     loogle_fn.backend = "loogle"   # H11 telemetry label
     if backend != "embedding":

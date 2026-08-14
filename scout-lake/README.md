@@ -3,7 +3,8 @@
 A throwaway Lake project whose only job is to run
 [`lean_scout`](https://github.com/mathlib-initiative/lean_scout) over the
 `MathFin` library and emit the JSONL index the foundry's context packs consume
-(`house_context` → `scout_index.ScoutIndex`).
+(`house_context` → `scout_index.ScoutIndex`) and the drafter searches
+semantically (`embed.load_premises`).
 
 It is deliberately **separate** from the main repo's `lakefile.lean`: that
 manifest is the verification anchor + the ledger input-hash, so we never add a
@@ -45,3 +46,43 @@ error. Fallbacks, in order of preference:
 
 The index is rebuilt once per pin; `index/PIN` records the toolchain + lean_scout
 rev it was built under so staleness is detectable.
+
+## What ends up in the index (the slice)
+
+`--imports MathFin` extracts the whole transitive closure — ~771k records,
+~850 MB, overwhelmingly Mathlib and core internals. Step 2 of `build-index.sh`
+narrows that, via `probe/index_filter.py`, to:
+
+- **own modules in full** — `MathFin.*` and `BrownianMotion.*`;
+- **plus every `Mathlib.*` module that hosts a constant a MathFin declaration
+  actually depends on**, kept whole. If a proof consumes
+  `MeasureTheory.Integrable.add`, all of that lemma's module becomes visible,
+  so the drafter can find the sibling it should consume instead of reproving
+  it. Module-granular rather than constant-granular on purpose: the miniCTX
+  result is that whole-file context beats isolated signatures.
+- **`tactics.jsonl` stays own-only.** It feeds `tactic_exemplars`, whose job is
+  to show how *this library* discharges a goal. Mathlib's own tactic usage is
+  not house style, so admitting it would be bloat that actively misleads.
+
+Until 2026-08-14 this step was a `grep '"module":"MathFin'` keeping ONLY
+`MathFin.*` (~2.8k records, a 275x shrink, 0.03s adapter load). That was chosen
+for load time, but it had an uncosted consequence: `embed.py` embeds
+`types.jsonl`, so the drafter's semantic retrieval had never seen a Mathlib
+lemma, and its only Mathlib channel was `af_drafting.loogle_candidates` — a
+syntactic query against a public instance tracking a *newer* Mathlib than the
+pin, which its own docstring marks UNVERIFIED. A drafter held to a
+coherence-first, anti-wrapper contract could not look up the lemma it was
+supposed to consume.
+
+Keeping everything is not the fix either: the corpus size is a latency and
+memory budget, not just a disk number. Measured here at 1024 dims and 50k
+premises, the pure-Python cosine scan costs ~2.1s per query (fine, once per
+draft), but inline JSON vectors would be ~1.0 GB on disk, ~8s to parse, and
+~1.2 GB resident as Python floats. Hence the flat float32 sidecar in
+`embed.vectors_path` — ~205 MB, one read.
+
+Size the corpus before paying to embed it:
+
+```bash
+cd probe && python3 embed.py --dry-run        # composition by namespace, no API calls
+```

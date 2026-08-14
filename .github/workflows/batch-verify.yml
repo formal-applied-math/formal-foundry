@@ -53,7 +53,7 @@ jobs:
           fetch-depth: 1
 
       - name: Pull the pinned verify image
-        run: docker pull ghcr.io/raphaelrrcoelho/mathfin-verify:latest
+        run: docker pull ghcr.io/formal-applied-math/mathfin-verify:latest
 
       - name: Verify the manifest in parallel (inside the image)
         env:
@@ -75,7 +75,7 @@ jobs:
             -e MANIFEST -e WORKERS \
             -v "${{ github.workspace }}/main":/app \
             -v "${{ github.workspace }}":/foundry \
-            -w /app ghcr.io/raphaelrrcoelho/mathfin-verify:latest -lc '
+            -w /app ghcr.io/formal-applied-math/mathfin-verify:latest -lc '
               set -e
               lake exe cache get >/dev/null 2>&1 || true
               lake build MathFin

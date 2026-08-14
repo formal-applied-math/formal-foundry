@@ -277,6 +277,12 @@ No reasoner (a retriever/index is not a general model). Lower priority; the
 graph-closure packs are already decent. Source:
 [LeanDojo / ReProver](https://arxiv.org/abs/2306.15626).
 
+**Landed, but over the wrong corpus until 2026-08-14 — see item W.** The
+retriever was real; `index/types.jsonl` was MathFin-only, so "surface library
+lemmas R didn't name" could only ever mean *our* lemmas. Mathlib, the library
+the anti-wrapper contract is actually about, was filtered out upstream of the
+embedding step.
+
 ---
 
 ## [needs general reasoner] — for when we add a second engine
@@ -740,3 +746,81 @@ ours — formal-mathfin#166, an outside contribution, *derived* its
 denominator-nonvanishing condition from `zcb_pos` instead of assuming it,
 leaving one hypothesis. That is the exact inverse of R's failure mode, and it is
 what the drafter's statement stage should be aiming at.
+
+---
+
+### W. The retrieval corpus excluded Mathlib [BUILT 2026-08-14]
+
+`scripts/build-index.sh` extracts the full transitive closure (~771k records,
+~850 MB) and then, in step 2, kept only `MathFin.*` — ~2.8k records, a 275x
+shrink chosen so the `scout_index` adapter would load in ~0.03s. The load-time
+win was real. The uncosted consequence: `embed.load_premises` reads that same
+`types.jsonl`, so **the drafter's semantic retrieval had never seen a Mathlib
+lemma.** Its only Mathlib channel was `af_drafting.loogle_candidates` —
+syntactic, and pointed at a public instance tracking a *newer* Mathlib than the
+pin, which its own docstring marks UNVERIFIED.
+
+That is a coherence-first, anti-wrapper pipeline in which the drafter cannot
+look up the lemma it is supposed to consume. It is also the shape of failure the
+repo keeps rediscovering: two components each correct against their own
+contract, wrong in composition, with every unit test passing.
+
+**Reproduction:** `probe/test_index_filter.py::test_sliced_index_feeds_both_consumers_with_mathlib_visible`
+fails against the old `grep '"module":"MathFin'` step and passes against
+`probe/index_filter.py`. The stale `MAIN_REPO` default in
+`scripts/build-index.sh` (still the pre-relocation `~/code/...` path) was found
+in the same pass; CI set it explicitly, so only local runs broke, and only at
+the PIN stamp *after* paying the full extraction.
+
+**What shipped.**
+
+| piece | code | why |
+|---|---|---|
+| neighbourhood slice | `probe/index_filter.py` | own modules in full + every `Mathlib.*` module hosting a constant a MathFin decl reaches; `tactics.jsonl` own-only (exemplars teach *house* style) |
+| dict-backed lookups | `probe/scout_index.py` | `signature_of`/`dependencies` were per-call linear scans, fine at 2.8k records and not at Mathlib scale |
+| flat float32 sidecar | `probe/embed.py` `vectors_path` | measured at 1024 dims / 50k premises: inline JSON is ~1.0 GB, ~8s to parse, ~1.2 GB resident as Python floats; float32 is ~205 MB in one read |
+| spend guard | `embed.py --dry-run` / `--max-premises` | the corpus is now an API bill; size it before paying |
+
+**Deliberately NOT done: a lexical prefilter before the cosine scan.** The
+obvious worry was that a bigger corpus makes `top_k` too slow to run in-loop.
+Measured first: 1024 dims, 50k premises, pure Python — ~2.1s per query, i.e.
+fine for a once-per-draft call. A prefilter would have traded real recall (it
+drops premises that share no tokens with the query, which is precisely what
+embeddings are for) against a cost that does not exist.
+
+**Measured 2026-08-14** (run 31770423695, `main_commit=2af6a91`, Lean v4.32.0):
+
+| | records | embeddable premises |
+|---|---|---|
+| MathFin | 3,672 | 1,960 |
+| BrownianMotion | 1,613 | 782 |
+| Mathlib | 102,985 | 65,399 |
+| **total** | **108,270** across 1,150 modules | **68,141** |
+
+Against ~2.8k before, so the index grew ~38x and the premise corpus is now 96%
+Mathlib. The engineering holds at that size: the sidecar is ~279 MB (inline JSON
+would have been ~1.4 GB), and the cosine scan extrapolates to ~2.9s/query —
+still a once-per-draft cost, still no case for the prefilter.
+
+**The policy does NOT hold, and this is the follow-up.** The biggest modules
+admitted are `Mathlib.Algebra.Group.Defs` (1,183), `Analysis.Normed.Ring.Basic`
+(774), `Order.WithBot` (655), `GroupTheory.GroupAction.Hom` (647),
+`Order.CompleteBooleanAlgebra` (565) — the algebraic and order-theoretic
+foundations, pulled in because every proof transitively reaches `Mul`, `Zero`,
+`le_refl`. That is not where the next mathfin theorem lives, and it is 96% of
+what an embed run would pay for. "Any reached constant promotes its whole
+module" is too coarse a frontier.
+
+Candidate refinements, in order of appeal, none yet tried:
+
+1. **weight the frontier** — promote a module only above a threshold of
+   *distinct* MathFin constants reaching it, so `Order.WithBot` (reached
+   incidentally) drops out while `MeasureTheory.Integral.*` stays;
+2. **exclude an algebra/order core** the way `Init.*` is already excluded —
+   cruder, and risks dropping genuinely-used order lemmas;
+3. **rank rather than filter** — keep the slice, bias retrieval toward modules
+   with more MathFin reach.
+
+Until one lands, `embed --max-premises` is the blunt lever. Nothing auto-embeds:
+`autoformalize.build_retrieve_fns` only *loads* an existing cache and falls back
+when absent, so merging this costs nothing until someone runs `embed.py`.
