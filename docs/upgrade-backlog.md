@@ -811,16 +811,49 @@ foundations, pulled in because every proof transitively reaches `Mul`, `Zero`,
 what an embed run would pay for. "Any reached constant promotes its whole
 module" is too coarse a frontier.
 
-Candidate refinements, in order of appeal, none yet tried:
+**Refinements 1 and 2 were tried against the real index on 2026-08-14 and both
+are REJECTED.** The measurement is in this doc rather than a scratch file
+because the negative result is the useful part.
 
-1. **weight the frontier** — promote a module only above a threshold of
-   *distinct* MathFin constants reaching it, so `Order.WithBot` (reached
-   incidentally) drops out while `MeasureTheory.Integral.*` stays;
-2. **exclude an algebra/order core** the way `Init.*` is already excluded —
-   cruder, and risks dropping genuinely-used order lemmas;
-3. **rank rather than filter** — keep the slice, bias retrieval toward modules
-   with more MathFin reach.
+*Weight promotion by distinct MathFin reach* — the refinement this item
+originally proposed, and it is built on a false premise. I claimed
+`Order.WithBot` was "reached incidentally" while the measure-theory core was
+heavily reached. Measured: `Mathlib.Algebra.Group.Defs`, the module named as the
+worst offender, has **2,641 distinct MathFin constants reaching it** — the
+second most-reached module in the whole slice, behind `Data.Real.Basic` at
+3,270. Every reach threshold keeps it. `Order.WithBot` has 131. The lever does
+not move the thing it was designed to move.
 
-Until one lands, `embed --max-premises` is the blunt lever. Nothing auto-embeds:
-`autoformalize.build_retrieve_fns` only *loads* an existing cache and falls back
-when absent, so merging this costs nothing until someone runs `embed.py`.
+*Threshold on reach DENSITY* (distinct reach per record, to catch "we brushed
+one corner of a big module") — sharper, and still wrong. At `>=0.5` it takes
+108k records to 34k, but the drop list includes
+`MeasureTheory.Function.LpSeminorm.Basic` (0.40),
+`MeasureTheory.Integral.IntervalIntegral.Basic` (0.13),
+`MeasureTheory.Integral.IntegrableOn` (0.20),
+`MeasureTheory.Function.SimpleFunc` (0.01 — the construction the Itô integral is
+built on) and `Order.Filter.Basic` (0.44). Those are the neighbourhoods the next
+theorem lives in.
+
+**Why both fail, and why a third variant will too.** Reach measures how much of a
+module we have *already consumed*. Retrieval exists to surface what we have
+**not** consumed yet. Any frontier keyed on past reach is anti-correlated with
+the goal: it is most confident about dropping exactly the lightly-touched
+modules with the most undiscovered siblings — which is the entire premise of
+slicing by module rather than by constant.
+
+**So the over-breadth complaint is withdrawn.** It was aesthetic ("96% Mathlib
+feels wrong"), not empirical. The measured costs are acceptable — ~2.9s/query,
+~279 MB sidecar, a one-time embed of 68k short texts — and `Algebra.Group.Defs`
+being in the corpus does not hurt precision, because an Itô-isometry query will
+not rank group axioms highly. Cosine ranking already does at query time, per
+query, the discrimination an index-time filter would have to do blindly and
+permanently.
+
+If corpus cost ever does bite, the lever is at **ranking** time, not index time:
+bias scores by module reach rather than deleting modules, so a plumbing hit can
+still surface when it is genuinely the best match. `embed --max-premises`
+remains the blunt fallback.
+
+Nothing auto-embeds: `autoformalize.build_retrieve_fns` only *loads* a cache and
+falls back to loogle when absent, so the 68k corpus costs nothing until someone
+runs `embed.py`.
