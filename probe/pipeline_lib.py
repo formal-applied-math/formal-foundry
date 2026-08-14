@@ -273,7 +273,7 @@ def queue_claimed(candidate: dict, queue_dir: str) -> bool:
     return bool(tid) and os.path.exists(os.path.join(queue_dir, f"{tid}.entry.json"))
 
 
-def pr_claimed(candidate: dict, *, run_fn=None, repo: str = "raphaelrrcoelho/formal-mathfin") -> bool:
+def pr_claimed(candidate: dict, *, run_fn=None, repo: str = "formal-applied-math/formal-mathfin") -> bool:
     """Is there an OPEN pull request that already closes this candidate's issue?
 
     The ground-truth half of the duplicate guard. Asks `gh` for open PRs mentioning the

@@ -1,9 +1,9 @@
-# mathfin-foundry
+# formal-foundry
 
-Private operational repo for the **MathFin autoformalization operation**. It runs
-a two-engine, self-feeding loop that turns an open proof *issue* on
-[`formal-mathfin`](https://github.com/raphaelrrcoelho/formal-mathfin) into a
-ready-for-review PR: a frontier reasoner (Anthropic's **Claude**) drafts and
+The autoformalization foundry for the
+[`formal-applied-math`](https://github.com/formal-applied-math) program. It runs a
+two-engine, self-feeding loop that turns an open proof *issue* in one of the domain
+libraries into a ready-for-review PR: a frontier reasoner (Anthropic's **Claude**) drafts and
 faithfulness-gates a Lean *statement* from the issue — specifying the intent, then
 writing the Lean **agentically** against the lean-lsp — and a leaf-prover (Mistral's
 **Leanstral**) proves it — both checked against Lean's kernel, both **scouts, not
@@ -11,6 +11,26 @@ authors**. If you've built agentic coding loops, this is two of them chained: a
 model proposing code (a Lean statement, then its proof) into compiler-feedback
 repair loops, where "compile passes" means a proof kernel certified a gap-free
 proof and a human still owns the merge.
+
+**One foundry, several libraries.** The program's domain libraries are
+[`formal-mathfin`](https://github.com/formal-applied-math/formal-mathfin)
+(mathematical finance),
+[`formal-econometrics`](https://github.com/formal-applied-math/formal-econometrics)
+(identification), and
+[`formal-macroeconomics`](https://github.com/formal-applied-math/formal-macroeconomics)
+(growth). The foundry is deliberately *retargetable*: the prover loop, the kernel
+gates, and the faithfulness discipline are field-neutral, and what differs per
+library is a domain pack — the house context, the prompt assembly, and the target
+queue. Adding a library is meant to be configuration, not a fork. Today the
+mathematical-finance pack is the mature one; the others are earlier in that path.
+
+**Why this is public.** The libraries publish machine-checked theorems and claim
+that a machine drafted some of them. That claim is only auditable if the machinery
+making it is inspectable, which is the same argument that keeps the honesty
+apparatus in the public domain libraries rather than here. What is published is the
+pipeline, its prompts, and its telemetry — `runs/` records what the prover actually
+failed at, not only what it landed. Credentials live in CI secrets and have never
+been committed.
 
 > **New here?** Read [`docs/overview.md`](docs/overview.md) first — the full map of
 > both repos, the pipeline, and the outside reading to get fluent. Design of
@@ -180,7 +200,7 @@ scripts/leanstral-vibe.sh --agent lean -p "prove the sorry in MathFin/…; use l
 On a pass, the scheduled workflow assembles the proof and — **only with the
 `MAIN_PR_TOKEN` foundry secret set** — opens a ready-for-review PR on
 `formal-mathfin` that closes the source issue (the first was
-[#120](https://github.com/raphaelrrcoelho/formal-mathfin/pull/120), contango,
+[#120](https://github.com/formal-applied-math/formal-mathfin/pull/120), contango,
 opened 2026-07-11). Without the token it stops at candidate-notify and opens no
 PR. **An opened PR is a *proposal*, not a finished contribution** — it passes CI
 but is unmerged, and R reviews it under the 8-lens bar and revises before merge.

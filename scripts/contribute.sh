@@ -49,7 +49,7 @@ with open(out, "w") as f:
     f.write(f"""# Merge into formalization.yaml → automation.methods:
 - method: "machine autoformalization (Leanstral, refined)"
   models: ["{model}"]
-  framework: "mathfin-foundry: text-loop probe / vibe <-> lean-lsp-mcp"
+  framework: "formal-foundry: text-loop probe / vibe <-> lean-lsp-mcp"
   cost:
     wall_time: "{wall}s"
     spend_usd: "0 (Mistral Labs beta)"

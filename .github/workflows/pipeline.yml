@@ -67,7 +67,7 @@ jobs:
       - name: Checkout MathFin (live pins; PR target — token gives push rights)
         uses: actions/checkout@v4
         with:
-          repository: raphaelrrcoelho/formal-mathfin
+          repository: formal-applied-math/formal-mathfin
           path: main
           fetch-depth: 0                 # full history so the autoform branch pushes cleanly
           token: ${{ secrets.MAIN_PR_TOKEN }}   # empty on forks / until R grants it → tick notifies, no PR
@@ -193,7 +193,7 @@ jobs:
           MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
           MAIN_PR_TOKEN: ${{ secrets.MAIN_PR_TOKEN }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}   # frontier drafter (item I)
-          MAIN_REPO_SLUG: raphaelrrcoelho/formal-mathfin
+          MAIN_REPO_SLUG: formal-applied-math/formal-mathfin
           CI: "1"
           MAIN_REPO: ${{ github.workspace }}/main
           FOUNDRY_REPO: ${{ github.repository }}

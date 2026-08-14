@@ -21,7 +21,7 @@
 
 All tests run from the `probe/` directory (it is on `sys.path`; existing tests use bare `import autoformalize as af`):
 ```bash
-cd /home/rapha/code/mathfin-foundry/probe && python3 -m pytest <file> -v
+cd /home/rapha/code/formal-foundry/probe && python3 -m pytest <file> -v
 ```
 
 ---
@@ -149,7 +149,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/rapha/code/mathfin-foundry
+cd /home/rapha/code/formal-foundry
 git add probe/embed.py probe/test_embed.py
 git commit -m "feat(embed): Mistral /v1/embeddings client (stdlib mirror of mistral_chat)"
 ```
@@ -329,7 +329,7 @@ Expected: PASS (all).
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/rapha/code/mathfin-foundry
+cd /home/rapha/code/formal-foundry
 git add probe/embed.py probe/test_embed.py
 git commit -m "feat(embed): EmbeddingIndex over types.jsonl — cosine top-k + (model,corpus) cache"
 ```
@@ -439,7 +439,7 @@ echo "[build-embeddings] cache at index/embeddings-$MODEL.json"
 - [ ] **Step 6: Make it executable + commit**
 
 ```bash
-cd /home/rapha/code/mathfin-foundry
+cd /home/rapha/code/formal-foundry
 chmod +x scripts/build-embeddings.sh
 git add probe/embed.py probe/test_embed.py scripts/build-embeddings.sh
 git commit -m "feat(embed): build-embeddings CLI + script (embed committed types.jsonl)"
@@ -527,7 +527,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/rapha/code/mathfin-foundry
+cd /home/rapha/code/formal-foundry
 git add probe/embed.py probe/pipeline_lib.py probe/test_embed.py probe/test_autoformalize.py
 git commit -m "feat(embed): retrieve_fn factory + retrieval_backend/retrieval_k/embed_model/autop config"
 ```
@@ -613,7 +613,7 @@ Expected: PASS (new test passes; existing formalize/refill tests still green —
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/rapha/code/mathfin-foundry
+cd /home/rapha/code/formal-foundry
 git add probe/autoformalize.py probe/test_autoformalize.py
 git commit -m "feat(autoform): proactive premise injection into the initial formalize grounding"
 ```
@@ -727,7 +727,7 @@ Expected: PASS (all 4).
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/rapha/code/mathfin-foundry
+cd /home/rapha/code/formal-foundry
 git add probe/autop.py probe/test_autop.py
 git commit -m "feat(autop): cheap tactic-menu prove probe (scout, injected check_fn)"
 ```
@@ -885,7 +885,7 @@ Replace the body from line 303 (`context_pack = ...`) through the winning-candid
 
 Grep for where the PR is created:
 ```bash
-cd /home/rapha/code/mathfin-foundry && grep -n "gh pr create\|--id\|CAND\|run_tag\|run-tag" scripts/open-pr.sh | head
+cd /home/rapha/code/formal-foundry && grep -n "gh pr create\|--id\|CAND\|run_tag\|run-tag" scripts/open-pr.sh | head
 ```
 At the top of `open-pr.sh` (after it computes the candidate path `$CAND` for `--id`), detect the scout sidecar and set PR flags:
 ```bash
@@ -909,7 +909,7 @@ Expected: the two `build_retrieve_fns` tests PASS; the full foundry suite stays 
 - [ ] **Step 7: Commit**
 
 ```bash
-cd /home/rapha/code/mathfin-foundry
+cd /home/rapha/code/formal-foundry
 git add probe/autoformalize.py probe/probe.py scripts/open-pr.sh probe/test_autoformalize.py
 git commit -m "feat(prove): embedding retrieval-into-prove + autop scout rescue (draft PR, never silent merge)"
 ```
@@ -944,7 +944,7 @@ Expected: PASS (no failures, no errors).
 
 Run:
 ```bash
-cd /home/rapha/code/mathfin-foundry && MISTRAL_API_KEY=$MISTRAL_API_KEY ./scripts/build-embeddings.sh
+cd /home/rapha/code/formal-foundry && MISTRAL_API_KEY=$MISTRAL_API_KEY ./scripts/build-embeddings.sh
 ```
 Expected: `wrote index/embeddings-mistral-embed.json (2785 premises, model=mistral-embed)`.
 
@@ -981,14 +981,14 @@ Expected: `{'tactic': 'simp', 'proof': '...by simp'}` (or another menu tactic) �
 
 Check the cache size:
 ```bash
-ls -lh /home/rapha/code/mathfin-foundry/index/embeddings-mistral-embed.json
+ls -lh /home/rapha/code/formal-foundry/index/embeddings-mistral-embed.json
 ```
 If ≲ 30 MB, `git add` it (deterministic per pin, keeps ticks self-contained — like `types.jsonl` is committed). If larger, add `index/embeddings-*.json` to `.gitignore` and add a CI step running `scripts/build-embeddings.sh` before the prove step instead. Record the decision in the spec's Risks section.
 
 - [ ] **Step 7: Commit + push**
 
 ```bash
-cd /home/rapha/code/mathfin-foundry
+cd /home/rapha/code/formal-foundry
 git add pipeline.toml   # + index/embeddings-mistral-embed.json IF committing (Step 6)
 git commit -m "feat(pipeline): enable embedding retrieval + autop probe in [autoformalize]"
 git push origin main

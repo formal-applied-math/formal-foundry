@@ -48,7 +48,7 @@ jobs:
       - name: Checkout MathFin (live pins)
         uses: actions/checkout@v4
         with:
-          repository: raphaelrrcoelho/formal-mathfin
+          repository: formal-applied-math/formal-mathfin
           path: main
           fetch-depth: 1
 

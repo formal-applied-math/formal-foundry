@@ -103,7 +103,7 @@ vibe --setup                 # stores the Mistral API key
 # then, inside vibe, run /leanstall to install the Leanstral agent + model (labs-leanstral-1-5)
 
 # per session (the launcher takes the daemon down + brings lean-lsp up):
-cd ~/code/mathfin-foundry
+cd ~/code/formal-foundry
 scripts/leanstral-vibe.sh --agent lean -p "prove the sorry in <MathFin/…>; use lean_goal to read the state"
 
 # tear the LSP down when done (frees the Lean slot for the daemon):
@@ -152,12 +152,12 @@ and, on a pass, opens a ready-for-review PR on `formal-mathfin` that closes the
 source issue. That step needs one credential — the only thing granting the
 foundry write access to main:
 
-1. On `raphaelrrcoelho/formal-mathfin`, create a **fine-grained PAT** scoped to
+1. On `formal-applied-math/formal-mathfin`, create a **fine-grained PAT** scoped to
    that repo with **Contents: read/write** + **Pull requests: read/write**.
 2. Store it as the foundry secret (never in argv/logs):
 
    ```bash
-   printf '%s' "<PAT>" | gh secret set MAIN_PR_TOKEN --repo raphaelrrcoelho/mathfin-foundry
+   printf '%s' "<PAT>" | gh secret set MAIN_PR_TOKEN --repo formal-applied-math/formal-foundry
    ```
 
 Without `MAIN_PR_TOKEN` the tick falls back to candidate-notify and opens no PR,

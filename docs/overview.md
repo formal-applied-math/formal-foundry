@@ -13,7 +13,7 @@ There are two repos:
 - **`formal-mathfin`** (public) — a Lean 4 library of ~324 formally verified
   theorems in mathematical finance. This is *the artifact*. A theorem is "done"
   only when Lean's kernel accepts a proof with zero gaps.
-- **`mathfin-foundry`** (private, this repo) — a two-engine, self-feeding
+- **`formal-foundry`** (private, this repo) — a two-engine, self-feeding
   autoformalization pipeline. From an open proof *issue* it drafts a Lean
   *statement* (Anthropic's **Claude** — specify the intent, then write the Lean
   agentically against the lean-lsp — faithfulness-gated), then proves it (Mistral's
@@ -94,7 +94,7 @@ Read roughly in this order:
 
 ---
 
-## Part 2 — The autoformalization (`mathfin-foundry`): how proofs get drafted
+## Part 2 — The autoformalization (`formal-foundry`): how proofs get drafted
 
 The pipeline is a metered repair loop. Full ASCII/Mermaid diagram in
 `docs/leanstral-architecture.md`; the compact version:
@@ -183,7 +183,7 @@ the foundry instead of opening a red PR. The one credential that grants write
 access to main is a fine-grained PAT (`MAIN_PR_TOKEN`); revoking it fully disables
 auto-PR. Details in `docs/PROVER_SETUP.md`.
 
-### Where to read next (inside `mathfin-foundry`)
+### Where to read next (inside `formal-foundry`)
 
 1. `README.md` — the operational hard-rules and repo layout.
 2. `docs/leanstral-architecture.md` — the full pipeline diagram.
@@ -372,7 +372,7 @@ these are the papers behind it:
 2. Play the [Natural Number Game](https://adam.math.hhu.de/#/g/leanprover-community/NNG4)
    to level ~4. You now understand the tactic loop.
 3. Read `formal-mathfin/docs/mathematical-architecture.md` for the *what*.
-4. Read `mathfin-foundry/docs/leanstral-architecture.md` for the *how*.
+4. Read `formal-foundry/docs/leanstral-architecture.md` for the *how*.
 5. Pull the pinned Docker image and run one `lake build` end to end
    (`CONTRIBUTING.md` has the commands) so the toolchain is real to you.
 6. Read one pipeline tick's telemetry in `runs/` against `probe/probe.py`.

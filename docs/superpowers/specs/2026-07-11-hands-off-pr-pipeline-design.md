@@ -1,11 +1,11 @@
 # Hands-off autoform → PR pipeline (design spec)
 
-Date: 2026-07-11 · Repo: `mathfin-foundry` (main repo `formal-mathfin` stays independent)
+Date: 2026-07-11 · Repo: `formal-foundry` (main repo `formal-mathfin` stays independent)
 
 ## Goal
 
 A functional, hands-off pipeline where the Leanstral autoformalization setup
-**opens PRs on `raphaelrrcoelho/formal-mathfin`, ready for review**, that expand
+**opens PRs on `formal-applied-math/formal-mathfin`, ready for review**, that expand
 the formalization program. R evaluates and merges; the machine does everything
 up to the merge button.
 
@@ -107,7 +107,7 @@ existing scout-not-author packet). Only green, ready-for-review PRs are opened.
 
 ## Infra / credential (the one R action)
 
-- R creates a **fine-grained PAT** on `raphaelrrcoelho/formal-mathfin` with
+- R creates a **fine-grained PAT** on `formal-applied-math/formal-mathfin` with
   `contents: write` + `pull requests: write`. I store it as the foundry secret
   `MAIN_PR_TOKEN` (via stdin, never argv/logged). `pipeline.yml` checks out main
   with it for the assemble+PR step. This is the only thing that grants the

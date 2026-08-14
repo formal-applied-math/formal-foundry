@@ -3,7 +3,7 @@
 The scheduled pipeline works this queue one target per tick, oldest-unattempted
 first, and opens a PR on `formal-mathfin` that closes the target's source issue.
 The queue is seeded from the **`status:ready` + `type:proof`** issue backlog
-(`gh issue list --repo raphaelrrcoelho/formal-mathfin`) — each issue's *Task* is
+(`gh issue list --repo formal-applied-math/formal-mathfin`) — each issue's *Task* is
 the statement and its *Pointers* are the context-pack modules.
 
 ## A target = a stub + a re-export sidecar

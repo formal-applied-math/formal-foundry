@@ -52,7 +52,7 @@
 
   <!-- ===== FOUNDRY (center) ===== -->
   <rect x="460" y="170" width="420" height="420" rx="13" fill="#fbf5f0" stroke="#ecd6c3"/>
-  <text x="476" y="194" class="clab" fill="#d9611e">FOUNDRY · mathfin-foundry (local, private)</text>
+  <text x="476" y="194" class="clab" fill="#d9611e">FOUNDRY · formal-foundry (local, private)</text>
   <rect x="480" y="206" width="380" height="46" rx="9" fill="#ffffff" stroke="#d5dae1"/>
   <text x="494" y="227" class="nt"><tspan class="mono">house_context</tspan> → doctrine</text>
   <text x="494" y="245" class="nd">values · idioms · pins · context pack (lean_scout index)</text>

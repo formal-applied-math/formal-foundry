@@ -713,7 +713,7 @@ def main() -> int:
     p.add_argument("--main-repo", required=True)
     p.add_argument("--config", default=None,
                    help="pipeline.toml for [autoformalize] defaults (default: <foundry>/pipeline.toml)")
-    p.add_argument("--slug", default="raphaelrrcoelho/formal-mathfin")
+    p.add_argument("--slug", default="formal-applied-math/formal-mathfin")
     p.add_argument("--queue-dir", default=None, help="default: <foundry>/targets/queue")
     p.add_argument("--only", type=int, default=None, help="attempt only this issue number")
     p.add_argument("--route", choices=["theorem", "defs"], default=None,

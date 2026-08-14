@@ -78,7 +78,7 @@ jobs:
       - name: Checkout MathFin (for the pin stamp)
         uses: actions/checkout@v4
         with:
-          repository: raphaelrrcoelho/formal-mathfin
+          repository: formal-applied-math/formal-mathfin
           path: main
 
       - name: GHCR login (optional — image is public; login only eases rate limits)

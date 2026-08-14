@@ -33,7 +33,7 @@ done
 
 FOUNDRY="$(cd "$(dirname "$0")/.." && pwd)"
 MAIN="${MAIN_REPO:-/home/rapha/code/automated_proofs_quantfin}"
-SLUG="${MAIN_REPO_SLUG:-raphaelrrcoelho/formal-mathfin}"
+SLUG="${MAIN_REPO_SLUG:-formal-applied-math/formal-mathfin}"
 QUEUE="$FOUNDRY/targets/queue/manifest.json"
 CAND="$FOUNDRY/runs/$TAG-$ID.lean"
 [ -f "$CAND" ] || { echo "[open-pr] no candidate at $CAND" >&2; exit 1; }
@@ -86,13 +86,13 @@ fi
 # author prover and is axiom-guarded by the gate.)
 MODEL="${MODEL:-labs-leanstral-1-5}"   # the prover, for attribution + the PR body
 PR_FLAGS=()
-PROVER_DESC="Proved by Leanstral (${MODEL}) via the mathfin-foundry autoform pipeline; human-reviewed before merge."
+PROVER_DESC="Proved by Leanstral (${MODEL}) via the formal-foundry autoform pipeline; human-reviewed before merge."
 COMMIT_TRAILER=(-m "Co-Authored-By: Leanstral <${MODEL}@users.noreply.mistral.ai>")
 PROVENANCE_DESC="leanstral"
 BODY_INTRO="this pr was produced by the autoform pipeline (leanstral $MODEL), then assembled and validated green in ci."
 PROOF_BULLET="- \`$MODULE\` — the proof (axioms-clean; the probe's axiom guard passed)."
 
-FOUNDRY_SLUG="${FOUNDRY_REPO:-raphaelrrcoelho/mathfin-foundry}"
+FOUNDRY_SLUG="${FOUNDRY_REPO:-formal-applied-math/formal-foundry}"
 
 blocked() {  # file an autoform-blocked issue on the FOUNDRY repo, do NOT open a PR
   echo "[open-pr] BLOCKED: $1" >&2

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make the foundry's Leanstral pipeline open ready-for-review PRs on `raphaelrrcoelho/formal-mathfin` that resolve the open autoformalization issues and expand the formalization program, with R as the sole merge gate.
+**Goal:** Make the foundry's Leanstral pipeline open ready-for-review PRs on `formal-applied-math/formal-mathfin` that resolve the open autoformalization issues and expand the formalization program, with R as the sole merge gate.
 
 **Architecture:** The 91 labeled issues on formal-mathfin ARE the backlog (each issue's *Task* = the statement, *Pointers* = the context-pack modules, and a merged PR *Closes* it). A tick selects the next tractable `status:ready` `type:proof` issue → a seeded faithful stub → the pass@k probe proves it against the lean-repl daemon → `assemble.py` places the proof in a real `MathFin/` module + a re-export benchmark entry → `open-pr.sh` validates+regenerates in the foundry CI runner and opens a green PR that closes the issue. All pure logic is TDD'd behind injected `chat_fn`/`check_fn` seams; all heavy Lean build runs in CI, never on the 10 GB box.
 
@@ -18,7 +18,7 @@
 - **Specific `git add` only** — never `git add -A` / `git add .`.
 - **PR bodies in R's outbound style**: lowercase, "i", short sentences, no marketing, no em-dashes.
 - Main repo `formal-mathfin` stays **independent**: the foundry reads it and contributes only via PRs its own CI judges. The foundry gains write access solely through `MAIN_PR_TOKEN` (revocable).
-- Work in `~/code/mathfin-foundry`; main checkout path is `${MAIN_REPO:-/home/rapha/code/automated_proofs_quantfin}`.
+- Work in `~/code/formal-foundry`; main checkout path is `${MAIN_REPO:-/home/rapha/code/automated_proofs_quantfin}`.
 
 ---
 
@@ -356,13 +356,13 @@ git commit -m "feat(assemble): place proof in MathFin module + append re-export 
 
 **Files:**
 - Create: `targets/queue/cal-*.lean` (6–8 stubs) + `targets/queue/manifest.json` (via `build_manifest.py`)
-- Reference: issue bodies via `gh issue view <n> --repo raphaelrrcoelho/formal-mathfin`
+- Reference: issue bodies via `gh issue view <n> --repo formal-applied-math/formal-mathfin`
 
 **Selection bar** (all must hold): label `status:ready` + `type:proof`; difficulty `good-first`/`small`; the *Task* is a closed-form/algebra/`Real.exp`-monotonicity statement; the *Pointers* name existing MathFin lemmas to consume. First batch (confirmed good-first, `status:ready`): **#109** Siegel's paradox (fx), **#108** interest-rate parity (fx), **#88** contango/backwardation (futures), **#85** premium principles (actuarial), **#53** knock-in/out parity (black-scholes), **#66** IR-swap value/par rate (fixed-income), **#67** FRA value/simple forward (fixed-income). Skip `type:research` and `status:blocked-*`.
 
 **Per-issue procedure** (worked example below is real):
 
-- [ ] **Step 1:** `gh issue view <n> --repo raphaelrrcoelho/formal-mathfin --json title,body`. Read the *Task* (the statement) and *Pointers* (context modules).
+- [ ] **Step 1:** `gh issue view <n> --repo formal-applied-math/formal-mathfin --json title,body`. Read the *Task* (the statement) and *Pointers* (context modules).
 - [ ] **Step 2:** Author `targets/queue/cal-bk-<n>.lean` as a MathFin module stub: license header, `module`, `public import`s (Mathlib + the pointer modules), a `## Result` docstring, `@[expose] public section`, `namespace MathFin`, one faithful `theorem … := by sorry`, `end MathFin` — plus the placement header comment lines. Faithfulness is R's to confirm at merge; author conservatively (state exactly the issue's formula, no stronger).
 
 Worked example — `targets/queue/cal-bk-109.lean` (Siegel's paradox, #109):
@@ -432,7 +432,7 @@ This runs in the foundry CI runner (16 GB, `mathfin-verify` image, main checked 
   4. **validate + regen** (green-or-abort): `lake build MathFin` → `python3 -m tools.verify.axiom_audit_gen --write` → `python3 -m tools.formalization_yaml --write` → `python3 -m tools.verify.ledger status`; if any fails, `gh issue create --label autoform-blocked` on the FOUNDRY repo (candidate needs manual placement) and `exit 0` WITHOUT opening a PR;
   5. **promotion honesty**: run the `#print axioms MathFin.<name>` + a definitional-`rfl` check (reject if the "full" proof is `rfl`-trivial — the test_values rfl-tripwire case);
   6. specific `git add` of exactly the written module + benchmark + regenerated `MathFin/AxiomAuditGen.lean` + `formalization.yaml` + `verification_ledger.json`; commit with a message that does **not** carry Claude attribution;
-  7. `git push` the branch; `gh pr create --repo raphaelrrcoelho/formal-mathfin --label autoform --title "autoform: <issue title> (closes #<n>)" --body "$(pr_body)"`.
+  7. `git push` the branch; `gh pr create --repo formal-applied-math/formal-mathfin --label autoform --title "autoform: <issue title> (closes #<n>)" --body "$(pr_body)"`.
   8. `pr_body`: R's outbound style — what was proved, provenance (Leanstral + tokens + run tag), "closes #<n>", and an 8-lens review checklist. No em-dashes, lowercase, "i".
 - [ ] **Step 2:** `chmod +x scripts/open-pr.sh`.
 - [ ] **Step 3: Commit**
@@ -447,11 +447,11 @@ git commit -m "feat(pipeline): open-pr.sh — assemble + validate/regen + green-
 **Files:**
 - Modify: `scripts/pipeline-tick.sh:67-83` (on `pass` → call `open-pr.sh` instead of only notifying)
 - Modify: `.github/workflows/pipeline.yml` (checkout main with `MAIN_PR_TOKEN`; run the assemble+PR step in-container after a pass)
-- Modify: `pipeline.toml` (add `main_repo_slug = "raphaelrrcoelho/formal-mathfin"`)
+- Modify: `pipeline.toml` (add `main_repo_slug = "formal-applied-math/formal-mathfin"`)
 
 - [ ] **Step 1:** In `pipeline-tick.sh`, replace the notify-only block: on `OUTCOME = pass`, invoke `scripts/open-pr.sh --id "$ID" --tag "$TAG"` (guarded by `[ -n "${MAIN_PR_TOKEN:-}" ]`; if unset, fall back to the existing candidate-notify so local runs never try to PR).
-- [ ] **Step 2:** In `pipeline.yml`: add a checkout of `raphaelrrcoelho/formal-mathfin` (path `main`, `token: ${{ secrets.MAIN_PR_TOKEN }}`, full history for `lake`), pass `MAIN_PR_TOKEN` + `MAIN_REPO=main` into the tick step, and ensure `gh` is authed with that token for the PR step.
-- [ ] **Step 3:** Document the credential in `pipeline.yml` header + `docs/PROVER_SETUP.md`: R creates a fine-grained PAT on `formal-mathfin` (`contents: write`, `pull requests: write`); it is stored as the foundry secret `MAIN_PR_TOKEN`. (Setting the secret — `printf '%s' "$PAT" | gh secret set MAIN_PR_TOKEN --repo raphaelrrcoelho/mathfin-foundry` — is R's action / done via stdin when R hands over the PAT; never in the plan/logs.)
+- [ ] **Step 2:** In `pipeline.yml`: add a checkout of `formal-applied-math/formal-mathfin` (path `main`, `token: ${{ secrets.MAIN_PR_TOKEN }}`, full history for `lake`), pass `MAIN_PR_TOKEN` + `MAIN_REPO=main` into the tick step, and ensure `gh` is authed with that token for the PR step.
+- [ ] **Step 3:** Document the credential in `pipeline.yml` header + `docs/PROVER_SETUP.md`: R creates a fine-grained PAT on `formal-mathfin` (`contents: write`, `pull requests: write`); it is stored as the foundry secret `MAIN_PR_TOKEN`. (Setting the secret — `printf '%s' "$PAT" | gh secret set MAIN_PR_TOKEN --repo formal-applied-math/formal-foundry` — is R's action / done via stdin when R hands over the PAT; never in the plan/logs.)
 - [ ] **Step 4: Commit**
 
 ```bash

@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "mathfin-foundry run record (v1)",
+  "title": "formal-foundry run record (v1)",
   "description": "One NORMALIZED telemetry record per (subject x attempt x stage), DERIVED (never authored) from runs/*.jsonl by probe/provenance.py. Grain: a draft record per (issue x refill-history attempt); a prove record per (target x prove-summary). Per-stage fields that the source stream does not carry are null (an honest gap, not a fabrication). One substrate for the obstruction census, the price-sheet decision, and any future meta-review.",
   "type": "object",
   "required": ["record_id", "stage", "attempt", "outcome", "ts", "source_file"],
