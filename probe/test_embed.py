@@ -146,3 +146,170 @@ def test_load_premises_drops_allowcompletion_false(tmp_path):
         {"name": "MathFin.autoGenThing", "type": "Q", "allowCompletion": False},
     ]))
     assert [r["name"] for r in embed.load_premises(str(tmp_path))] == ["MathFin.realLemma"]
+
+
+# --- flat float32 store + binary sidecar (2026-08-14) -------------------------
+# The corpus grew from MathFin-only (~2.8k) to MathFin + its reached Mathlib
+# neighbourhoods, so the vectors moved out of the JSON. These pin the properties
+# that move made load-bearing.
+
+import array
+import json as _json
+import os as _os
+import sys as _sys
+import tempfile
+
+
+def _prem(n):
+    return [{"name": f"L{i}", "module": "MathFin.Foo", "type": "T"} for i in range(n)]
+
+
+def _rows(n, dim=4):
+    # distinct, non-degenerate rows so ranking is well-defined
+    return [[float((i + j) % 7) + 1.0 for j in range(dim)] for i in range(n)]
+
+
+def test_save_writes_a_binary_sidecar_not_inline_vectors():
+    with tempfile.TemporaryDirectory() as d:
+        idx = embed.EmbeddingIndex(_prem(3), model="fake")
+        idx.vectors = _rows(3)
+        path = embed.cache_path(d, "fake")
+        idx.save(path)
+        blob = _json.load(open(path))
+        assert "vectors" not in blob                     # the 1 GB-at-scale mistake
+        assert blob["dim"] == 4 and blob["count"] == 3
+        assert _os.path.isfile(embed.vectors_path(path))
+        # 3 rows x 4 dims x 4 bytes
+        assert _os.path.getsize(embed.vectors_path(path)) == 48
+
+
+def test_sidecar_roundtrip_preserves_ranking():
+    with tempfile.TemporaryDirectory() as d:
+        prem = _prem(5)
+        idx = embed.EmbeddingIndex(prem, model="fake")
+        idx.vectors = _rows(5)
+        path = embed.cache_path(d, "fake")
+        idx.save(path)
+        loaded = embed.EmbeddingIndex.load(path, prem, "fake")
+        assert loaded is not None
+        q = [1.0, 2.0, 3.0, 4.0]
+        assert (embed.top_k_flat(q, loaded._flat, loaded._dim, 5)
+                == embed.top_k_flat(q, idx._flat, idx._dim, 5))
+
+
+def test_top_k_flat_agrees_with_top_k():
+    rows = _rows(6)
+    flat = array.array("f", (x for r in rows for x in r))
+    q = [0.5, 1.0, 0.0, 2.0]
+    # float32 vs float64 must not reorder these well-separated rows
+    assert embed.top_k_flat(q, flat, 4, 3) == embed.top_k(q, rows, 3)
+
+
+def test_precomputed_norms_do_not_change_the_ranking():
+    rows = _rows(6)
+    idx = embed.EmbeddingIndex(_prem(6), model="fake")
+    idx.vectors = rows
+    q = [0.5, 1.0, 0.0, 2.0]
+    assert (embed.top_k_flat(q, idx._flat, idx._dim, 4, norms=idx._row_norms())
+            == embed.top_k_flat(q, idx._flat, idx._dim, 4))
+
+
+def test_legacy_inline_cache_still_loads():
+    # a cache written before the sidecar existed must not be silently discarded:
+    # rebuilding costs a full re-embed of the corpus.
+    with tempfile.TemporaryDirectory() as d:
+        prem = _prem(2)
+        idx = embed.EmbeddingIndex(prem, model="fake")
+        path = embed.cache_path(d, "fake")
+        with open(path, "w") as f:
+            _json.dump({"model": "fake", "corpus_hash": idx.hash,
+                        "vectors": [[1.0, 0.0], [0.0, 1.0]]}, f)
+        loaded = embed.EmbeddingIndex.load(path, prem, "fake")
+        assert loaded is not None and loaded.vectors == [[1.0, 0.0], [0.0, 1.0]]
+
+
+def test_missing_sidecar_is_stale_not_a_crash():
+    with tempfile.TemporaryDirectory() as d:
+        prem = _prem(3)
+        idx = embed.EmbeddingIndex(prem, model="fake")
+        idx.vectors = _rows(3)
+        path = embed.cache_path(d, "fake")
+        idx.save(path)
+        _os.remove(embed.vectors_path(path))
+        assert embed.EmbeddingIndex.load(path, prem, "fake") is None
+
+
+def test_truncated_sidecar_is_stale_not_a_crash():
+    with tempfile.TemporaryDirectory() as d:
+        prem = _prem(3)
+        idx = embed.EmbeddingIndex(prem, model="fake")
+        idx.vectors = _rows(3)
+        path = embed.cache_path(d, "fake")
+        idx.save(path)
+        with open(embed.vectors_path(path), "r+b") as f:
+            f.truncate(20)
+        assert embed.EmbeddingIndex.load(path, prem, "fake") is None
+
+
+def test_foreign_byteorder_cache_is_rejected():
+    # float32 is written native; decoding it the other way round yields noise,
+    # and noise that ranks confidently is worse than no cache at all.
+    with tempfile.TemporaryDirectory() as d:
+        prem = _prem(3)
+        idx = embed.EmbeddingIndex(prem, model="fake")
+        idx.vectors = _rows(3)
+        path = embed.cache_path(d, "fake")
+        idx.save(path)
+        blob = _json.load(open(path))
+        blob["byteorder"] = "big" if _sys.byteorder == "little" else "little"
+        _json.dump(blob, open(path, "w"))
+        assert embed.EmbeddingIndex.load(path, prem, "fake") is None
+
+
+def test_save_before_build_is_an_error_not_an_empty_cache():
+    with tempfile.TemporaryDirectory() as d:
+        idx = embed.EmbeddingIndex(_prem(2), model="fake")
+        try:
+            idx.save(embed.cache_path(d, "fake"))
+        except ValueError:
+            return
+        assert False, "saving an unbuilt index must raise, not write a bad cache"
+
+
+def test_vectors_path_sits_beside_the_json():
+    assert embed.vectors_path("index/embeddings-mistral-embed.json") == \
+        "index/embeddings-mistral-embed.f32"
+
+
+def test_corpus_composition_counts_by_namespace():
+    prem = [{"module": "MathFin.Foo"}, {"module": "MathFin.Bar"},
+            {"module": "Mathlib.MeasureTheory.X"}, {"module": None}]
+    assert embed.corpus_composition(prem) == {"MathFin": 2, "Mathlib": 1, "?": 1}
+
+
+def test_dry_run_reports_without_touching_the_api(capsys, monkeypatch):
+    # the guard against silently spending an embed budget on a corpus nobody sized
+    monkeypatch.setattr(embed, "mistral_embed",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("called the API")))
+    with tempfile.TemporaryDirectory() as d:
+        with open(_os.path.join(d, "types.jsonl"), "w") as f:
+            for i in range(5):
+                f.write(_json.dumps({"name": f"MathFin.l{i}", "module": "MathFin.Foo",
+                                     "type": "T", "allowCompletion": True}) + "\n")
+        assert embed.build_cli(["--index-dir", d, "--dry-run"]) == 0
+        err = capsys.readouterr().err
+        assert "corpus: 5 premises" in err and "MathFin=5" in err
+
+
+def test_max_premises_keeps_own_records_first(capsys, monkeypatch):
+    monkeypatch.setattr(embed, "mistral_embed", lambda *a, **k: [])
+    with tempfile.TemporaryDirectory() as d:
+        with open(_os.path.join(d, "types.jsonl"), "w") as f:
+            for i in range(3):
+                f.write(_json.dumps({"name": f"Mathlib.m{i}", "module": "Mathlib.X",
+                                     "type": "T", "allowCompletion": True}) + "\n")
+            f.write(_json.dumps({"name": "MathFin.a", "module": "MathFin.Foo",
+                                 "type": "T", "allowCompletion": True}) + "\n")
+        assert embed.build_cli(["--index-dir", d, "--dry-run", "--max-premises", "2"]) == 0
+        err = capsys.readouterr().err
+        assert "capped to 2" in err and "1 own records kept first" in err

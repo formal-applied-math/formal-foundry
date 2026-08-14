@@ -277,6 +277,12 @@ No reasoner (a retriever/index is not a general model). Lower priority; the
 graph-closure packs are already decent. Source:
 [LeanDojo / ReProver](https://arxiv.org/abs/2306.15626).
 
+**Landed, but over the wrong corpus until 2026-08-14 — see item W.** The
+retriever was real; `index/types.jsonl` was MathFin-only, so "surface library
+lemmas R didn't name" could only ever mean *our* lemmas. Mathlib, the library
+the anti-wrapper contract is actually about, was filtered out upstream of the
+embedding step.
+
 ---
 
 ## [needs general reasoner] — for when we add a second engine
@@ -740,3 +746,50 @@ ours — formal-mathfin#166, an outside contribution, *derived* its
 denominator-nonvanishing condition from `zcb_pos` instead of assuming it,
 leaving one hypothesis. That is the exact inverse of R's failure mode, and it is
 what the drafter's statement stage should be aiming at.
+
+---
+
+### W. The retrieval corpus excluded Mathlib [BUILT 2026-08-14]
+
+`scripts/build-index.sh` extracts the full transitive closure (~771k records,
+~850 MB) and then, in step 2, kept only `MathFin.*` — ~2.8k records, a 275x
+shrink chosen so the `scout_index` adapter would load in ~0.03s. The load-time
+win was real. The uncosted consequence: `embed.load_premises` reads that same
+`types.jsonl`, so **the drafter's semantic retrieval had never seen a Mathlib
+lemma.** Its only Mathlib channel was `af_drafting.loogle_candidates` —
+syntactic, and pointed at a public instance tracking a *newer* Mathlib than the
+pin, which its own docstring marks UNVERIFIED.
+
+That is a coherence-first, anti-wrapper pipeline in which the drafter cannot
+look up the lemma it is supposed to consume. It is also the shape of failure the
+repo keeps rediscovering: two components each correct against their own
+contract, wrong in composition, with every unit test passing.
+
+**Reproduction:** `probe/test_index_filter.py::test_sliced_index_feeds_both_consumers_with_mathlib_visible`
+fails against the old `grep '"module":"MathFin'` step and passes against
+`probe/index_filter.py`. The stale `MAIN_REPO` default in
+`scripts/build-index.sh` (still the pre-relocation `~/code/...` path) was found
+in the same pass; CI set it explicitly, so only local runs broke, and only at
+the PIN stamp *after* paying the full extraction.
+
+**What shipped.**
+
+| piece | code | why |
+|---|---|---|
+| neighbourhood slice | `probe/index_filter.py` | own modules in full + every `Mathlib.*` module hosting a constant a MathFin decl reaches; `tactics.jsonl` own-only (exemplars teach *house* style) |
+| dict-backed lookups | `probe/scout_index.py` | `signature_of`/`dependencies` were per-call linear scans, fine at 2.8k records and not at Mathlib scale |
+| flat float32 sidecar | `probe/embed.py` `vectors_path` | measured at 1024 dims / 50k premises: inline JSON is ~1.0 GB, ~8s to parse, ~1.2 GB resident as Python floats; float32 is ~205 MB in one read |
+| spend guard | `embed.py --dry-run` / `--max-premises` | the corpus is now an API bill; size it before paying |
+
+**Deliberately NOT done: a lexical prefilter before the cosine scan.** The
+obvious worry was that a bigger corpus makes `top_k` too slow to run in-loop.
+Measured first: 1024 dims, 50k premises, pure Python — ~2.1s per query, i.e.
+fine for a once-per-draft call. A prefilter would have traded real recall (it
+drops premises that share no tokens with the query, which is precisely what
+embeddings are for) against a cost that does not exist.
+
+**Open — the numbers are unmeasured.** The slice size is whatever the frontier
+turns out to be; nobody has run it yet. `index_filter` prints the frontier size
+and kept/total per file on every run, and `embed --dry-run` breaks the corpus
+down by namespace, so the first `build-index.yml` run answers it. Tune `DEFAULT_ALLOW` / revisit the float32
+sidecar only against those numbers.

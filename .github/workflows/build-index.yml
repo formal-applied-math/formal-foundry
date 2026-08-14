@@ -3,8 +3,10 @@ name: build lean_scout index
 # THE "REBUILD ONCE PER PIN" STEP, made a job instead of a chore.
 #
 # `scripts/build-index.sh` extracts the lean_scout index the context packs
-# consume (`house_context` → `scout_index.ScoutIndex`) by running lean_scout
-# over the MathFin library. The index is gitignored on purpose — it is a
+# consume (`house_context` → `scout_index.ScoutIndex`) and the drafter searches
+# semantically (`embed.load_premises`), by running lean_scout over the MathFin
+# library and slicing the result to MathFin + the Mathlib neighbourhoods MathFin
+# actually reaches (`probe/index_filter.py`). The index is gitignored — it is a
 # derived artifact keyed to a pin, and `index/PIN` records the toolchain +
 # lean_scout rev it was built under so staleness is detectable rather than
 # silent.
