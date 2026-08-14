@@ -152,7 +152,7 @@ fi
 # (one Lake writer) — the workflow guarantees that before calling this script.
 # FIRST-RUN NOTE: this docker/mount/cache path is validated on the first live PR;
 # on any failure we abort to an autoform-blocked issue rather than open a red PR.
-IMAGE="${VERIFY_IMAGE:-ghcr.io/raphaelrrcoelho/mathfin-verify:latest}"
+IMAGE="${VERIFY_IMAGE:-ghcr.io/formal-applied-math/mathfin-verify:latest}"
 # the proving daemon is done; stop it (all possible names: docker-run `lean-repl`,
 # compose `docker-lean-repl-1`, plus the lean-lsp) so the build has the memory
 # headroom AND is the sole Lake writer to the shared olean volume mounted below.

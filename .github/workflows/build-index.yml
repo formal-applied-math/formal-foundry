@@ -94,7 +94,7 @@ jobs:
           fi
 
       - name: Pull the pinned verify image
-        run: docker pull ghcr.io/raphaelrrcoelho/mathfin-verify:latest
+        run: docker pull ghcr.io/formal-applied-math/mathfin-verify:latest
 
       - name: Report the pins this index will be built under
         run: |
@@ -103,7 +103,7 @@ jobs:
           grep -E '^REV=' scripts/build-index.sh
           echo "image /app toolchain:"
           docker run --rm --entrypoint cat \
-            ghcr.io/raphaelrrcoelho/mathfin-verify:latest /app/lean-toolchain
+            ghcr.io/formal-applied-math/mathfin-verify:latest /app/lean-toolchain
 
       - name: Extract
         env:

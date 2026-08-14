@@ -19,7 +19,7 @@
 set -euo pipefail
 FOUNDRY="$(cd "$(dirname "$0")/.." && pwd)"
 MAIN="${MAIN_REPO:-/mnt/c/Users/rapha/Documents/Code/formal-mathfin}"
-IMAGE="${MATHFIN_IMAGE:-ghcr.io/raphaelrrcoelho/mathfin-verify:latest}"
+IMAGE="${MATHFIN_IMAGE:-ghcr.io/formal-applied-math/mathfin-verify:latest}"
 REV="289c1f1f88a4"                       # lean_scout on Lean v4.32.0
 INDEX="$FOUNDRY/index"
 mkdir -p "$INDEX"
