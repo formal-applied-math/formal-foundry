@@ -15,7 +15,12 @@
 #   4. record a vibe-style summary row + the A/B scoreboard row, and refresh the scoreboard.
 set -euo pipefail
 FOUNDRY="$(cd "$(dirname "$0")/.." && pwd)"
-MAIN="${MAIN_REPO:-/home/rapha/code/automated_proofs_quantfin}"
+
+# --- domain pack (runbook 06): the ONE place that knows which library we target ---
+# `DOMAIN` picks the pack; with none set the shim reads `[domain] name` from
+# pipeline.toml.
+eval "$(python3 "$FOUNDRY/probe/domain_pack.py" --export-env ${DOMAIN:+"$DOMAIN"})"
+MAIN="${MAIN_REPO:-$(dirname "$FOUNDRY")/$DOMAIN_REPO_NAME}"
 QUEUE="$FOUNDRY/targets/queue/manifest.json"
 RUNS="$FOUNDRY/runs"
 CFG="$FOUNDRY/pipeline.toml"

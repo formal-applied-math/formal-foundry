@@ -66,17 +66,32 @@ verify_image = "ghcr.io/formal-applied-math/mathfin-verify:latest"
 scratch_module = "MathFin/_AutoformAgentic.lean"
 
 [module]
-# The house preamble every emitted module opens. Girsanov.lean:50-51 — 155 of 262
-# MathFin modules open exactly these, so the drafter emits bare
-# `IsProbabilityMeasure`/`IntegrableOn`/`Measure` as a MathFin author would and the
-# module must carry the namespaces holding them. An unused open is harmless; a
-# missing one is a silent bare-name death (run 29667784310, #60 + #109).
+# The house preamble every emitted module carries, between the `/-! … -/` doc and
+# the body. Composed rather than templated so the three consumers — the emitter,
+# the decomposer's skeleton, and the splice reader — cannot drift apart.
+#
+# `options` is pinned in the STUB even though the lakefile already sets it: the
+# daemon that gates drafts elaborates with Lean's default (autoImplicit true), so a
+# drafted `{Ω : Type u}` auto-binds `u`, passes every gate, then fails the open-pr
+# regen build with `unknown universe level` (the run-4 PR blocker).
+options = "set_option autoImplicit false"
+
+# Girsanov.lean:50-51 — 155 of 262 MathFin modules open exactly these, so the
+# drafter emits bare `IsProbabilityMeasure`/`IntegrableOn`/`Measure` as a MathFin
+# author would and the module must carry the namespaces holding them. An unused
+# open is harmless; a missing one is a silent bare-name death (run 29667784310,
+# #60 + #109).
 opens = ["open MeasureTheory ProbabilityTheory", "open scoped NNReal ENNReal"]
 
-# The line `_extract_core_stub` splices from — the LAST preamble open. Keeping it
-# an explicit field rather than deriving it from `opens[-1]` makes the coupling
-# between the emitter and the splice reader visible in one place.
-splice_anchor = "open scoped NNReal ENNReal"
+# Where the opens sit relative to `namespace`. MathFin opens INSIDE the namespace;
+# formal-econometrics opens before it (PotentialOutcomes.lean:43-45). This field
+# exists because runbook 06 found it: writing the second pack is the first real
+# test of this contract, and the module skeleton was the field 02 guessed.
+opens_before_namespace = false
+
+# NOTE there is no `splice_anchor` field. The line `_extract_core_stub` reads the
+# body back from is DERIVED — it is the last line of the preamble — so a pack
+# cannot declare a preamble and then disagree about how to parse what follows it.
 
 license = """\
 /-

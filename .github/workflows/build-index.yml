@@ -4,8 +4,8 @@ name: build lean_scout index
 #
 # `scripts/build-index.sh` extracts the lean_scout index the context packs
 # consume (`house_context` → `scout_index.ScoutIndex`) and the drafter searches
-# semantically (`embed.load_premises`), by running lean_scout over the MathFin
-# library and slicing the result to MathFin + the Mathlib neighbourhoods MathFin
+# semantically (`embed.load_premises`), by running lean_scout over the target
+# library and slicing the result to it + the Mathlib neighbourhoods that library
 # actually reaches (`probe/index_filter.py`). The index is gitignored — it is a
 # derived artifact keyed to a pin, and `index/PIN` records the toolchain +
 # lean_scout rev it was built under so staleness is detectable rather than
@@ -19,13 +19,13 @@ name: build lean_scout index
 # refreshing the index is "download the artifact, unzip into index/".
 #
 # It also answers the question scout-lake/README.md flags as the one thing that
-# can go wrong: does lean_scout @<rev> actually build against MathFin's current
+# can go wrong: does lean_scout @<rev> actually build against the library's current
 # Mathlib? A red run here IS that answer, and it arrives at the pin bump rather
 # than the next time somebody wants an index.
 #
 # Runs on the pin-following commits (the paths below are what changes when the
 # library moves) plus manual dispatch. The extraction reuses the image's baked
-# `/app` — Mathlib + BrownianMotion + MathFin oleans are already compiled in
+# `/app` — Mathlib + deps + library oleans are already compiled in
 # there, so only lean_scout itself compiles here.
 
 on:
@@ -49,6 +49,11 @@ on:
         description: "Also extract the tactics index (heavy — re-elaborates every tactic)"
         type: boolean
         default: false
+      domain:
+        description: "domain pack to index (a directory under domains/)"
+        type: choice
+        options: [mathfin, econometrics]
+        default: mathfin
 
 concurrency:
   group: build-index
@@ -59,6 +64,8 @@ jobs:
     name: extract from the pinned image
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    env:
+      DOMAIN: ${{ inputs.domain || 'mathfin' }}
     steps:
       # The verify image is Mathlib-sized; the runner's default free disk is
       # not. Same reclaim pipeline.yml uses before pulling it.
@@ -74,13 +81,20 @@ jobs:
       - name: Checkout foundry
         uses: actions/checkout@v4
 
+      - name: Resolve the domain pack
+        # `--format env` is REQUIRED: $GITHUB_ENV is not shell-parsed, so the
+        # shell-quoted form would put literal quotes inside every value.
+        run: |
+          python3 probe/domain_pack.py --export-env "$DOMAIN" --format env >> "$GITHUB_ENV"
+          echo "[domain] $DOMAIN" >&2
+
       # Only for the PIN stamp — the extraction itself reads the image's baked
       # /app, not this checkout. Shallow is enough (the script asks for
       # `rev-parse HEAD` and `lean-toolchain`).
-      - name: Checkout MathFin (for the pin stamp)
+      - name: Checkout the target library (for the pin stamp)
         uses: actions/checkout@v4
         with:
-          repository: formal-applied-math/formal-mathfin
+          repository: ${{ env.MAIN_REPO_SLUG }}
           path: main
 
       - name: GHCR login (optional — image is public; login only eases rate limits)
@@ -90,11 +104,11 @@ jobs:
           if [ -n "$GHCR_TOKEN" ]; then
             echo "$GHCR_TOKEN" | docker login ghcr.io -u raphaelrrcoelho --password-stdin
           else
-            echo "no GHCR_TOKEN set — anonymous pull (mathfin-verify is public)"
+            echo "no GHCR_TOKEN set — anonymous pull (the verify image is public)"
           fi
 
       - name: Pull the pinned verify image
-        run: docker pull ghcr.io/formal-applied-math/mathfin-verify:latest
+        run: docker pull "$DOMAIN_VERIFY_IMAGE"
 
       - name: Report the pins this index will be built under
         run: |
@@ -103,7 +117,7 @@ jobs:
           grep -E '^REV=' scripts/build-index.sh
           echo "image /app toolchain:"
           docker run --rm --entrypoint cat \
-            ghcr.io/formal-applied-math/mathfin-verify:latest /app/lean-toolchain
+            "$DOMAIN_VERIFY_IMAGE" /app/lean-toolchain
 
       - name: Extract
         env:

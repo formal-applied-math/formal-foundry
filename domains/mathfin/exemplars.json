@@ -1,8 +1,12 @@
 {
-  "_comment": "Worked-example constants the prompt templates substitute. `exemplar` is a real, fully-applied library def the drafter is shown as the shape to CONSUME rather than re-derive; `exemplar_partial` is the same def under-applied, the pitfall it illustrates. A second domain supplies its own — the prompts stay field-neutral.",
+  "_comment": "Worked-example constants and phrases the prompt templates substitute. `exemplar` is a real, fully-applied library def the drafter is shown as the shape to CONSUME rather than re-derive; `exemplar_partial` is the same def under-applied, the pitfall it illustrates. The `_subject`, `_provable_side_condition`, `_piecewise` and `_grounded_bodies` slots carry the worked EXAMPLES the prompts reason through — a second domain that inherited this one's would be told to reason about bond prices, which is why they are data.",
   "benchmark_id_format": "mf-<area>-<slug>",
   "exemplar": "MathFin.zcb",
   "exemplar_applied": "MathFin.zcb r t T",
   "exemplar_applied_alt": "MathFin.zcb r 0 T",
-  "exemplar_partial": "MathFin.zcb r"
+  "exemplar_grounded_bodies": "an integral, Real.exp, max, an existing MathFin price",
+  "exemplar_partial": "MathFin.zcb r",
+  "exemplar_piecewise": "a payoff branching on a sign/threshold",
+  "exemplar_provable_side_condition": "a zero-coupon-bond price built from `Real.exp` is automatically positive, so an explicit `0 < P` positivity hypothesis is unnecessary",
+  "exemplar_subject": "the bond price"
 }

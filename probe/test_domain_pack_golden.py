@@ -179,8 +179,10 @@ def renders(main_repo: str) -> dict[str, str]:
                                   ["the convexity bound", "the par case"]),
         indent=2, ensure_ascii=False)
 
-    # `_DRAFTER_PROMPT` is module-global mutable state: render BOTH the unwired
-    # (empty preamble) and wired forms, and restore it so ordering cannot leak.
+    # The drafter preamble used to be module-global mutable state (`_DRAFTER_PROMPT`,
+    # set once at pipeline start); the pack refactor made it a parameter. Render BOTH
+    # the unwired form (no preamble — what a caller that never wires it gets) and the
+    # wired one, since the snapshot has to pin the join as well as the pieces.
     preamble = house_context.build_drafter_prompt(main_repo, PACK)
     out["messages/intent-unwired"] = json.dumps(
         af_prompts.intent_messages(PACK, _ISSUE, "CONTEXT PACK"),

@@ -270,9 +270,7 @@ def _module_text(pack: DomainPack, pointers, body: str) -> str:
     return (
         f"{pack.license}\nmodule\n\n"
         f"{imports}\n\n"
-        "set_option autoImplicit false\n\n"
-        "@[expose] public section\n\n"
-        f"namespace {pack.namespace}\n\n"
+        f"{pack.module_preamble(opens=False)}\n\n"
         + body
         + f"\n\nend {pack.namespace}\n"
     )

@@ -1,0 +1,79 @@
+# The econometrics domain pack — the program's second field.
+#
+# Written against the REAL library (`formal-econometrics` @ 7908849), not against a
+# guess: the namespace, the module skeleton, the exemplar and the sections are all
+# read off `Econometrics/Identification/{PotentialOutcomes,DiD}.lean`. Where this
+# pack disagreed with the contract runbook 02 shipped, the CONTRACT was fixed — see
+# `opens_before_namespace` below.
+#
+# Status of the target library: PHASE 0, one theorem. `docs/phase0-verdict.md` says
+# continue, with the σ-algebra (`condExp`) route flagged as the top residual risk —
+# it was never exercised, and it is the route covariate conditioning will need.
+#
+# Runbook of record:
+# formal-mathfin/docs/plans/2026-08-09-program-execution/06-foundry-target-plane.md
+
+[library]
+namespace = "Econometrics"
+lake_root = "Econometrics"
+
+# No vendored dependency. The lakefile says why in as many words: identification
+# needs conditional expectation and orthogonal projection, not continuous-time
+# process theory, so BrownianMotion and kolmogorov_extension4 are deliberately NOT
+# required and the import closure stays small.
+own_namespaces = ["Econometrics"]
+
+field = "econometric-identification"
+dependencies_inline = "Mathlib"
+
+# Mathlib is pinned to the SAME revision as the flagship, deliberately: the two
+# libraries must be able to share a `ForMathlib/` block, and that requires a shared
+# Mathlib (formal-econometrics/lakefile.lean, and program-architecture.md §1 L0).
+[[library.deps]]
+manifest = "mathlib"
+label = "Mathlib"
+upstream = "leanprover-community/mathlib4"
+
+[repo]
+slug = "formal-applied-math/formal-econometrics"
+benchmark = "benchmarks/identification.json"
+domain = "econometric_identification"
+
+[infra]
+lean_lsp_container = "econometrics-lean-lsp"
+# Runbook 06 step 4: published from CI ONLY, never built locally. The memory
+# doctrine forbids a local Mathlib image build outright, and that rule does not
+# relax because the library is small. This tag does not exist yet.
+verify_image = "ghcr.io/formal-applied-math/econometrics-verify:latest"
+scratch_module = "Econometrics/_AutoformAgentic.lean"
+
+[module]
+# Same lake-parity reasoning as the flagship: the lakefile sets autoImplicit false
+# (`leanOptions` in formal-econometrics/lakefile.lean), the gating daemon does not,
+# so the stub pins it.
+options = "set_option autoImplicit false"
+
+# PotentialOutcomes.lean:43 and DiD.lean:41 both open exactly this.
+opens = ["open MeasureTheory ProbabilityTheory"]
+
+# THE DIVERGENCE, and why this field exists. formal-econometrics opens BEFORE
+# `namespace` (PotentialOutcomes.lean:43-45, DiD.lean:41-63); the flagship opens
+# after it (Girsanov.lean:50-51). Runbook 02 had no such field — it read one
+# library and generalised from it. Writing this pack is what found it, which is
+# exactly what runbook 06 step 1 predicted, and the contract was widened rather
+# than special-cased.
+opens_before_namespace = true
+
+license = """\
+/-
+Copyright (c) 2026 Raphael Coelho. All rights reserved.
+Released under Apache 2.0 license as described in the file LICENSE.
+Authors: Raphael Coelho
+-/"""
+
+# Only `Identification/` exists today. Deliberately NOT pre-populated with the
+# sections applied-areas.md ranks next (time-series §3.2, recursive macro §3.3):
+# an area label mapping to a directory with nothing in it gives the depth gate
+# nothing to consume, and the gate must not be weakened to make that pass.
+[areas]
+identification = "Identification"

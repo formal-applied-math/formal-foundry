@@ -91,8 +91,9 @@ class DomainPack:
     scratch_module: str
 
     # --- emitted-module shape ---
+    options: str
     opens: tuple[str, ...]
-    splice_anchor: str
+    opens_before_namespace: bool
     license: str
 
     # --- vocabulary + prose ---
@@ -148,6 +149,26 @@ class DomainPack:
 
     def import_line(self, pointer: str) -> str:
         return f"public import {self.module_of(pointer)}"
+
+    # --- derived: the emitted module's preamble --------------------------
+
+    def module_preamble(self, *, opens: bool = True) -> str:
+        """The block between the `/-! … -/` doc and the body: the pinned options,
+        `@[expose] public section`, and the namespace — with the house opens on the
+        side of `namespace` this library puts them. `opens=False` is the
+        decomposer's skeleton, which has never carried them."""
+        ns = f"namespace {self.namespace}"
+        open_block = "\n".join(self.opens) if (opens and self.opens) else ""
+        middle = ([open_block, ns] if self.opens_before_namespace else [ns, open_block])
+        parts = [self.options, "@[expose] public section"] + [m for m in middle if m]
+        return "\n\n".join(p for p in parts if p)
+
+    @property
+    def splice_anchor(self) -> str:
+        """The line `_extract_core_stub` reads the drafted body back from — the LAST
+        preamble line. Derived, not stored: the emitter and the reader must agree,
+        and the only way to guarantee that is to give them one source."""
+        return self.module_preamble().splitlines()[-1]
 
     # --- derived: prose -------------------------------------------------------
 
@@ -216,6 +237,38 @@ def available(name: str, root: str | None = None) -> bool:
 DEFAULT_NAME = "mathfin"
 
 
+def export_env(pack: DomainPack, *, quote: bool = True) -> str:
+    """The pack as `KEY=value` lines. Runbook 06's shim: the scripts stay shell
+    instead of growing a Python rewrite, and there is still exactly one place that
+    knows what a domain is.
+
+    TWO FORMATS, and the difference is load-bearing. `quote=True` single-quotes
+    each value (POSIX-escaping any embedded quote) for `eval` in a shell.
+    `quote=False` emits bare `KEY=value` for GitHub Actions' `$GITHUB_ENV`, which
+    is NOT shell-parsed — appending the quoted form there makes the quotes part of
+    the value, and every downstream step then compares against `'MathFin'`."""
+    def q(v: str) -> str:
+        if not quote:
+            return str(v)
+        return "'" + str(v).replace("'", "'\\''") + "'"
+
+    rows = {
+        "DOMAIN_NAME": pack.name,
+        "DOMAIN_NAMESPACE": pack.namespace,
+        "DOMAIN_LAKE_ROOT": pack.lake_root,
+        "DOMAIN_OWN_NAMESPACES": " ".join(pack.own_namespaces),
+        "MAIN_REPO_SLUG": pack.slug,
+        # the checkout directory name, for a sibling-of-foundry default
+        "DOMAIN_REPO_NAME": pack.slug.rsplit("/", 1)[-1],
+        "DOMAIN_BENCHMARK": pack.benchmark,
+        "DOMAIN_CORPUS": pack.domain,
+        "DOMAIN_LEAN_LSP_CONTAINER": pack.lean_lsp_container,
+        "DOMAIN_VERIFY_IMAGE": pack.verify_image,
+        "DOMAIN_SCRATCH_MODULE": pack.scratch_module,
+    }
+    return "".join(f"{k}={q(v)}\n" for k, v in rows.items())
+
+
 def name_from_config(config_path: str) -> str:
     """`[domain] name` from pipeline.toml — the one key the pack contract adds
     there. Falls back to the flagship, so an old config keeps working unchanged."""
@@ -271,8 +324,9 @@ def load(name: str = "mathfin", root: str | None = None) -> DomainPack:
         lean_lsp_container=infra["lean_lsp_container"],
         verify_image=infra["verify_image"],
         scratch_module=infra["scratch_module"],
-        opens=tuple(module["opens"]),
-        splice_anchor=module["splice_anchor"],
+        options=module.get("options", ""),
+        opens=tuple(module.get("opens") or []),
+        opens_before_namespace=bool(module.get("opens_before_namespace", False)),
         license=module["license"],
         areas=MappingProxyType(dict(cfg.get("areas", {}))),
         exemplars=MappingProxyType(dict(exemplars)),
@@ -284,3 +338,56 @@ def load(name: str = "mathfin", root: str | None = None) -> DomainPack:
             _read_text(os.path.join(base, "statement-design.md")), subs,
             where=f"{name}/statement-design.md"),
     )
+
+
+# --- CLI: the shell's view of a pack ------------------------------------------
+
+
+def main(argv: list[str] | None = None) -> int:
+    """`python3 domain_pack.py --export-env <name>` prints `KEY=value` lines for a
+    shell to eval; `--show <name>` is the human-readable form.
+
+        eval "$(python3 "$FOUNDRY/probe/domain_pack.py" --export-env mathfin)"
+    """
+    import argparse
+
+    ap = argparse.ArgumentParser(prog="domain_pack")
+    ap.add_argument("--export-env", metavar="NAME", nargs="?", const="", default=None,
+                    help="print KEY=value lines for `eval` in a shell script; "
+                         "with no NAME, resolve `[domain] name` from pipeline.toml")
+    ap.add_argument("--show", metavar="NAME", default=None,
+                    help="print the pack's scalars, one per line")
+    ap.add_argument("--list", action="store_true", help="list the available packs")
+    ap.add_argument("--format", choices=["shell", "env"], default="shell",
+                    help="shell: quoted for `eval` (default). "
+                         "env: bare KEY=value for GitHub Actions' $GITHUB_ENV")
+    args = ap.parse_args(argv)
+
+    if args.list:
+        root = default_pack_root()
+        for d in sorted(os.listdir(root)) if os.path.isdir(root) else []:
+            if available(d, root):
+                print(d)
+        return 0
+    export = getattr(args, "export_env", None)
+    if export is None and not args.show:
+        ap.print_help()
+        return 2
+    # `--export-env` with no NAME means "whatever pipeline.toml says", so a shell
+    # script never has to parse TOML itself.
+    name = args.show or export or name_from_config(
+        os.path.join(os.path.dirname(default_pack_root()), "pipeline.toml"))
+    try:
+        pack = load(name)
+    except FileNotFoundError as e:
+        print(str(e), file=__import__("sys").stderr)
+        return 1
+    if export is not None:
+        print(export_env(pack, quote=args.format == "shell"), end="")
+    else:
+        print(export_env(pack, quote=False), end="")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

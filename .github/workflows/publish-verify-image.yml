@@ -1,0 +1,144 @@
+name: publish verify image
+
+# Build and push a domain's verify image to GHCR (runbook 06 step 4).
+#
+# WHY THIS EXISTS AS A WORKFLOW. The image bakes a full Mathlib olean tree, which is
+# the ~4-5 GB Lean process the memory doctrine allows exactly one of on the dev box —
+# for tens of minutes, with docker's layer cache on top. So the image is built from
+# CI ONLY, and this is the sanctioned path. That rule does not relax because a
+# library is small: the Mathlib prebuild dominates and every domain pays it the same.
+#
+# Dispatch-only. Nothing here should ever fire on a schedule — an image rebuild is a
+# deliberate act tied to a pin bump or a new library, and it is the single most
+# expensive job in the program.
+#
+# Secrets:
+#   GHCR_TOKEN — write:packages. WITHOUT it the job builds and STOPS before pushing,
+#                which is the useful dry run: it proves the Dockerfile still works
+#                against the target's current pins without publishing anything.
+
+on:
+  workflow_dispatch:
+    inputs:
+      domain:
+        description: "domain pack whose image to build (a directory under domains/)"
+        type: choice
+        options: [mathfin, econometrics]
+        default: econometrics
+      push:
+        description: "push to GHCR (off = build only, the dry run)"
+        type: boolean
+        default: false
+      tag:
+        description: "extra tag beside :latest (e.g. 2026-08-16); blank for none"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: publish-verify-image-${{ inputs.domain }}
+  cancel-in-progress: false        # never interrupt a Mathlib build
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180           # a cold Mathlib prebuild is the long pole
+    env:
+      DOMAIN: ${{ inputs.domain }}
+    steps:
+      # The image is Mathlib-sized and so is its build. Same reclaim the other
+      # workflows do before pulling one.
+      - name: Reclaim disk
+        run: |
+          df -h / | tail -1
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+                      /usr/local/.ghcup /usr/local/share/boost /opt/hostedtoolcache/CodeQL \
+                      /usr/local/lib/node_modules 2>/dev/null || true
+          docker image prune -af >/dev/null 2>&1 || true
+          echo "after cleanup:"; df -h / | tail -1
+
+      - name: Checkout foundry
+        uses: actions/checkout@v4
+
+      - name: Resolve the domain pack
+        # `--format env` is REQUIRED: $GITHUB_ENV is not shell-parsed, so the
+        # shell-quoted form would put literal quotes inside every value.
+        run: |
+          python3 probe/domain_pack.py --export-env "$DOMAIN" --format env >> "$GITHUB_ENV"
+          echo "[domain] building the verify image for $DOMAIN" >&2
+
+      - name: Checkout the target library (the build context)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.MAIN_REPO_SLUG }}
+          path: main
+          fetch-depth: 1
+
+      - name: Build
+        # The context is the LIBRARY checkout; the Dockerfile comes from the foundry,
+        # so a second library needs no CI infra of its own.
+        run: |
+          docker build \
+            -f docker/Dockerfile.verify.domain \
+            --build-arg LAKE_ROOT="$DOMAIN_LAKE_ROOT" \
+            --build-arg UMBRELLA="$DOMAIN_NAMESPACE.lean" \
+            --build-arg PACK_NAME="$DOMAIN_NAME" \
+            -t "$DOMAIN_VERIFY_IMAGE" \
+            main
+
+      - name: Smoke-test the image before it is published
+        # A pushed image that cannot elaborate is worse than no image: every later
+        # tick pulls it and fails somewhere further from the cause.
+        run: |
+          docker run --rm --entrypoint bash "$DOMAIN_VERIFY_IMAGE" -lc '
+            set -e
+            lean --version
+            lake --version
+            test -d /app/.lake/build || { echo "no baked olean tree at /app/.lake/build" >&2; exit 1; }
+          '
+          echo "smoke test passed"
+
+      - name: Push
+        if: ${{ inputs.push }}
+        # Every `${{ }}` goes through `env:` rather than into the script text.
+        # `tag` is free-form dispatch input, so it is the one that matters: spliced
+        # inline, `x"; curl … ; echo "` would run. It is also format-checked below —
+        # a docker tag is [A-Za-z0-9._-] and nothing else, so anything that is not
+        # cannot be a typo worth guessing at.
+        env:
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          ACTOR: ${{ github.actor }}
+          EXTRA_TAG: ${{ inputs.tag }}
+        run: |
+          if [ -z "$GHCR_TOKEN" ]; then
+            echo "::error::push requested but GHCR_TOKEN is not set — built and verified, not published"
+            exit 1
+          fi
+          if [ -n "$EXTRA_TAG" ] && ! printf '%s' "$EXTRA_TAG" | grep -Eq '^[A-Za-z0-9._-]{1,64}$'; then
+            echo "::error::refusing tag '$EXTRA_TAG' — a docker tag is [A-Za-z0-9._-], max 64"
+            exit 1
+          fi
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+          docker push "$DOMAIN_VERIFY_IMAGE"
+          if [ -n "$EXTRA_TAG" ]; then
+            DATED="${DOMAIN_VERIFY_IMAGE%:*}:$EXTRA_TAG"
+            docker tag "$DOMAIN_VERIFY_IMAGE" "$DATED"
+            docker push "$DATED"
+            echo "pushed $DATED"
+          fi
+
+      - name: Say what happened
+        if: always()
+        env:
+          PUSHED: ${{ inputs.push }}
+        run: |
+          if [ "$PUSHED" = "true" ]; then
+            echo "published \`$DOMAIN_VERIFY_IMAGE\`" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "DRY RUN — built and smoke-tested \`$DOMAIN_VERIFY_IMAGE\`, pushed nothing." \
+              >> "$GITHUB_STEP_SUMMARY"
+            echo "Re-run with \`push: true\` to publish." >> "$GITHUB_STEP_SUMMARY"
+          fi

@@ -188,13 +188,50 @@ trim `[areas]` to the labels its issues actually use. Then run
 `python3 -m pytest probe/ -q` — `test_no_domain_leakage.py` fails if any domain
 string crept back into `probe/`.
 
-**What this does NOT do.** A domain-free `probe/` is necessary and not sufficient.
-The **target plane** — `scripts/*.sh`, the three workflows, the GHCR image with the
-library's oleans baked in, and the target repo's `status:ready`/`type:proof`/`area:*`
-label vocabulary — is still welded to the flagship in ~77 places. Lifting it is
-[runbook 06](https://github.com/formal-applied-math/formal-mathfin/blob/main/docs/plans/2026-08-09-program-execution/06-foundry-target-plane.md).
-Until that lands the foundry is portable in principle and immovable in practice, and
-switching `[domain] name` alone will not retarget a live tick.
+### The target plane — which repo the pipeline actually points at
+
+A domain-free `probe/` is necessary and not sufficient: the pipeline does not read
+`probe/` to decide which repo it operates on. It reads shell scripts, four
+workflows, a compose file, a GHCR image with the library's oleans baked in, and the
+target repo's issue labels. Those are the **target plane**, and they now read the
+same pack.
+
+- **Scripts** source it once and use `DOMAIN_*` — the shell stays shell:
+  ```bash
+  eval "$(python3 "$FOUNDRY/probe/domain_pack.py" --export-env ${DOMAIN:+"$DOMAIN"})"
+  ```
+  With no `DOMAIN` the shim resolves `[domain] name` from `pipeline.toml`, so no
+  script parses TOML itself. `MAIN_REPO` now defaults to the target checked out
+  *beside* the foundry, named by the pack — it used to be a hardcoded path, and the
+  two scripts that hardcoded it disagreed, one pointing somewhere that no longer
+  exists.
+- **Workflows** take a `domain` dispatch input (default `mathfin`), resolve the pack
+  into job env, and read `repository:`, the image pull and the cache keys from it.
+  The cache keys hash the pack's own Lake root via `format('main/{0}/**', …)`, not a
+  literal a second library would not even have. Use `--format env` when writing to
+  `$GITHUB_ENV` — it is not shell-parsed, so the quoted form would put literal
+  quotes inside every value.
+- **The compose service** uses `${DOMAIN_*:-<flagship default>}`, so a bare
+  `docker compose` outside the scripts behaves exactly as it always did.
+- **The verify image** builds from one generic `docker/Dockerfile.verify.domain`
+  (three build args) against the target's checkout, via
+  `.github/workflows/publish-verify-image.yml`. **CI only, never locally** — it runs
+  `lake build` over a full Mathlib olean tree, which is the one Lean process the
+  memory doctrine allows, for tens of minutes. That rule does not relax because a
+  library is small. The workflow defaults to a dry run that builds and smoke-tests
+  without pushing.
+
+`probe/test_no_domain_leakage.py` gates all of it — `probe/*.py`, `scripts/*.sh`,
+`.github/workflows/*.yml` and `docker/*.yml` — with an explicit, reason-annotated
+allowlist and a test that fails on a *stale* allowlist entry.
+
+**What is still open.** The acceptance criterion runbook 06 actually sets is a live
+artifact, not a green test suite: a ready-for-review PR opened by the pipeline on
+the second library, plus an unregressed flagship tick beside it. Neither has run.
+Two things gate them — the `econometrics-verify` image has never been published
+(the workflow exists; nobody has dispatched it), and `formal-econometrics` has no
+`status:ready`/`type:proof`/`area:*` labels and no target issue. Until a tick runs,
+this is a retarget that type-checks, not one that has been observed.
 
 ### The hard rules (read these before touching anything)
 

@@ -14,7 +14,13 @@
 # budget (max_turns); the daemon serves refill + the gate.
 set -euo pipefail
 FOUNDRY="$(cd "$(dirname "$0")/.." && pwd)"
-MAIN="${MAIN_REPO:-/home/rapha/code/automated_proofs_quantfin}"
+
+# --- domain pack (runbook 06): the ONE place that knows which library we target ---
+# `DOMAIN` picks the pack; with none set the shim reads `[domain] name` from
+# pipeline.toml. Exports DOMAIN_NAMESPACE, DOMAIN_LAKE_ROOT, MAIN_REPO_SLUG,
+# DOMAIN_VERIFY_IMAGE, DOMAIN_LEAN_LSP_CONTAINER, DOMAIN_BENCHMARK, ...
+eval "$(python3 "$FOUNDRY/probe/domain_pack.py" --export-env ${DOMAIN:+"$DOMAIN"})"
+MAIN="${MAIN_REPO:-$(dirname "$FOUNDRY")/$DOMAIN_REPO_NAME}"
 CFG="$FOUNDRY/pipeline.toml"
 STATE="$FOUNDRY/pipeline_state.json"
 QUEUE="$FOUNDRY/targets/queue/manifest.json"
@@ -176,7 +182,7 @@ PR_OPENED=0
 ASSEMBLY_BLOCKED=0
 if [ "$OUTCOME" = "pass" ] && [ -f "$CAND" ]; then
   if [ -n "${MAIN_PR_TOKEN:-}" ]; then
-    echo "[tick] $OUTCOME → opening PR on formal-mathfin…" >&2
+    echo "[tick] $OUTCOME → opening PR on $MAIN_REPO_SLUG…" >&2
     if GH_TOKEN="$MAIN_PR_TOKEN" "$FOUNDRY/scripts/open-pr.sh" --id "$ID" --tag "$TAG"; then
       PR_OPENED=1
     else

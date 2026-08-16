@@ -21,6 +21,11 @@ on:
         description: "parallel Lean workers (1 on the 7 GB runner; 2+ on a ≥16 GB runner)"
         type: string
         default: "1"
+      domain:
+        description: "domain pack to target (a directory under domains/)"
+        type: choice
+        options: [mathfin, econometrics]
+        default: mathfin
 
 permissions:
   contents: read
@@ -33,6 +38,8 @@ jobs:
   batch-verify:
     runs-on: ubuntu-latest              # swap to a ≥16 GB label to use workers > 1
     timeout-minutes: 120
+    env:
+      DOMAIN: ${{ inputs.domain || 'mathfin' }}
     steps:
       - name: Free disk space
         run: |
@@ -45,15 +52,23 @@ jobs:
       - name: Checkout foundry
         uses: actions/checkout@v4
 
-      - name: Checkout MathFin (live pins)
+      - name: Resolve the domain pack
+        # One place decides which library this run targets. `--format env` is
+        # REQUIRED: $GITHUB_ENV is not shell-parsed, so the shell-quoted form would
+        # put literal quotes inside every value.
+        run: |
+          python3 probe/domain_pack.py --export-env "$DOMAIN" --format env >> "$GITHUB_ENV"
+          echo "[domain] $DOMAIN" >&2
+
+      - name: Checkout the target library (live pins)
         uses: actions/checkout@v4
         with:
-          repository: formal-applied-math/formal-mathfin
+          repository: ${{ env.MAIN_REPO_SLUG }}
           path: main
           fetch-depth: 1
 
       - name: Pull the pinned verify image
-        run: docker pull ghcr.io/formal-applied-math/mathfin-verify:latest
+        run: docker pull "$DOMAIN_VERIFY_IMAGE"
 
       - name: Verify the manifest in parallel (inside the image)
         env:
@@ -69,18 +84,19 @@ jobs:
           # Run the pool INSIDE the image (the Lean toolchain lives there, not on the runner
           # host). MANIFEST/WORKERS are passed as CONTAINER env (`-e`) and expanded by the
           # inner shell — never spliced into the script text. `cache get` + `lake build
-          # MathFin` prime the shared oleans the stubs import, then the pool elaborates each
+          # the library` prime the shared oleans the stubs import, then the pool elaborates
           # stub with N concurrent `lake env lean` workers; the job fails if any target does not verify.
           docker run --rm --entrypoint bash \
-            -e MANIFEST -e WORKERS \
+            -e MANIFEST -e WORKERS -e DOMAIN_NAMESPACE -e DOMAIN \
             -v "${{ github.workspace }}/main":/app \
             -v "${{ github.workspace }}":/foundry \
-            -w /app ghcr.io/formal-applied-math/mathfin-verify:latest -lc '
+            -w /app "$DOMAIN_VERIFY_IMAGE" -lc '
               set -e
               lake exe cache get >/dev/null 2>&1 || true
-              lake build MathFin
+              lake build "$DOMAIN_NAMESPACE"
               python3 /foundry/probe/verify_pool.py \
                 --main-repo /app --manifest "/foundry/$MANIFEST" --workers "$WORKERS" \
+                --domain "$DOMAIN" \
                 | tee /foundry/runs-batch-verify.json
             '
 

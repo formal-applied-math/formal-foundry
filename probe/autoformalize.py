@@ -1459,23 +1459,23 @@ def emit_target_files(pack: DomainPack, issue: dict, stub: str,
         f"{imports}\n\n"
         f"{headers}\n\n"
         f"/-!\n{docstring}\n-/\n\n"
+        # The house preamble is the PACK's — pinned options, `@[expose] public
+        # section`, the namespace, and the house opens on whichever side of it this
+        # library puts them. Two facts it carries, both learned the hard way:
+        #
         # lake-parity: the lakefile sets autoImplicit false, but the DAEMON that
         # gates drafts elaborates with Lean's default (true) — a drafted
-        # `{Ω : Type u}` auto-binds `u`, passes every gate, then fails the
-        # open-pr regen build with `unknown universe level` (run-4 PR blocker).
-        # Pinning the option in the stub makes draft-time elaboration enforce
-        # exactly what the build enforces, so the compile-repair loop fixes it.
-        "set_option autoImplicit false\n\n"
-        "@[expose] public section\n\n"
-        f"namespace {pack.namespace}\n\n"
-        # the house preamble (`pack.opens`; in the flagship, Girsanov.lean:50-51 — 155 of
-        # the drafter emits bare `IsProbabilityMeasure`/`IntegrableOn`/`Measure`
-        # 262 modules do this): the drafter emits bare names exactly as a library
-        # author would, so the module must open the namespaces
-        # that carry them. Without this, every measure-theory target died `unknown
-        # identifier` even after a FAITHFUL draft (run 29667784310, #60 + #109). An
-        # unused open is harmless; a missing one is a silent bare-name death.
-        + "".join(f"{o}\n" for o in pack.opens) + "\n"
+        # `{Ω : Type u}` auto-binds `u`, passes every gate, then fails the open-pr
+        # regen build with `unknown universe level` (run-4 PR blocker). Pinning the
+        # option in the stub makes draft-time elaboration enforce exactly what the
+        # build enforces, so the compile-repair loop fixes it.
+        #
+        # the opens: the drafter emits bare `IsProbabilityMeasure`/`IntegrableOn`/
+        # `Measure` exactly as a library author would, so the module must open the
+        # namespaces carrying them. Without this, every measure-theory target died
+        # `unknown identifier` even after a FAITHFUL draft (run 29667784310, #60 +
+        # #109). An unused open is harmless; a missing one is a silent bare-name death.
+        f"{pack.module_preamble()}\n\n"
         f"{stub.strip()}\n\n"
         f"end {pack.namespace}\n"
     )
