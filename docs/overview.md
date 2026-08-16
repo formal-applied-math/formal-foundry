@@ -225,13 +225,36 @@ same pack.
 `.github/workflows/*.yml` and `docker/*.yml` — with an explicit, reason-annotated
 allowlist and a test that fails on a *stale* allowlist entry.
 
+**The second domain's queue is live.** `formal-econometrics` now carries the same
+`status:` / `type:` / `difficulty:` vocabulary as the flagship plus
+`area:identification`, and
+[issue #1](https://github.com/formal-applied-math/formal-econometrics/issues/1) is
+its first `status:ready` + `type:proof` target — random assignment identifies the
+ATT, the second design on the same skeleton as the DiD theorem already there.
+
+Note what the runbook's two *named* first targets turned out to need. Omitted-variable
+bias and Frisch–Waugh–Lovell are both "Mathlib ready" in `applied-areas.md` §3.1, but
+they are about **linear projection**, and `Econometrics/` has no projection layer —
+pointed at the modules that do exist they consume nothing from them, which is runbook
+06's own kill criterion firing. The gate is not weakened for them; they wait for the
+layer, and the seeded target is one whose type genuinely lives in the existing
+definitional layer so the depth gate has something real to check.
+
 **What is still open.** The acceptance criterion runbook 06 actually sets is a live
-artifact, not a green test suite: a ready-for-review PR opened by the pipeline on
-the second library, plus an unregressed flagship tick beside it. Neither has run.
-Two things gate them — the `econometrics-verify` image has never been published
-(the workflow exists; nobody has dispatched it), and `formal-econometrics` has no
-`status:ready`/`type:proof`/`area:*` labels and no target issue. Until a tick runs,
-this is a retarget that type-checks, not one that has been observed.
+artifact, not a green test suite: a ready-for-review PR opened by the pipeline on the
+second library, plus an unregressed flagship tick beside it. Neither has run, and
+neither can from the dev box — the prove path needs `MISTRAL_API_KEY` (Leanstral is
+the prover *and* the vacuity/disproof kernel gates) and the `econometrics-verify`
+image has never been published; the workflow exists, nobody has dispatched it.
+
+What HAS been observed is everything up to the first Lean call, against the live
+repo: pack → slug → `gh issue list` → select → pointers → route → context pack → the
+emitted module and the gate probes. That path resolves `Econometrics` throughout —
+16 real declarations offered to the drafter, the module minted at
+`Econometrics/Identification/RandomAssignment.lean`, the splice round-tripping, and
+the depth probe looking up `` `Econometrics.att_eq_meanDiff `` against the two real
+pointer modules. Until a tick closes one, this is a retarget whose read path is
+verified and whose prove path is not.
 
 ### The hard rules (read these before touching anything)
 
