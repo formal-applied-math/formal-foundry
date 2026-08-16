@@ -70,12 +70,41 @@ jobs:
           python3 probe/domain_pack.py --export-env "$DOMAIN" --format env >> "$GITHUB_ENV"
           echo "[domain] building the verify image for $DOMAIN" >&2
 
+      - name: Check the token can read the target library
+        # The default GITHUB_TOKEN is scoped to THIS repo only, so checking out a
+        # sibling needs a PAT — and a *private* sibling needs that PAT to include it.
+        # `MAIN_PR_TOKEN` was granted for the flagship; formal-econometrics and
+        # formal-macroeconomics are private and may not be in its repo list. Failing
+        # here with the fix spelled out beats `actions/checkout` emitting
+        # "repository not found", which reads like the repo is gone.
+        env:
+          MAIN_PR_TOKEN: ${{ secrets.MAIN_PR_TOKEN }}
+        run: |
+          if [ -z "$MAIN_PR_TOKEN" ]; then
+            echo "::error::MAIN_PR_TOKEN is not set — cannot check out $MAIN_REPO_SLUG"
+            exit 1
+          fi
+          code=$(curl -s -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer $MAIN_PR_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$MAIN_REPO_SLUG")
+          if [ "$code" != "200" ]; then
+            echo "::error::MAIN_PR_TOKEN cannot read $MAIN_REPO_SLUG (HTTP $code)."
+            echo "::error::Add that repository to the PAT's repository access, or issue a"
+            echo "::error::token that covers it. A private sibling is not readable by a PAT"
+            echo "::error::scoped to the flagship alone."
+            exit 1
+          fi
+          echo "token can read $MAIN_REPO_SLUG"
+
       - name: Checkout the target library (the build context)
         uses: actions/checkout@v4
         with:
           repository: ${{ env.MAIN_REPO_SLUG }}
           path: main
           fetch-depth: 1
+          # A private sibling needs a PAT; the default GITHUB_TOKEN will not do.
+          token: ${{ secrets.MAIN_PR_TOKEN }}
 
       - name: Build
         # The context is the LIBRARY checkout; the Dockerfile comes from the foundry,
