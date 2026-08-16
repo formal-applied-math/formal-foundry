@@ -21,6 +21,7 @@ import os
 import sys
 import time
 
+import domain_pack
 import pipeline_lib as P
 from pipeline_lib import PipelineConfig
 
@@ -33,6 +34,9 @@ def _now(args):
 
 def cmd_plan(args) -> int:
     cfg = PipelineConfig.load(args.config)
+    # which library this tick targets — the duplicate guard asks GitHub about ITS repo
+    pack = domain_pack.load(getattr(args, "domain", None)
+                            or domain_pack.name_from_config(args.config or ""))
     state = P.load_state(args.state)
     now_epoch, now_ym = _now(args)
     state = P.roll_month(state, now_ym)
@@ -60,7 +64,8 @@ def cmd_plan(args) -> int:
     ask_gh = os.environ.get("GH_GROUND_TRUTH", "1") != "0"
     target = P.next_target(
         candidates, state,
-        claimed_fn=lambda c: P.queue_claimed(c, queue_dir) or (ask_gh and P.pr_claimed(c)))
+        claimed_fn=lambda c: P.queue_claimed(c, queue_dir)
+        or (ask_gh and P.pr_claimed(c, repo=pack.slug)))
     if target is None:
         return emit({"action": "skip", "reason": "no_unattempted_targets"})
 

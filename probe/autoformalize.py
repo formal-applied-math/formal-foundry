@@ -27,7 +27,10 @@ import sys
 import time
 
 import embed as _embed
-from house_context import build_drafter_prompt, build_system_prompt, extract_signatures
+import domain_pack
+from domain_pack import DomainPack
+from house_context import (build_drafter_prompt, build_system_prompt,
+                           extract_signatures)
 from issues import difficulty_rank, select_issues
 from pipeline_lib import AutoformalizeConfig, DrafterConfig
 from gate_cache import GateCache
@@ -54,7 +57,7 @@ from af_gates import *  # noqa: F401,F403 — re-export the extracted gates
 # and iterates until it elaborates — its OWN tool loop instead of the fixed round-based
 # completion repair. Needs the lean-lsp container up + the daemon down (one Lean
 # process; the tick flips the slot). Design: 2026-07-24-frontier-drafter-design.md.
-def _lean_lsp_mcp_config(container: str = "mathfin-lean-lsp", project: str = "/app") -> dict:
+def _lean_lsp_mcp_config(container: str, project: str = "/app") -> dict:
     """The `claude --mcp-config` JSON for the lean-lsp MCP — the SAME server (docker exec,
     stdio) the vibe harness wires for Leanstral (scripts/vibe-setup.sh)."""
     return {"mcpServers": {"lean-lsp": {
@@ -77,12 +80,13 @@ def _agentic_formalize_args(mcp_config_path: str, *, model: str = "") -> list[st
 
 
 
-_AGENTIC_SCRATCH_REL = "MathFin/_AutoformAgentic.lean"
+# (the agentic scratch module is the domain's: `pack.scratch_module`)
 
 
 
 
-def _agentic_formalize_prompt(intent: dict, scaffold_module: str, scratch_rel: str,
+def _agentic_formalize_prompt(pack: DomainPack, intent: dict, scaffold_module: str,
+                              scratch_rel: str,
                               premises: str = "") -> str:
     """The task prompt for the agentic formalize session: write the module realizing `intent`
     to `scratch_rel`, using the given scaffold, and self-validate to elaboration via the
@@ -101,7 +105,8 @@ def _agentic_formalize_prompt(intent: dict, scaffold_module: str, scratch_rel: s
            f"{premises}\n\n" if premises else "")
         + f"Write the COMPLETE module to the file `{scratch_rel}` (relative to the project root), "
         "using EXACTLY this scaffold — replace only the body between the `open` lines and "
-        "`end MathFin` with the definition(s) and the single theorem (ending `:= by sorry`), "
+        f"`end {pack.namespace}` with the definition(s) and the single theorem "
+        "(ending `:= by sorry`), "
         "plus 1-2 concrete `example ... := by norm_num`/`decide` instance checks per new def:\n\n"
         f"```lean\n{scaffold_module}\n```\n\n"
         f"Then use the lean-lsp MCP tools (e.g. lean_diagnostics on `{scratch_rel}`) to CHECK and "
@@ -109,24 +114,28 @@ def _agentic_formalize_prompt(intent: dict, scaffold_module: str, scratch_rel: s
         "ONE `sorry` (the main theorem's). Keep the statement FAITHFUL to the intended statement; "
         "do NOT prove the theorem (leave its `sorry`); do not touch the license/module/import/"
         "namespace scaffold lines. Reply DONE when it elaborates cleanly.\n\n"
-        + _AGENTIC_PITFALLS
+        + pack.prompt("agentic-pitfalls")
     )
 
 
 
 
-def _extract_core_stub(lean_text: str) -> str:
+def _extract_core_stub(pack: DomainPack, lean_text: str) -> str:
     """The body an emit-scaffolded module wraps: the text between the `open scoped …` line
-    and `end MathFin` (the defs + theorem + examples). '' if the markers are absent."""
-    m = re.search(r"open scoped NNReal ENNReal\n+(.*?)\n+end MathFin", lean_text, re.DOTALL)
+    and the namespace's `end` (the defs + theorem + examples). '' if the markers are
+    absent. Both markers come from the pack, so the emitter and this reader cannot
+    drift apart."""
+    m = re.search(rf"{re.escape(pack.splice_anchor)}\n+(.*?)\n+end {re.escape(pack.namespace)}",
+                  lean_text, re.DOTALL)
     return m.group(1).strip() if m else ""
 
 
 
 
-def agentic_formalize(intent: dict, *, issue: dict, main_repo: str, check_fn=None, model: str = "",
+def agentic_formalize(pack: DomainPack, intent: dict, *, issue: dict, main_repo: str,
+                      check_fn=None, model: str = "",
                       run_fn=None, mcp_config_path: str | None = None, premises: str = "",
-                      scratch_rel: str = _AGENTIC_SCRATCH_REL, log=lambda m: None) -> dict:
+                      scratch_rel: str | None = None, log=lambda m: None) -> dict:
     """Item I phase 2: ONE agentic `claude -p` session (lean-lsp MCP) drafts the module for
     `intent` to `scratch_rel` (under `main_repo`, bind-mounted into the lean-lsp container),
     self-validating to elaboration via lean tools. We read it back, daemon-verify, and
@@ -137,7 +146,9 @@ def agentic_formalize(intent: dict, *, issue: dict, main_repo: str, check_fn=Non
     meta = {"module_name": intent["module_name"], "benchmark_id": intent["benchmark_id"],
             "docstring": intent.get("docstring", ""),
             "definitions": intent.get("definitions") or [], "deferred": intent.get("deferred")}
-    scaffold, _e0, _p0 = emit_target_files(issue, "theorem _agentic_placeholder : True := by sorry", meta)
+    scratch_rel = scratch_rel if scratch_rel is not None else pack.scratch_module
+    scaffold, _e0, _p0 = emit_target_files(
+        pack, issue, "theorem _agentic_placeholder : True := by sorry", meta)
     scratch_abs = os.path.join(main_repo, scratch_rel)
 
     tmp_cfg = None
@@ -145,7 +156,7 @@ def agentic_formalize(intent: dict, *, issue: dict, main_repo: str, check_fn=Non
         import tempfile
         fd, mcp_config_path = tempfile.mkstemp(suffix=".json", prefix="lean-lsp-mcp-")
         with os.fdopen(fd, "w") as f:
-            json.dump(_lean_lsp_mcp_config(), f)
+            json.dump(_lean_lsp_mcp_config(pack.lean_lsp_container), f)
         tmp_cfg = mcp_config_path
 
     if run_fn is None:
@@ -153,7 +164,7 @@ def agentic_formalize(intent: dict, *, issue: dict, main_repo: str, check_fn=Non
             return subprocess.run(argv, input=stdin, capture_output=True, text=True,
                                   timeout=1800, cwd=cwd)
     argv = _agentic_formalize_args(mcp_config_path, model=model)
-    prompt = _agentic_formalize_prompt(intent, scaffold, scratch_rel, premises)
+    prompt = _agentic_formalize_prompt(pack, intent, scaffold, scratch_rel, premises)
     try:
         res = run_fn(argv, prompt, main_repo)
     finally:
@@ -179,9 +190,9 @@ def agentic_formalize(intent: dict, *, issue: dict, main_repo: str, check_fn=Non
         if elab.get("errors") or elab.get("sorry_count", 0) != 1:
             return {"ok": False, "stub": None, "lean_text": lean_final, "entry": None, "meta": meta,
                     "tokens": tokens, "reason": "final module does not elaborate cleanly"}
-    core = _extract_core_stub(lean_final)
+    core = _extract_core_stub(pack, lean_final)
     if core:                                        # canonicalise via emit → consistent entry
-        lean_text, entry, _placement = emit_target_files(issue, core, meta)
+        lean_text, entry, _placement = emit_target_files(pack, issue, core, meta)
     else:                                           # markers absent — ship claude's module as-is
         lean_text, entry = lean_final, None
     return {"ok": True, "stub": core, "lean_text": lean_text, "entry": entry, "meta": meta,
@@ -272,17 +283,19 @@ def disproof(lean_text: str, sorry_name: str, *, chat_fn, check_fn,
 
 # --- issue preparation --------------------------------------------------------
 
-_POINTER_RE = re.compile(r"MathFin/[\w/]+\.lean")
+# (the pointer / location / import regexes are DERIVED from the pack's lake root
+# and namespace — `pack.pointer_re`, `pack.location_re`, `pack.import_re` — so a
+# pack cannot declare a namespace and then disagree about how to parse it.)
 
 
 
 
-def extract_pointers(body: str) -> list[str]:
-    """Repo-relative `MathFin/…/X.lean` paths named in an issue body (its Pointers
+def extract_pointers(pack: DomainPack, body: str) -> list[str]:
+    """Repo-relative `<LakeRoot>/…/X.lean` paths named in an issue body (its Pointers
     section), de-duplicated in first-seen order."""
     seen: set[str] = set()
     out: list[str] = []
-    for p in _POINTER_RE.findall(body or ""):
+    for p in pack.pointer_re.findall(body or ""):
         if p not in seen:
             seen.add(p)
             out.append(p)
@@ -291,22 +304,23 @@ def extract_pointers(body: str) -> list[str]:
 
 
 
-_LOCATION_RE = re.compile(r"(?im)^\s*location:\s*(MathFin/[\w/]+\.lean)")
 
 
-def extract_location(body: str) -> str | None:
+
+def extract_location(pack: DomainPack, body: str) -> str | None:
     """The module an issue's `location:` line names, or None if it has no such line.
 
-    R writes these deliberately — "location: MathFin/Performance/RatiosExtended.lean
+    R writes these deliberately — "location: <LakeRoot>/Performance/RatiosExtended.lean
     (beside sortinoRatio / informationRatio)" — to say the new result belongs with its
     siblings rather than in a module of its own. Emit honours it via `placement.append`
     (backlog S); before that it was captured into the `-- pointers:` header and then
     silently overridden."""
-    m = _LOCATION_RE.search(body or "")
+    m = pack.location_re.search(body or "")
     return m.group(1) if m else None
 
 
-def prepare_issues(raw: list[dict], *, max_difficulty: str = "medium") -> list[dict]:
+def prepare_issues(pack: DomainPack, raw: list[dict], *,
+                   max_difficulty: str = "medium") -> list[dict]:
     """Filter+order the raw `gh issue list` output to the tractable
     `status:ready`+`type:proof` queue (via `issues.select_issues`) and enrich each
     with its `body` + extracted `pointers` for drafting."""
@@ -314,13 +328,14 @@ def prepare_issues(raw: list[dict], *, max_difficulty: str = "medium") -> list[d
     out = []
     for s in select_issues(raw, max_difficulty=max_difficulty):
         body = by_num.get(s["number"], {}).get("body") or ""
-        out.append({**s, "body": body, "pointers": extract_pointers(body)})
+        out.append({**s, "body": body, "pointers": extract_pointers(pack, body)})
     return out
 
 
 
 
-def semantic_verdict(*, lean_text: str, stub: str, name: str, intent: dict, issue: dict,
+def semantic_verdict(pack: DomainPack, *, lean_text: str, stub: str, name: str,
+                     intent: dict, issue: dict,
                      deferred: list[str], reason_fn, prove_fn, check_fn, gate_budget: int,
                      depth_gate: bool = True, triviality_gate: bool = True,
                      route: str = "theorem", def_names: list[str] | None = None,
@@ -335,7 +350,7 @@ def semantic_verdict(*, lean_text: str, stub: str, name: str, intent: dict, issu
     faces five others (and open-pr's honesty guards + the human merge after that)."""
     tokens = 0
     if route == "defs":
-        dr = defs_rejection(lean_text, name, def_names or [], check_fn=check_fn)
+        dr = defs_rejection(pack, lean_text, name, def_names or [], check_fn=check_fn)
         tokens += dr["tokens"]
         if dr.get("indeterminate"):   # H5: infra, not a verdict — retryable
             return {"gate": "indeterminate", "detail": dr.get("verdict", "")}, tokens
@@ -346,7 +361,8 @@ def semantic_verdict(*, lean_text: str, stub: str, name: str, intent: dict, issu
         if ip["failed"]:                    # item M: each new def needs a concrete probe
             return {"gate": ip["gate"], "detail": ip.get("verdict", "")}, tokens
     elif depth_gate:
-        dep = depth_rejection(lean_text, name, issue.get("pointers", []), check_fn=check_fn)
+        dep = depth_rejection(pack, lean_text, name, issue.get("pointers", []),
+                              check_fn=check_fn)
         tokens += dep["tokens"]
         if dep.get("indeterminate"):
             return {"gate": "indeterminate", "detail": dep.get("verdict", "")}, tokens
@@ -369,7 +385,7 @@ def semantic_verdict(*, lean_text: str, stub: str, name: str, intent: dict, issu
     tokens += dis["tokens"]
     if dis["false"]:
         return {"gate": "false", "detail": "the negated conclusion was proved"}, tokens
-    j = judge_faithfulness(issue, stub, chat_fn=reason_fn, deferred=deferred)
+    j = judge_faithfulness(pack, issue, stub, chat_fn=reason_fn, deferred=deferred)
     tokens += j["tokens"]
     if not j.get("faithful"):
         detail = j.get("verdict", "")
@@ -399,8 +415,9 @@ def _write_target(queue_dir: str, n: int, lean_text: str, entry: dict) -> list[s
 
 
 
-def route_feasibility(intent: dict, pointers: list[str], *, lookup_fn) -> dict:
-    """Feasibility census at intent time (H12): the `MathFin.*` primitives the intent
+def route_feasibility(pack: DomainPack, intent: dict, pointers: list[str], *,
+                      lookup_fn) -> dict:
+    """Feasibility census at intent time (H12): the own-namespace primitives the intent
     NAMES but that exist neither in the pointer modules nor in the pin index.
     `lookup_fn(name) -> bool` reports existence (scout index, fallback grep). ≥1
     missing ⇒ `feasible=False` — drafting is doomed (the #1 recorded death family,
@@ -409,11 +426,11 @@ def route_feasibility(intent: dict, pointers: list[str], *, lookup_fn) -> dict:
     constant. Mathlib names are not checked (out of our authority; the elaborator
     gates those). Returns `{feasible, missing, note}`."""
     named = [o for o in (intent.get("objects") or [])
-             if isinstance(o, str) and o.startswith("MathFin.")]
+             if isinstance(o, str) and o.startswith(pack.namespace + ".")]
     missing = [o for o in named if not lookup_fn(o)]
     if not missing:
         return {"feasible": True, "missing": [], "note": ""}
-    note = ("intent names MathFin primitives that do not exist yet: "
+    note = (f"intent names {pack.namespace} primitives that do not exist yet: "
             + ", ".join(missing) + " — route to the defs stage (introduce them) or "
             "leave a human issue comment; do not draft against invented constants.")
     return {"feasible": False, "missing": missing, "note": note}
@@ -454,7 +471,8 @@ def _record_refill_experience(store, rec: dict, *, summarize_fn=None) -> None:
         pass
 
 
-def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn, intent_fn=None,
+def refill(pack: DomainPack, issues: list[dict], *, reason_fn, prove_fn, check_fn,
+           context_fn, intent_fn=None, drafter_preamble: str = "",
            agentic_formalize_fn=None, slot_switch_fn=None,
            queue_dir: str, budget: int, max_issues: int = 1,
            max_attempt_issues: int = 3, gate_budget: int = 20_000, formalize_rounds: int = 3,
@@ -514,7 +532,8 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn, int
                     history.append({"attempt": attempt, "gate": "budget",
                                     "detail": f"refill budget exhausted ({spent} >= {budget})"})
                     break
-                di = draft_intent(issue, ctx, chat_fn=intent_fn, feedback=feedback,
+                di = draft_intent(pack, issue, ctx, chat_fn=intent_fn, feedback=feedback,
+                                  drafter_preamble=drafter_preamble,
                                   route=route, prior_unknowns=issue.get("prior_unknowns"),
                                   prior_lessons=lesson_note)
                 spent += di["tokens"]
@@ -523,7 +542,7 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn, int
                             "detail": di.get("reason") or "no parseable intent reply"}
                     history.append({"attempt": attempt, **fail})
                     log(f"#{n}: intent rejected — {fail['detail']} (attempt {attempt})")
-                    feedback = render_gate_feedback(fail["gate"], fail["detail"], None)
+                    feedback = render_gate_feedback(pack, fail["gate"], fail["detail"], None)
                     continue
                 intent = di["intent"]
                 ps = prose_slop_report(intent.get("docstring") or "")   # SP4: surface docstring slop
@@ -535,14 +554,14 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn, int
                             "detail": "defs route: the intent must name 1-3 new definitions"}
                     history.append({"attempt": attempt, **fail})
                     log(f"#{n}: intent named no definitions (attempt {attempt})")
-                    feedback = render_gate_feedback(fail["gate"], fail["detail"], None)
+                    feedback = render_gate_feedback(pack, fail["gate"], fail["detail"], None)
                     continue
-                # H12: feasibility census — if the intent names MathFin primitives that
+                # H12: feasibility census — if the intent names own-namespace primitives
                 # don't exist yet (the #1 death family), record blocked_on_infra + the
                 # missing list and STOP, never burning a formalize budget on a doomed
                 # draft. The defs route is exempt (it is allowed to introduce new defs).
                 if feasibility_fn is not None and route != "defs":
-                    feas = route_feasibility(intent, issue.get("pointers", []),
+                    feas = route_feasibility(pack, intent, issue.get("pointers", []),
                                              lookup_fn=feasibility_fn)
                     if not feas["feasible"]:
                         row = {"attempt": attempt, "gate": "blocked_on_infra",
@@ -584,13 +603,14 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn, int
                         row["unknown_identifiers"] = unknowns
                     history.append(row)
                     log(f"#{n}: {fail['detail']} (attempt {attempt})")
-                    feedback = render_gate_feedback(fail["gate"], fail["detail"], None)
+                    feedback = render_gate_feedback(pack, fail["gate"], fail["detail"], None)
                     continue
                 stub, lean_text, entry = fr["stub"], fr["lean_text"], fr["entry"]
                 name = split_statement(stub)[0]
                 deferred = normalize_deferred((fr.get("meta") or {}).get("deferred"))
 
                 fail, gate_tokens = semantic_verdict(
+                    pack,
                     lean_text=lean_text, stub=stub, name=name, intent=intent, issue=issue,
                     deferred=deferred, reason_fn=reason_fn, prove_fn=prove_fn,
                     check_fn=check_fn, gate_budget=gate_budget, depth_gate=depth_gate,
@@ -616,7 +636,7 @@ def refill(issues: list[dict], *, reason_fn, prove_fn, check_fn, context_fn, int
                     # retryable for the next tick, never a false seed or rejection.
                     log(f"#{n}: indeterminate (daemon infra) — deferring to next tick")
                     break
-                feedback = render_gate_feedback(fail["gate"], fail["detail"], stub)
+                feedback = render_gate_feedback(pack, fail["gate"], fail["detail"], stub)
             if staged:
                 outcome = "seeded"
             elif history and history[-1]["gate"] == "indeterminate":
@@ -683,8 +703,8 @@ def _foundry_root() -> str:
 
 def build_retrieve_fns(*, backend, main_repo, index_dir, k, embed_model, api_key):
     """(reactive_retrieve_fn, proactive_fn). Embedding backend ranks the whole
-    premise corpus — MathFin, BrownianMotion, and the Mathlib neighbourhoods
-    MathFin reaches (`index_filter`); proactive_fn retrieves on the intent
+    premise corpus — the target library, its vendored deps, and the Mathlib
+    neighbourhoods it reaches (`index_filter`); proactive_fn retrieves on the intent
     STATEMENT. Falls open to loogle (reactive only) when the cache is absent.
 
     LOADS a cache, never builds one: an absent cache degrades to loogle rather
@@ -717,7 +737,10 @@ def main() -> int:
     p.add_argument("--main-repo", required=True)
     p.add_argument("--config", default=None,
                    help="pipeline.toml for [autoformalize] defaults (default: <foundry>/pipeline.toml)")
-    p.add_argument("--slug", default="formal-applied-math/formal-mathfin")
+    p.add_argument("--domain", default=None,
+                   help="domain pack name (default: [domain].name in pipeline.toml)")
+    p.add_argument("--slug", default=None,
+                   help="target repo slug; defaults to the domain pack's")
     p.add_argument("--queue-dir", default=None, help="default: <foundry>/targets/queue")
     p.add_argument("--only", type=int, default=None, help="attempt only this issue number")
     p.add_argument("--route", choices=["theorem", "defs"], default=None,
@@ -746,7 +769,14 @@ def main() -> int:
         return 2
 
     # pipeline.toml [autoformalize] is authoritative; CLI flags override per-field.
-    cfg = AutoformalizeConfig.load(args.config or os.path.join(_foundry_root(), "pipeline.toml"))
+    config_path = args.config or os.path.join(_foundry_root(), "pipeline.toml")
+    cfg = AutoformalizeConfig.load(config_path)
+
+    # The domain pack decides which library this tick targets: its namespace, its
+    # house doctrine, its prompts, its issue vocabulary. Loaded ONCE here and passed
+    # down; nothing below reads a module-level default.
+    pack = domain_pack.load(args.domain or domain_pack.name_from_config(config_path))
+    slug = args.slug or pack.slug
     pick = lambda a, c: a if a is not None else c
     budget = pick(args.budget, cfg.budget)
     max_issues = pick(args.max_issues, cfg.max_issues)
@@ -762,7 +792,7 @@ def main() -> int:
     queue_dir = args.queue_dir or os.path.join(_foundry_root(), "targets", "queue")
 
     seeded_nums = _already_seeded(queue_dir)
-    issues = [i for i in prepare_issues(_fetch_issues(args.slug))
+    issues = [i for i in prepare_issues(pack, _fetch_issues(slug))
               if i["number"] not in seeded_nums
               and (args.only is None or i["number"] == args.only)]
     if not issues:
@@ -785,8 +815,10 @@ def main() -> int:
     print(f"[refill] routes: " + ", ".join(f"#{i['number']}→{i['route']}" for i in issues[:8]),
           file=sys.stderr)
 
-    prove_system = build_system_prompt(args.main_repo)   # the leaf-prover gate doctrine
-    set_drafter_prompt(args.main_repo)   # H1: pins + statement-design reach the drafter too
+    prove_system = build_system_prompt(args.main_repo, pack)  # leaf-prover gate doctrine
+    # H1: pins + statement-design reach the drafter too — as a VALUE threaded into
+    # refill, not a module global, so a second domain in this process cannot inherit it.
+    drafter_preamble = build_drafter_prompt(args.main_repo, pack)
 
     def prove_fn(msgs):   # leanstral: the kernel gate battery (vacuity / disproof)
         return mistral_chat(msgs, api_key=api_key, model=prover_model,
@@ -808,7 +840,7 @@ def main() -> int:
     # elaboration); the tick flips the single Lean slot to lean-lsp around it and back to the
     # daemon for the gates. check_fn=None defers the elaboration check to the gate battery.
     def agentic_fn(intent, ctx, issue, premises=""):
-        return agentic_formalize(intent, issue=issue, main_repo=args.main_repo,
+        return agentic_formalize(pack, intent, issue=issue, main_repo=args.main_repo,
                                  model=drafter.claude_model, check_fn=None, premises=premises,
                                  log=lambda m: print(f"[agentic] {m}", file=sys.stderr))
 
@@ -833,8 +865,8 @@ def main() -> int:
     else:
         proactive_fn = None
 
-    # H12 feasibility census: does a named MathFin.* primitive exist? scout index
-    # first (authoritative), then a grep of the main-repo MathFin/ sources. Fail-open
+    # H12 feasibility census: does a named own-namespace primitive exist? scout index
+    # first (authoritative), then a grep of the main-repo library sources. Fail-open
     # (return True) whenever neither can confidently decide, so the census only ever
     # blocks a target it is SURE names a missing primitive — never a good one.
     from scout_index import ScoutIndex
@@ -847,7 +879,7 @@ def main() -> int:
         try:
             out = subprocess.run(
                 ["grep", "-rlE", rf"(def|theorem|lemma|abbrev|structure)[[:space:]]+{short}\b",
-                 os.path.join(args.main_repo, "MathFin")],
+                 os.path.join(args.main_repo, pack.lake_root)],
                 capture_output=True, text=True, timeout=15)
             return bool(out.stdout.strip())
         except (OSError, subprocess.SubprocessError):
@@ -873,7 +905,8 @@ def main() -> int:
                 msgs, api_key=_key, max_tokens=800, temperature=0.2)
         print("[refill] experience memory ON", file=sys.stderr)
 
-    res = refill(issues, reason_fn=judge_fn, intent_fn=draft_intent_fn, prove_fn=prove_fn,
+    res = refill(pack, issues, reason_fn=judge_fn, intent_fn=draft_intent_fn,
+                 drafter_preamble=drafter_preamble, prove_fn=prove_fn,
                  agentic_formalize_fn=agentic_fn, slot_switch_fn=slot_switch_fn, check_fn=daemon_check,
                  context_fn=context_fn, queue_dir=queue_dir, budget=budget,
                  max_issues=max_issues, max_attempt_issues=max_attempt, gate_budget=gate_budget,
@@ -1020,20 +1053,21 @@ def unused_theorem_hypotheses(warnings, binders: str) -> list[str]:
 
 
 
-def _rebuild_snippet(snippet: str, candidate: str, thm_name: str) -> str | None:
+def _rebuild_snippet(pack: DomainPack, snippet: str, candidate: str,
+                     thm_name: str) -> str | None:
     """Rebuild the re-export snippet against the stripped module theorem: same
     binders, application re-derived from them (emit's own formula). None if the
     snippet's shape is unexpected — the caller must then revert the whole strip,
     because a module/snippet signature mismatch would block open-pr regen. A
     snippet that applies a DIFFERENT theorem (the corollary shape re-exports the
     corollary while `thm_name` is the sorry-carrying core) is refused outright."""
-    if f"MathFin.{thm_name}" not in snippet:
+    if pack.qualified(thm_name) not in snippet:
         return None
     try:
         cb, cs, _ce = _locate_named(candidate, thm_name)
         new_binders = candidate[cb:cs].strip()
         _sn, sb, ss, send = _locate(snippet)
-        app = f"MathFin.{thm_name} {' '.join(explicit_arg_names(new_binders))}".rstrip()
+        app = f"{pack.qualified(thm_name)} {' '.join(explicit_arg_names(new_binders))}".rstrip()
         return (snippet[:sb] + f" {new_binders} " + snippet[ss:send + 2]
                 + f"\n  {app}\n")
     except ValueError:
@@ -1042,20 +1076,20 @@ def _rebuild_snippet(snippet: str, candidate: str, thm_name: str) -> str | None:
 
 
 
-_MATHFIN_IMPORT_RE = re.compile(r"^public import (MathFin\.\S+)[ \t]*\n", re.MULTILINE)
 
 
 
 
-def trim_unused_imports(candidate: str, *, check_fn) -> dict:
-    """Drop `public import MathFin.X` lines the proved candidate does not need.
+
+def trim_unused_imports(pack: DomainPack, candidate: str, *, check_fn) -> dict:
+    """Drop own-namespace `public import` lines the proved candidate does not need.
     Emit imports EVERY issue pointer, and 'an unused import is harmless' is false
     by the coherence lens: both production PRs carried unused pointer imports,
     one adding a spurious FixedIncome→Futures edge. Subtractive and fail-open:
     each removal is kept only if the file still elaborates clean without it.
     `public import Mathlib` is never touched. Returns `{candidate, removed}`."""
     removed: list[str] = []
-    for m in list(_MATHFIN_IMPORT_RE.finditer(candidate)):
+    for m in list(pack.import_re.finditer(candidate)):
         line, mod = m.group(0), m.group(1)
         trial = candidate.replace(line, "", 1)
         r = check_fn(trial)
@@ -1124,14 +1158,15 @@ def _decl_signatures(text: str) -> list[str]:
 
 
 
-def golf_candidate(candidate: str, *, chat_fn, regate_fn, log=lambda m: None) -> dict:
+def golf_candidate(pack: DomainPack, candidate: str, *, chat_fn, regate_fn,
+                   log=lambda m: None) -> dict:
     """One post-gate polish round: the prover golfs its own accepted proof toward
     the house register (the repo contract: a machine-found proof is refactored to
     the certificate that shows why before it merges). Accepted only if every decl
     signature is byte-equivalent (proof-only edits) AND the full gate passes again;
     any miss keeps the proved original (fail-open). Returns {candidate, golfed}."""
     try:
-        content, _tk = chat_fn([{"role": "system", "content": GOLF_SYSTEM},
+        content, _tk = chat_fn([{"role": "system", "content": pack.prompt("golf-system")},
                                 {"role": "user", "content": f"```lean\n{candidate}\n```"}])
     except Exception:  # noqa: BLE001 — polish is optional; never lose the proof
         return {"candidate": candidate, "golfed": False}
@@ -1191,7 +1226,8 @@ def _protected_from_strip(binders: str, body: str, drop: list[str]) -> set[str]:
 
 
 
-def strengthen_candidate(candidate: str, snippet: str | None, thm_name: str,
+def strengthen_candidate(pack: DomainPack, candidate: str, snippet: str | None,
+                         thm_name: str,
                          warnings, *, regate_fn, max_passes: int = 3,
                          log=lambda m: None) -> dict:
     """Drop theorem hypotheses the finished proof never used and re-gate. Keeps
@@ -1230,7 +1266,7 @@ def strengthen_candidate(candidate: str, snippet: str | None, thm_name: str,
         return {"candidate": original, "entry_code": None, "stripped": []}
     entry_code = None
     if snippet is not None:
-        entry_code = _rebuild_snippet(snippet, candidate, thm_name)
+        entry_code = _rebuild_snippet(pack, snippet, candidate, thm_name)
         if entry_code is None:
             log("strengthen: snippet rebuild failed; reverting to the original statement")
             return {"candidate": original, "entry_code": None, "stripped": []}
@@ -1241,42 +1277,12 @@ def strengthen_candidate(candidate: str, snippet: str | None, thm_name: str,
 
 # --- placement + mechanical emit ---------------------------------------------
 
-# issue area label -> MathFin subdirectory. Areas without a directory yet (fx)
+# (the issue area label -> subdirectory map is the domain's: `pack.areas`, applied
+# by `pack.section_for_area`. Areas without a directory yet (fx)
 # map to a new one the umbrella import + lake build absorb; anything unmapped
 # falls back to a CamelCase of the area.
-_AREA_TO_SECTION = {
-    "fixed-income": "FixedIncome", "actuarial": "Actuarial", "fx": "FX",
-    "black-scholes": "BlackScholes", "futures": "Futures", "binomial": "Binomial",
-    "portfolio": "Portfolio", "performance": "Performance", "risk": "RiskMeasures",
-    "defi": "DeFi", "credit": "FixedIncome", "execution": "Portfolio",
-}
-
-
-
-_LICENSE = (
-    "/-\n"
-    "Copyright (c) 2026 Raphael Coelho. All rights reserved.\n"
-    "Released under Apache 2.0 license as described in the file LICENSE.\n"
-    "Authors: Raphael Coelho\n"
-    "-/"
-)
-
-
-_BENCHMARK = "benchmarks/mathematical_finance.json"
-
-
-_DOMAIN = "mathematical_finance"
-
-
-
-
-def section_for_area(area: str) -> str:
-    """Map an issue's `area:` label to a `MathFin/<Section>/` subdirectory."""
-    if area in _AREA_TO_SECTION:
-        return _AREA_TO_SECTION[area]
-    return "".join(p.capitalize() for p in re.split(r"[-_ ]+", area or "") if p)
-
-
+# The license header, the benchmark path and the corpus `domain` string are the
+# domain's too — `pack.license`, `pack.benchmark`, `pack.domain`.
 
 
 def normalize_deferred(val) -> list[str]:
@@ -1331,7 +1337,7 @@ def _prelint_stub(stub: str) -> str:
     # explicit `u` is unbound → "unknown universe level u" (recurred live on #109/#60). Only
     # u/v/w-prefixed vars (Lean's autobound naming) are touched; numeric levels are left alone.
     stub = re.sub(r"\b(Type|Sort)[ \t]+([uvw][A-Za-z0-9_']*)\b", r"\1*", stub)
-    # A15: MathFin is a proof-only library, so every real-valued def is effectively
+    # A15: the target is a proof-only library, so every real-valued def is effectively
     # noncomputable (ℝ division and order are). The drafter routinely omits the
     # modifier and then burns every repair round on "consider marking it as
     # 'noncomputable'" (the #1 recurring defs-route error, seen on every #73 probe).
@@ -1362,20 +1368,21 @@ def _prelint_stub(stub: str) -> str:
 
 
 
-def emit_target_files(issue: dict, stub: str, meta: dict) -> tuple[str, dict, dict]:
+def emit_target_files(pack: DomainPack, issue: dict, stub: str,
+                      meta: dict) -> tuple[str, dict, dict]:
     """Assemble a queue target from a drafted stub — MECHANICAL, no model call.
 
     Returns `(stub_lean_text, entry_json, placement)`:
     - `stub_lean_text`: the full `cal-bk-<N>.lean` module (license, module header,
       `public import Mathlib`, placement comment headers `build_manifest` reads, the
       `meta.docstring` as a `/-! -/` doc, `@[expose] public section`, `namespace
-      MathFin`, the drafted theorem with its `sorry`, `end MathFin`);
+      <Namespace>`, the drafted theorem with its `sorry`, `end <Namespace>`);
     - `entry_json`: the re-export benchmark entry (`import` the module + apply the
       lemma, carrying `metadata.provenance`);
     - `placement`: `{main_module, benchmark, benchmark_id, source_issue}`.
     """
     n = issue["number"]
-    section = section_for_area(issue.get("area") or "")
+    section = pack.section_for_area(issue.get("area") or "")
     benchmark_id = meta["benchmark_id"]
     docstring = (meta.get("docstring") or "").strip()
     deferred = normalize_deferred(meta.get("deferred"))
@@ -1384,7 +1391,7 @@ def emit_target_files(issue: dict, stub: str, meta: dict) -> tuple[str, dict, di
     stub = _prelint_stub(stub)   # A5 modifier-order fix + A7 Σ/Π-identifier reject
     name, binders, concl = split_statement(stub)
 
-    # main-module placement. When the issue's `location:` names a MathFin module, that
+    # main-module placement. When the issue's `location:` names a library module, that
     # is the answer (backlog S) — #161/#162 both said `Performance/RatiosExtended.lean`,
     # beside the four ratios that already share an algebraic master, and the pipeline
     # made four new one-lemma modules instead. `append` tells
@@ -1398,18 +1405,18 @@ def emit_target_files(issue: dict, stub: str, meta: dict) -> tuple[str, dict, di
     # it introduces (def `upCapture` -> module `UpCapture`), and reject loudly if it
     # still collides (a module cannot import itself).
     append = False
-    location = extract_location(issue.get("body") or "")
+    location = extract_location(pack, issue.get("body") or "")
     module_name = meta["module_name"]
     if location:
         main_module, append = location, True
         module_name = os.path.basename(location)[:-len(".lean")]
     else:
-        main_module = f"MathFin/{section}/{module_name}.lean"
+        main_module = pack.main_module(section, module_name)
         if main_module in pointers:
             primary = new_defs[0].split(".")[-1].strip() if new_defs else ""
             if primary:
                 module_name = primary[:1].upper() + primary[1:]
-                main_module = f"MathFin/{section}/{module_name}.lean"
+                main_module = pack.main_module(section, module_name)
             if main_module in pointers:
                 raise ValueError(
                     f"main-module {main_module} collides with a pointer import; a "
@@ -1418,7 +1425,7 @@ def emit_target_files(issue: dict, stub: str, meta: dict) -> tuple[str, dict, di
     header_lines = [
         f"-- pointers: {', '.join(pointers)}",
         f"-- main-module: {main_module}",
-        f"-- benchmark: {_BENCHMARK}",
+        f"-- benchmark: {pack.benchmark}",
         f"-- benchmark-id: {benchmark_id}",
         f"-- source-issue: {n}",
     ]
@@ -1438,17 +1445,16 @@ def emit_target_files(issue: dict, stub: str, meta: dict) -> tuple[str, dict, di
         header_lines.append(f"-- new-defs: {', '.join(new_defs)}")
     headers = "\n".join(header_lines)
     # coherence-first: import the pointer modules so the drafted statement can
-    # consume existing MathFin defs (a path 'MathFin/FixedIncome/ZCB.lean' becomes
-    # 'public import MathFin.FixedIncome.ZCB'). An unused pointer import is NOT
+    # consume existing library defs (a path '<LakeRoot>/FixedIncome/ZCB.lean' becomes
+    # 'public import <Namespace>.FixedIncome.ZCB'). An unused pointer import is NOT
     # harmless (it adds a spurious cross-module edge) — trim_unused_imports drops any
     # the proved candidate does not need, post-proof.
     imports = "\n".join(
         ["public import Mathlib"]
-        + [f"public import {p[:-5].replace('/', '.')}"
-           for p in pointers if p.endswith(".lean")]
+        + [pack.import_line(p) for p in pointers if p.endswith(".lean")]
     )
     lean_text = (
-        f"{_LICENSE}\n"
+        f"{pack.license}\n"
         "module\n\n"
         f"{imports}\n\n"
         f"{headers}\n\n"
@@ -1461,31 +1467,31 @@ def emit_target_files(issue: dict, stub: str, meta: dict) -> tuple[str, dict, di
         # exactly what the build enforces, so the compile-repair loop fixes it.
         "set_option autoImplicit false\n\n"
         "@[expose] public section\n\n"
-        "namespace MathFin\n\n"
-        # the house preamble (Girsanov.lean:50-51 — 155/262 MathFin modules do this):
+        f"namespace {pack.namespace}\n\n"
+        # the house preamble (`pack.opens`; in the flagship, Girsanov.lean:50-51 — 155 of
         # the drafter emits bare `IsProbabilityMeasure`/`IntegrableOn`/`Measure`
-        # exactly as a MathFin author would, so the module must open the namespaces
+        # 262 modules do this): the drafter emits bare names exactly as a library
+        # author would, so the module must open the namespaces
         # that carry them. Without this, every measure-theory target died `unknown
         # identifier` even after a FAITHFUL draft (run 29667784310, #60 + #109). An
         # unused open is harmless; a missing one is a silent bare-name death.
-        "open MeasureTheory ProbabilityTheory\n"
-        "open scoped NNReal ENNReal\n\n"
+        + "".join(f"{o}\n" for o in pack.opens) + "\n"
         f"{stub.strip()}\n\n"
-        "end MathFin\n"
+        f"end {pack.namespace}\n"
     )
 
     mf_name = benchmark_id.replace("-", "_")
-    app = f"MathFin.{name} {' '.join(explicit_arg_names(binders))}".rstrip()
+    app = f"{pack.qualified(name)} {' '.join(explicit_arg_names(binders))}".rstrip()
     reexport = (
-        f"import MathFin.{section}.{module_name}\n\n"
-        "open MathFin\n\n"
+        f"import {pack.namespace}.{section}.{module_name}\n\n"
+        f"open {pack.namespace}\n\n"
         f"/-- {docstring} -/\n"
         f"theorem {mf_name} {binders.strip()} :{concl.rstrip()} :=\n"
         f"  {app}\n"
     )
     scope = (
         f"Full formal proof in {main_module} (autoformalized statement, "
-        "leanstral proof). Re-export from MathFin. Axioms-clean."
+        f"leanstral proof). Re-export from {pack.namespace}. Axioms-clean."
     )
     # drafter-agnostic provenance: the statement drafter is not named (it's Claude, and
     # Claude is never attributed per the repo's attribution rule); the PROVER stays
@@ -1509,7 +1515,7 @@ def emit_target_files(issue: dict, stub: str, meta: dict) -> tuple[str, dict, di
         "id": benchmark_id,
         "name": issue.get("title", benchmark_id),
         "description": docstring,
-        "domain": _DOMAIN,
+        "domain": pack.domain,
         "code": {"lean": reexport},
         "metadata": {
             "chapter": 0,
@@ -1522,7 +1528,7 @@ def emit_target_files(issue: dict, stub: str, meta: dict) -> tuple[str, dict, di
     }
     placement = {
         "main_module": main_module,
-        "benchmark": _BENCHMARK,
+        "benchmark": pack.benchmark,
         "benchmark_id": benchmark_id,
         "source_issue": n,
         "deferred": deferred,

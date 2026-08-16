@@ -10,7 +10,7 @@ session per target instead of pasting compiler error strings into
 Mechanics (W0-validated):
 - vibe edits files on the HOST from its CWD; the MCP reads goals from `/app` in
   the container. So we run vibe with CWD = the main repo and materialize the stub
-  as `MathFin/<stem>.lean`, which is the same bind-mounted file on both sides.
+  as `<LakeRoot>/<stem>.lean`, the same bind-mounted file on both sides.
 - the stub is a throwaway scratch file; the captured proof is gated (daemon) and
   assembled into its real module downstream by open-pr.sh. We delete the scratch
   before the tick flips the Lean slot back to the daemon.
@@ -32,11 +32,13 @@ def sanitize_stem(target_id: str) -> str:
     return "_Autoform_" + re.sub(r"[^A-Za-z0-9]", "_", target_id)
 
 
-def scratch_paths(main_repo: str, target_id: str) -> tuple[str, str]:
-    """(host absolute path, path relative to the main repo / container `/app`)."""
+def scratch_paths(pack, main_repo: str, target_id: str) -> tuple[str, str]:
+    """(host absolute path, path relative to the main repo / container `/app`).
+    Under the pack's Lake root, so the scratch module lands inside the target
+    library rather than beside it."""
     stem = sanitize_stem(target_id)
-    host = os.path.join(main_repo, "MathFin", stem + ".lean")
-    rel = f"MathFin/{stem}.lean"
+    host = os.path.join(main_repo, pack.lake_root, stem + ".lean")
+    rel = f"{pack.lake_root}/{stem}.lean"
     return host, rel
 
 
@@ -107,7 +109,8 @@ def read_back(host_path: str) -> str | None:
         return None
 
 
-def run_vibe_target(target: dict, *, main_repo: str, context_pack: str, max_turns: int,
+def run_vibe_target(pack, target: dict, *, main_repo: str, context_pack: str,
+                    max_turns: int,
                     vibe_script: str, run_fn=subprocess.run, state_hints: str = "",
                     experience: str = "") -> str | None:
     """Materialize the stub → one headless vibe session (CWD=main_repo) → capture the
@@ -115,7 +118,7 @@ def run_vibe_target(target: dict, *, main_repo: str, context_pack: str, max_turn
     `run_fn` is injected (subprocess.run) so this is unit-testable without vibe/docker.
     leanstral-vibe.sh brings the lean-lsp service up (daemon down) and injects the
     house doctrine; the caller flips the Lean slot back to the daemon afterwards."""
-    host, rel = scratch_paths(main_repo, target["id"])
+    host, rel = scratch_paths(pack, main_repo, target["id"])
     os.makedirs(os.path.dirname(host), exist_ok=True)
     with open(host, "w", encoding="utf-8") as f:
         f.write(target["statement"])
@@ -196,8 +199,12 @@ def _summarizer():
 
 
 def _cmd_run(args) -> int:
+    import domain_pack
     from house_context import extract_signatures
     foundry_root, run_dir = _run_dir()
+    pack = domain_pack.load(getattr(args, "domain", None)
+                            or domain_pack.name_from_config(
+                                getattr(args, "config", None) or ""))
     vibe_script = os.path.join(foundry_root, "scripts", "leanstral-vibe.sh")
     cache = _state_cache(run_dir, getattr(args, "config", None))
     memory = _experience_store(run_dir, getattr(args, "config", None))
@@ -215,7 +222,8 @@ def _cmd_run(args) -> int:
         if notebook:
             print(f"[vibe-run] {target['id']}: carrying {memory.attempts(target['id'])} "
                   f"prior attempt(s) of experience", flush=True)
-        cand = run_vibe_target(target, main_repo=args.main_repo, context_pack=context_pack,
+        cand = run_vibe_target(pack, target, main_repo=args.main_repo,
+                               context_pack=context_pack,
                                max_turns=args.max_turns, vibe_script=vibe_script,
                                state_hints=state_hints, experience=notebook)
         cand_path = os.path.join(run_dir, f"{args.run_tag}-{target['id']}.candidate")
@@ -230,12 +238,16 @@ def _cmd_run(args) -> int:
 def _cmd_gate(args) -> int:
     import time
 
+    import domain_pack
     from autoformalize import (golf_candidate, strengthen_candidate,
                                 trim_unused_imports, trim_unused_opens)
     from gate import gate as run_gate
     from probe import daemon_check, mistral_chat
     from probe_lib import append_jsonl
     _, run_dir = _run_dir()
+    pack = domain_pack.load(getattr(args, "domain", None)
+                            or domain_pack.name_from_config(
+                                getattr(args, "config", None) or ""))
     summary_log = os.path.join(run_dir, f"{args.run_tag}-summary.jsonl")
     state_cache = _state_cache(run_dir, getattr(args, "config", None))
     memory = _experience_store(run_dir, getattr(args, "config", None))
@@ -265,6 +277,7 @@ def _cmd_gate(args) -> int:
                 entry = target.get("benchmark_entry") or {}
                 snippet = (entry.get("code") or {}).get("lean")
                 s = strengthen_candidate(
+                    pack,
                     candidate, snippet, target["sorry_name"], g.get("warnings"),
                     regate_fn=lambda c: run_gate(c, target["sorry_name"],
                                                  check_fn=daemon_check),
@@ -284,7 +297,7 @@ def _cmd_gate(args) -> int:
                 # drop pointer imports the module never needed (elab-verified per
                 # necessity (item R): the pass above drops hypotheses the proof never
                 # USED — elaborator warnings. This one drops hypotheses the theorem
-                # does not NEED, which is a different set: on formal-mathfin#161/#162
+                # does not NEED, which is a different set: on the flagship's #161/#162
                 # all four drafts genuinely consumed their guard (`h.le`,
                 # `field_simp [h]`), so no warning fired, and the statement was true
                 # without it anyway. Re-proves the reduced statement with a tactic
@@ -305,7 +318,7 @@ def _cmd_gate(args) -> int:
                 # drop pointer imports the module never needed (elab-verified per
                 # removal); one full re-gate guards against instance-resolution
                 # drift, reverting the trim wholesale if anything changed.
-                t = trim_unused_imports(candidate, check_fn=daemon_check)
+                t = trim_unused_imports(pack, candidate, check_fn=daemon_check)
                 if t["removed"]:
                     g3 = run_gate(t["candidate"], target["sorry_name"],
                                   check_fn=daemon_check)
@@ -332,6 +345,7 @@ def _cmd_gate(args) -> int:
                 # full re-gate; fail-open). GOLF=0 disables the experiment.
                 if os.environ.get("GOLF", "1") != "0" and os.environ.get("MISTRAL_API_KEY"):
                     gf = golf_candidate(
+                        pack,
                         candidate,
                         chat_fn=lambda msgs: mistral_chat(
                             msgs, api_key=os.environ["MISTRAL_API_KEY"]),

@@ -1,4 +1,4 @@
-"""Select the next autoformalization target from the formal-mathfin issue backlog.
+"""Select the next autoformalization target from the target library's issue backlog.
 
 The open issues ARE the curated backlog: each `type:proof` `status:ready` issue
 carries the statement (its "Task" section) and the context modules (its

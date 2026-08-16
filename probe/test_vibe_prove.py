@@ -6,13 +6,18 @@ import os
 import vibe_prove
 
 
+import domain_pack
+
+PACK = domain_pack.load("mathfin")
+
+
 def test_sanitize_stem_makes_a_safe_module_name():
     assert vibe_prove.sanitize_stem("cal-bk-67") == "_Autoform_cal_bk_67"
     assert vibe_prove.sanitize_stem("mf/thm.9.1") == "_Autoform_mf_thm_9_1"
 
 
 def test_scratch_paths_host_and_container_align():
-    host, rel = vibe_prove.scratch_paths("/home/x/main", "cal-bk-67")
+    host, rel = vibe_prove.scratch_paths(PACK, "/home/x/main", "cal-bk-67")
     assert host == "/home/x/main/MathFin/_Autoform_cal_bk_67.lean"
     assert rel == "MathFin/_Autoform_cal_bk_67.lean"
     # the relative path is what vibe uses (CWD=main) AND what the MCP sees under /app
@@ -37,7 +42,7 @@ def test_run_vibe_target_captures_the_edited_file_and_cleans_up(tmp_path):
     (tmp_path / "MathFin").mkdir()
     target = {"id": "cal-x-1", "sorry_name": "foo",
               "statement": "import Mathlib\ntheorem foo : True := by sorry\n"}
-    host, _ = vibe_prove.scratch_paths(str(tmp_path), target["id"])
+    host, _ = vibe_prove.scratch_paths(PACK, str(tmp_path), target["id"])
 
     def fake_vibe(argv, cwd=None, check=None):
         # vibe runs with CWD = main repo, and edits the in-place host file
@@ -48,7 +53,7 @@ def test_run_vibe_target_captures_the_edited_file_and_cleans_up(tmp_path):
             f.write("import Mathlib\ntheorem foo : True := trivial\n")
         return 0
 
-    cand = vibe_prove.run_vibe_target(
+    cand = vibe_prove.run_vibe_target(PACK, 
         target, main_repo=str(tmp_path), context_pack="", max_turns=10,
         vibe_script="/x/leanstral-vibe.sh", run_fn=fake_vibe)
     assert cand is not None and "trivial" in cand and "sorry" not in cand
@@ -59,9 +64,9 @@ def test_run_vibe_target_returns_stub_on_a_no_op_and_still_cleans_up(tmp_path):
     (tmp_path / "MathFin").mkdir()
     target = {"id": "cal-x-2", "sorry_name": "bar",
               "statement": "import Mathlib\ntheorem bar : True := by sorry\n"}
-    host, _ = vibe_prove.scratch_paths(str(tmp_path), target["id"])
+    host, _ = vibe_prove.scratch_paths(PACK, str(tmp_path), target["id"])
 
-    cand = vibe_prove.run_vibe_target(
+    cand = vibe_prove.run_vibe_target(PACK, 
         target, main_repo=str(tmp_path), context_pack="", max_turns=10,
         vibe_script="/x/leanstral-vibe.sh", run_fn=lambda *a, **k: 0)
     assert cand is not None and "sorry" in cand  # unchanged stub captured

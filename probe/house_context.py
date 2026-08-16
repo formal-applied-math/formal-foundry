@@ -1,16 +1,24 @@
 """House context / values / idioms / pins for the formalization (prover) agents.
 
 This is the reusable "setup" layer that equips a Leanstral (or any) prover agent
-with the same standards a MathFin author works to: the toolchain/dependency pins
+with the same standards a library author works to: the toolchain/dependency pins
 it must target, the values contract its output is held to, and the distilled
 house Lean idioms that make a proof idiomatic instead of a kernel-green blob.
 
-`build_system_prompt(main_repo)` returns the system message injected on every
-attempt. `extract_signatures(main_repo, modules)` builds the per-target context
-pack — the existing declarations the agent should CONSUME rather than reprove
-(coherence-first, anti-wrapper). Both read the live repo so they never go stale.
+`build_system_prompt(main_repo, pack)` returns the system message injected on
+every attempt. `extract_signatures(main_repo, modules)` builds the per-target
+context pack — the existing declarations the agent should CONSUME rather than
+reprove (coherence-first, anti-wrapper). Both read the live repo so they never go
+stale.
 
-Design of record: docs/PROVER_SETUP.md. Stdlib only.
+The house doctrine itself is DATA: it lives in the domain pack
+(`domains/<name>/house.md`), because it is the one part of this module that is
+wholly about one library. What stays here is the assembly — the pin block, the
+live-patterns injection, and the context pack — all of which are field-neutral.
+
+Design of record: docs/PROVER_SETUP.md, and
+the flagship's docs/plans/2026-08-09-program-execution/02-foundry-domain-packs.md.
+Stdlib only.
 """
 
 from __future__ import annotations
@@ -19,27 +27,30 @@ import json
 import os
 import re
 
+from domain_pack import DomainPack
 from scout_index import ScoutIndex, default_index_dir
 
 # --- Pins ---------------------------------------------------------------------
 
-def read_pins(main_repo: str) -> dict:
-    """Live toolchain + Mathlib + BrownianMotion pins from the main repo."""
+def read_pins(main_repo: str, pack: DomainPack) -> dict:
+    """Live toolchain + per-dependency pins from the target repo, keyed by the
+    pack's `manifest` names plus `toolchain`. A dependency the manifest does not
+    carry reads '?' rather than raising: a stale pin degrades prompt quality, it
+    is not a reason to fail a tick."""
     toolchain = open(os.path.join(main_repo, "lean-toolchain")).read().strip()
+    wanted = {d.manifest for d in pack.deps}
     revs: dict[str, str] = {}
     try:
         man = json.load(open(os.path.join(main_repo, "lake-manifest.json")))
         for p in man.get("packages", []):
             n = (p.get("name") or "").lower()
-            if n in ("mathlib", "brownianmotion"):
+            if n in wanted:
                 revs[n] = (p.get("rev") or "")[:12]
     except Exception:
         pass
-    return {
-        "toolchain": toolchain,
-        "mathlib": revs.get("mathlib", "?"),
-        "brownianmotion": revs.get("brownianmotion", "?"),
-    }
+    pins = {"toolchain": toolchain}
+    pins.update({m: revs.get(m, "?") for m in sorted(wanted)})
+    return pins
 
 
 def read_patterns(main_repo: str) -> str:
@@ -55,100 +66,17 @@ def read_patterns(main_repo: str) -> str:
 
 
 # --- The house doctrine (values + idioms + strategy) ---------------------------
-# Distilled from CLAUDE.md's values contract + automation gate and docs/patterns.md.
-
-HOUSE_DOCTRINE = """\
-You are a formalization agent for MathFin — a library of formally verified
-mathematical-finance theorems built on Mathlib and Rémy Degenne's BrownianMotion
-package. Your job: given a Lean 4 file whose theorem ends in `:= by sorry`,
-replace the `sorry` with a complete, idiomatic, axiom-clean proof, and output the
-COMPLETE file in a single ```lean code block. Do not change the statement,
-imports, or anything else.
-
-── NON-NEGOTIABLE OUTPUT RULES (the values gate) ──
-- No `sorry`, `admit`, `native_decide`, `polyrith`, `exact?`, `apply?`, `hint`.
-  (These are auto-rejected. `decide`, `grind`, `nlinarith`, `simp`, `omega` are fine.)
-- The finished proof must depend only on the standard axioms
-  [propext, Classical.choice, Quot.sound] — introduce no new axioms.
-- Output the whole file, imports untouched, exactly one ```lean block.
-
-── COHERENCE FIRST (the anti-wrapper doctrine) ──
-- CONSUME Mathlib / BrownianMotion lemmas; do not re-prove what the libraries
-  already provide. Finding the canonical library lemma and applying it IS the
-  proof. `loogle` and `leansearch%` are available (LeanSearchClient is a dep) —
-  reason about which named lemma fits before hand-rolling.
-- Never wrap a single Mathlib lemma in a finance-named restatement. If your proof
-  is `:= someMathlibLemma` with renamed arguments, use the Mathlib lemma directly.
-- A proof that shows WHY (the conceptual certificate) beats an opaque discharge,
-  even when both are kernel-accepted. Aim for the proof a careful author would
-  keep, not merely one the kernel swallows.
-
-── HOUSE LEAN IDIOMS (a quick summary — the LIVE docs/patterns.md injected below is authoritative) ──
-- Tactic order for algebra/arithmetic: try `grind` FIRST (it wins on field
-  identities with `≠ 0` side-conditions, ℕ/cast arithmetic, and goals linear in
-  nonlinear atoms). For nonlinear REAL inequalities `grind` loses — use
-  `nlinarith [certificates]` (e.g. `nlinarith [sq_nonneg (a - b), mul_pos ha hb]`);
-  then `positivity` / `gcongr` / `bound` for structured inequality families.
-- `field_simp` BEFORE `ring`; `push_cast` BEFORE `field_simp` when `Nat.cast`
-  numerals are present. Factor `f` and `f'` aggressively before `ring` /
-  `linear_combination` to avoid polynomial-degree blowup.
-- For a predicate whose decidability comes from an underlying construction, use
-  `abbrev` (= `@[reducible] def`), not `def`, so instance search sees through it.
-- When a lambda passed to a polymorphic function has an ambiguous argument type,
-  annotate it (`fun (i : Fin n) => …`) or use `.val`.
-- To identify `deriv f` at a point from a known closed-form derivative, use
-  `HasDerivAt.congr_of_eventuallyEq` with a `=ᶠ[nhds x]` neighborhood equality.
-- Convexity on an OPEN set (e.g. `Set.Ioi 0`): `convexOn_of_deriv2_nonneg'`
-  (the primed variant wants differentiability on the set itself).
-- Canonical discount factor in NEW files: `Real.exp (-(r * τ))` — product under
-  one negation.
-
-── MATHLIB HOUSE-STYLE GOLF (a BM maintainer holds proofs to these; PR #484) ──
-- Prefer a bare proof term over `by exact` / `by exact_mod_cast` when the goal is
-  DEFEQ to the hypothesis — a stray `exact_mod_cast` usually masks an
-  already-defeq coercion (subtype→base, `WithTop`, `ℝ≥0→ℝ`, `⊥`/`⊤`). Let Lean
-  insert those coercions from context; do not hand-write `↑`.
-- Bind ∀-vars in the `have` signature: `have h (v : T) : P v := …`, not
-  `have h : ∀ v, P v := by intro v; …`.
-- Fold `have h := e; simp … at h; exact h` into `simpa … using e`.
-- No gratuitous `classical` — a `LinearOrder` already gives `DecidableLE`/`DecidableEq`.
-- `set x := e` WITHOUT `with hx` unless you rewrite by `hx`; unfold via `simp [x]`.
-- Assume the MINIMAL typeclass the callees actually need (e.g.
-  `SigmaFiniteFiltration`, not `IsFiniteMeasure`, when that suffices) —
-  over-assuming is a coherence smell.
-- Prefer fewer `have`s + mixed forward/backward reasoning (`suffices`,
-  `show … from`) so the proof's SHAPE stays visible.
-- LIFT the reusable abstraction: if the crux is a bespoke ε–δ core, state it as a
-  general lemma and apply it, rather than inlining it at one call site.
-- Gotcha: a `def` that reduces to `And` (e.g. `UniformIntegrable`) does NOT support
-  `h.myField` dot-notation against your lemma — call `Namespace.myLemma h …` by
-  full name; positional `h.2.1` for the And-components is fine.
-
-── STRUCTURAL STRATEGY (reach for these before brute force) ──
-- "This IS already that under renaming": before writing a fresh Gaussian integral
-  or induction, ask whether the target is literally an instance of an existing
-  closed form at a different parameterisation (e.g. a power/quanto/chooser payoff
-  is `bs_call_formula` at an effective spot/vol). Then the proof is algebraic
-  identification + reuse, not new machinery.
-- Variational `m = min_c g(c)`: hunt for a POINTWISE certificate inequality whose
-  integral collapses to `m` for every `c`, with equality exactly at `c*` — no
-  calculus needed (cf. the Rockafellar–Uryasev CVaR proof).
-- Multi-step from one step: prove the one-period inequality + a monotonicity lemma
-  for the one-period operator, then induct.
-
-You will receive compiler feedback (errors and, at a `sorry`, the goal state)
-after each attempt. Read it precisely, revise, and resend the complete file.
-"""
+# The doctrine prose itself is the DOMAIN's, not the foundry's: it names the
+# library, its dependencies, and the idioms its authors hold proofs to. It lives
+# in `domains/<name>/house.md` and reaches the prompt through `pack.house_doctrine`.
 
 
-def build_system_prompt(main_repo: str) -> str:
-    pins = read_pins(main_repo)
+def build_system_prompt(main_repo: str, pack: DomainPack) -> str:
+    pins = read_pins(main_repo, pack)
     pin_block = (
         "── PINS (target THIS API surface exactly) ──\n"
-        f"- Lean toolchain: {pins['toolchain']}\n"
-        f"- Mathlib: leanprover-community/mathlib4 @ {pins['mathlib']}\n"
-        f"- BrownianMotion: RemyDegenne/brownian-motion @ {pins['brownianmotion']}\n"
-        "Lemma names / signatures must match these revisions — do not assume a "
+        + pack.pin_block(pins["toolchain"], pins)
+        + "Lemma names / signatures must match these revisions — do not assume a "
         "newer or older Mathlib API. If unsure a lemma exists at this pin, prefer "
         "a first-principles step over a guessed name.\n"
     )
@@ -162,29 +90,21 @@ def build_system_prompt(main_repo: str) -> str:
         "summary above wherever they differ.\n\n"
         f"{patterns}\n"
     ) if patterns.strip() else ""
-    return HOUSE_DOCTRINE + "\n" + patterns_block + pin_block
+    return pack.house_doctrine + "\n" + patterns_block + pin_block
 
 
 # --- Drafter (statement) authority --------------------------------------------
 # The DRAFTER (intent + formalize stages) writes STATEMENTS, not proofs. Until
 # now it got none of the prover's context — no pins, no house statement-design
-# rules — which is why it hallucinated constants (e.g. `MathFin.zcb` onto a
-# barrier problem) and stated context-free theorems the depth-gate then killed.
-# It gets the pins + the statement-design section of patterns.md, and pointedly
-# NOT the prover's tactic ladder (which would only tempt it to write proofs).
-
-DRAFTER_STATEMENT_DESIGN_FALLBACK = """\
-── STATEMENT DESIGN (the drafter's job is a faithful, in-depth STATEMENT) ──
-The hardest failures are statement failures, not proof failures. Before `:= by sorry`:
-- Name objects ONLY from the declarations shown for THIS target. Never carry over an
-  example constant from these instructions (do not reach for `MathFin.zcb` unless it
-  appears in the shown declarations and the statement is about it).
-- If the primitive the statement needs is absent from the shown declarations, take the
-  DEFINITIONS route — do not invent a constant name.
-- Shape hard side-conditions to be inherited, not asserted; state at the natural level
-  of generality (`s.Nonempty` over a member-witness, `A ≠ 0` over provable positivity);
-  casts go outward around lattice/arith ops.
-"""
+# rules — which is why it hallucinated constants (the pack's worked-example
+# constant onto an unrelated problem) and stated context-free theorems the
+# depth-gate then killed. It gets the pins + the statement-design section of
+# patterns.md, and pointedly NOT the prover's tactic ladder (which would only
+# tempt it to write proofs).
+#
+# The fallback prose — used when the target's patterns.md carries no 'Statement
+# design' section — is the domain's, and lives in
+# `domains/<name>/statement-design.md` (`pack.statement_design_fallback`).
 
 
 def _slice_patterns_section(patterns: str, header_substr: str) -> str:
@@ -200,22 +120,20 @@ def _slice_patterns_section(patterns: str, header_substr: str) -> str:
     return "\n".join(lines[start:end]).strip()
 
 
-def build_drafter_prompt(main_repo: str) -> str:
+def build_drafter_prompt(main_repo: str, pack: DomainPack) -> str:
     """System-prompt PREAMBLE for the DRAFTER (intent + formalize stages): the pins
     it must target + the live 'Statement design' section of patterns.md (fail-open to
-    a curated fallback). Deliberately EXCLUDES the prover's tactic ladder — the
-    drafter states, it does not prove. Read live so patterns.md edits reach it."""
-    pins = read_pins(main_repo)
+    the pack's curated fallback). Deliberately EXCLUDES the prover's tactic ladder —
+    the drafter states, it does not prove. Read live so patterns.md edits reach it."""
+    pins = read_pins(main_repo, pack)
     pin_block = (
         "── PINS (target THIS API surface exactly) ──\n"
-        f"- Lean toolchain: {pins['toolchain']}\n"
-        f"- Mathlib: leanprover-community/mathlib4 @ {pins['mathlib']}\n"
-        f"- BrownianMotion: RemyDegenne/brownian-motion @ {pins['brownianmotion']}\n"
-        "Object and lemma names must exist at these revisions; if unsure a name exists, "
+        + pack.pin_block(pins["toolchain"], pins)
+        + "Object and lemma names must exist at these revisions; if unsure a name exists, "
         "do not guess it — take the definitions route or omit it.\n"
     )
     section = _slice_patterns_section(read_patterns(main_repo), "Statement design")
-    design_block = section if section else DRAFTER_STATEMENT_DESIGN_FALLBACK
+    design_block = section if section else pack.statement_design_fallback
     return pin_block + "\n" + design_block + "\n"
 
 
@@ -268,7 +186,7 @@ def _index_pack(idx: ScoutIndex, modules: list[str], max_per_module: int,
     # so the agent sees the lemmas those decls transitively rest on, not just the
     # pointer modules themselves (miniCTX: cross-file premises are a first-order
     # lever). Skip closure constants defined IN the pointer modules (already shown)
-    # and non-MathFin/Mathlib-core noise without a recorded type.
+    # and own-library/Mathlib-core noise without a recorded type.
     seed_set = set(seed_names)
     clines: list[str] = []
     for cname in idx.dependency_closure(seed_names, depth=closure_depth):
@@ -320,7 +238,7 @@ def extract_signatures(main_repo: str, modules: list[str], max_per_module: int =
                        closure_depth: int = 2) -> str:
     """Per-target context pack so the agent builds on existing results instead of
     reproving them. `modules` are repo-relative paths (e.g.
-    'MathFin/FixedIncome/VasicekBondPrice.lean').
+    '<LakeRoot>/<Section>/<Module>.lean').
 
     Prefers the lean_scout index (real elaborated signatures + docstrings +
     house-style tactic exemplars) when it covers the requested modules; otherwise

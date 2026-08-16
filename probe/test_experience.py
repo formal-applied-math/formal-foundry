@@ -9,6 +9,11 @@ import vibe_prove as vp
 
 # --- the roll ----------------------------------------------------------------
 
+import domain_pack
+
+PACK = domain_pack.load("mathfin")
+
+
 def test_mechanical_roll_accumulates_numbered_attempts():
     a = xp.summarize("", {"outcome": "fail_gate", "reason": "compile_or_sorry"}, index=1)
     b = xp.summarize(a, {"outcome": "max_rounds"}, index=2)
@@ -173,7 +178,7 @@ def test_experience_reaches_the_vibe_invocation(tmp_path, monkeypatch):
 
     main_repo = tmp_path / "main"
     (main_repo / "MathFin").mkdir(parents=True)
-    vp.run_vibe_target({"id": "t", "sorry_name": "thm", "statement": "theorem thm : True := by sorry"},
+    vp.run_vibe_target(PACK, {"id": "t", "sorry_name": "thm", "statement": "theorem thm : True := by sorry"},
                        main_repo=str(main_repo), context_pack="", max_turns=1,
                        vibe_script="/bin/true", run_fn=fake_run, experience="NOTEBOOK-HERE")
     assert "NOTEBOOK-HERE" in captured["task"]

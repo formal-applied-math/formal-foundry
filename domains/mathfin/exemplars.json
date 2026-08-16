@@ -1,0 +1,8 @@
+{
+  "_comment": "Worked-example constants the prompt templates substitute. `exemplar` is a real, fully-applied library def the drafter is shown as the shape to CONSUME rather than re-derive; `exemplar_partial` is the same def under-applied, the pitfall it illustrates. A second domain supplies its own — the prompts stay field-neutral.",
+  "benchmark_id_format": "mf-<area>-<slug>",
+  "exemplar": "MathFin.zcb",
+  "exemplar_applied": "MathFin.zcb r t T",
+  "exemplar_applied_alt": "MathFin.zcb r 0 T",
+  "exemplar_partial": "MathFin.zcb r"
+}

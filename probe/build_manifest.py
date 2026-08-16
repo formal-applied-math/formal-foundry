@@ -25,7 +25,7 @@ STREAMS = {"bk": "backlog", "a4": "depth", "sp": "textbook", "ctl": "control"}
 
 def parse_pointers(code: str) -> list[str]:
     """Pointers a stub declares for its context pack, via a comment line:
-        -- pointers: MathFin/BlackScholes/Call.lean, MathFin/BlackScholes/Forward.lean
+        -- pointers: <LakeRoot>/BlackScholes/Call.lean, <LakeRoot>/BlackScholes/Forward.lean
     Returns the repo-relative module paths (empty if none)."""
     m = re.search(r"--\s*pointers:\s*(.+)", code)
     if not m:
@@ -61,7 +61,7 @@ def load_entry(stub_path: str) -> dict | None:
 def parse_meta(code: str) -> dict:
     """Placement metadata a stub declares via comment header lines, telling the
     assembler where a proven candidate lands and which issue it closes:
-        -- main-module: MathFin/FX/InterestRateParity.lean
+        -- main-module: <LakeRoot>/FX/InterestRateParity.lean
         -- benchmark: benchmarks/mathematical_finance.json
         -- benchmark-id: mf-fx-interest-rate-parity
         -- source-issue: 108

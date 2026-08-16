@@ -146,6 +146,56 @@ PutnamBench curve climbs 44 → 587 solves as the per-problem budget goes
 can't close escalates to the **decompose** path. (This replaced an earlier pass@k
 text-loop of `fanout` parallel whole-proof samples + `repair_rounds`.)
 
+### Domain packs — the target library is data, not code
+
+`probe/` is **domain-free**. Everything specific to the library being formalized —
+the Lean namespace, the house doctrine, every system prompt, the worked-example
+constants, the issue `area:` vocabulary, the license header, the container and
+image names — lives in `domains/<name>/`, and `probe/domain_pack.py` is the single
+access path. `pipeline.toml`'s `[domain] name` picks the default; every CLI takes a
+`--domain` override.
+
+```
+domains/mathfin/
+  target.toml            namespace · lake root · own namespaces · repo slug ·
+                         benchmark path · corpus domain · dependency pin rows ·
+                         container + verify image · module opens · splice anchor ·
+                         license · the issue area -> section map
+  house.md               the prover's house doctrine (values gate · coherence · idioms)
+  statement-design.md    the drafter's fallback when patterns.md has no such section
+  exemplars.json         worked-example constants the prompt templates substitute
+  gate-instructions.json per-gate repair directions for the semantic repair cascade
+  prompts/*.md           judge · intent · formalize · defs-addendum · golf ·
+                         agentic-pitfalls · decompose
+```
+
+Prompt and prose files carry `{{placeholder}}` slots (`{{namespace}}`,
+`{{exemplar_applied}}`, …) that the loader substitutes at load time; an unknown
+placeholder raises rather than reaching a model verbatim. Text files store the
+string minus exactly one trailing newline, so a prompt round-trips through a file
+byte-for-byte — which `probe/test_domain_pack_golden.py` pins across **72 surfaces**,
+prompts *and* emitted Lean (the module skeleton, both gate meta-blocks, the
+re-export snippet, a splice round-trip, the three issue-parsing regexes).
+
+**The pack is passed DOWN as a parameter — there is no module-level default
+instance.** Two domains must be able to live in one process (a matrix CI run is the
+point), and a global would let the second silently inherit the first's namespace.
+
+**Adding a domain.** Copy `domains/mathfin/` to `domains/<name>/`; set the
+namespace, lake root, slug, benchmark and sections; rewrite `house.md` for that
+library's idioms and `exemplars.json` for one real, fully-applied def of its own;
+trim `[areas]` to the labels its issues actually use. Then run
+`python3 -m pytest probe/ -q` — `test_no_domain_leakage.py` fails if any domain
+string crept back into `probe/`.
+
+**What this does NOT do.** A domain-free `probe/` is necessary and not sufficient.
+The **target plane** — `scripts/*.sh`, the three workflows, the GHCR image with the
+library's oleans baked in, and the target repo's `status:ready`/`type:proof`/`area:*`
+label vocabulary — is still welded to the flagship in ~77 places. Lifting it is
+[runbook 06](https://github.com/formal-applied-math/formal-mathfin/blob/main/docs/plans/2026-08-09-program-execution/06-foundry-target-plane.md).
+Until that lands the foundry is portable in principle and immovable in practice, and
+switching `[domain] name` alone will not retarget a live tick.
+
 ### The hard rules (read these before touching anything)
 
 - **The foundry reads `formal-mathfin`; it never *merges* to it.** The pipeline may

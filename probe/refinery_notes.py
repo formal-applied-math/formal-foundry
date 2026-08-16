@@ -17,13 +17,13 @@ import os
 import sys
 
 REFINERY_SYSTEM = (
-    "You are a Lean 4 code reviewer for MathFin (on Mathlib + BrownianMotion). You are given "
+    "You are a Lean 4 code reviewer for {namespace} (on {deps}). You are given "
     "a PROVEN candidate module — it already compiles, is sorry-free and axiom-clean. Produce "
     "the MECHANICAL half of an 8-lens refinery pass: a punch list a human refiner starts "
     "from. Check ONLY these mechanical lenses, never taste:\n"
     "- ZERO SLOP: unused or gratuitous constructs — dead `have`s, unused hypotheses/binders, "
     "redundant `simp` lemmas, a leftover `classical`, imports the proof never uses.\n"
-    "- ANTI-WRAPPER: a lemma that merely renames a single Mathlib/MathFin result — name it so "
+    "- ANTI-WRAPPER: a lemma that merely renames a single Mathlib/{namespace} result — name it so "
     "it can be inlined/deleted.\n"
     "- REGISTER: a missing or thin docstring; non-idiomatic naming; `=>` where `↦` is house "
     "style; `by exact`/`by exact_mod_cast` where a bare term is defeq; hand-written coercions.\n"
@@ -36,19 +36,24 @@ REFINERY_SYSTEM = (
 )
 
 
-def refinery_messages(lean_text: str) -> list[dict]:
+def refinery_messages(pack, lean_text: str) -> list[dict]:
+    """The review prompt, with the pack's library identity rendered in. Kept a
+    format-string here rather than a pack file: every clause but the two names is
+    field-neutral, and a second domain should inherit the lens list unchanged."""
+    system = REFINERY_SYSTEM.format(namespace=pack.namespace,
+                                    deps=pack.dependencies_inline)
     return [
-        {"role": "system", "content": REFINERY_SYSTEM},
+        {"role": "system", "content": system},
         {"role": "user", "content": "CANDIDATE MODULE:\n```lean\n" + lean_text.strip() + "\n```"},
     ]
 
 
-def refinery_notes(lean_text: str, *, chat_fn) -> str:
+def refinery_notes(pack, lean_text: str, *, chat_fn) -> str:
     """The mechanical-half refinery punch list. SOFT — it never raises and never gates: any
     failure (no key, API error, empty reply) returns a fallback line so the PR still opens.
     `chat_fn(messages)` returns `(content, tokens)` (a bare string is tolerated too)."""
     try:
-        res = chat_fn(refinery_messages(lean_text))
+        res = chat_fn(refinery_messages(pack, lean_text))
     except Exception as e:   # soft: the punch list must never block a PR
         return f"_(first-pass refinery notes unavailable: {str(e)[:80]})_"
     content = res[0] if isinstance(res, tuple) else res
@@ -60,7 +65,10 @@ def main() -> int:
     ap.add_argument("--lean-file", required=True)
     ap.add_argument("--out", default=None, help="write here instead of stdout")
     ap.add_argument("--model", default=os.environ.get("REFINERY_MODEL", "claude-sonnet-5"))
+    ap.add_argument("--domain", default=None, help="domain pack name")
     args = ap.parse_args()
+    import domain_pack
+    pack = domain_pack.load(args.domain or domain_pack.DEFAULT_NAME)
     try:
         text = open(args.lean_file, encoding="utf-8").read()
     except OSError as e:
@@ -70,12 +78,13 @@ def main() -> int:
         md = "_(first-pass refinery notes skipped: empty candidate)_"
     elif args.model.startswith("claude"):   # default: claude (mistral remains selectable via --model)
         from autoformalize import claude_draft_fn   # lazy: only when a real call is made
-        md = refinery_notes(text, chat_fn=lambda msgs: claude_draft_fn(msgs, model=args.model))
+        md = refinery_notes(pack, text,
+                            chat_fn=lambda msgs: claude_draft_fn(msgs, model=args.model))
     elif not os.environ.get("MISTRAL_API_KEY"):
         md = "_(first-pass refinery notes skipped: no MISTRAL_API_KEY for a mistral --model)_"
     else:
         from probe import mistral_chat   # lazy: only when a real call is made
-        md = refinery_notes(text, chat_fn=lambda msgs: mistral_chat(
+        md = refinery_notes(pack, text, chat_fn=lambda msgs: mistral_chat(
             msgs, api_key=os.environ["MISTRAL_API_KEY"], model=args.model))
     if args.out:
         with open(args.out, "w", encoding="utf-8") as f:

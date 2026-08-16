@@ -18,6 +18,8 @@ import os
 import re
 from dataclasses import dataclass, field
 
+from domain_pack import DomainPack
+
 # Default leaf ceiling (R decision 2026-07-18: tight splits first). The pipeline.toml
 # `[decompose] max_leaves` override is threaded in by the tick wiring (Task 2.4).
 MAX_LEAVES = 3
@@ -34,7 +36,7 @@ class Node:
     statement: str
     pointers: list[str] = field(default_factory=list)
     depends_on: list[str] = field(default_factory=list)
-    applied_to: list[str] = field(default_factory=list)  # Mathlib/MathFin lemmas the leaf's
+    applied_to: list[str] = field(default_factory=list)  # library/Mathlib lemmas the leaf's
                                                           # proof consumes — a prover hint
     is_main: bool = False
     proof: str = ""   # the main node's Lean proof applying the leaves (leaves: "")
@@ -163,64 +165,14 @@ def topo_order(dag: Dag) -> list[Node]:
 # + statement-design, from house_context.build_drafter_prompt via `system_preamble`)
 # so the leaves are STATED to the same house standard — no import of autoformalize.
 
-DECOMPOSE_SYSTEM = (
-    "You are a Lean 4 proof ARCHITECT for MathFin (on Mathlib + BrownianMotion). Given a "
-    "hard target theorem, SPLIT it into a lemma-DAG: a few named leaf lemmas plus a MAIN "
-    "theorem whose proof applies them. Do NOT prove anything — you STATE the leaves and "
-    "sketch the main proof as leaf applications.\n"
-    "Playbook, in order:\n"
-    "- Spike the RISKIEST kernel first: leaf #1 is the single step most likely to be "
-    "impossible (a missing primitive, the hard analytic core). If it cannot be stated "
-    "cleanly, the whole split is wrong — say so instead of inventing a constant.\n"
-    "- Recon by conclusion-head: name each leaf after the Mathlib/MathFin result family "
-    "its conclusion belongs to, so the prover consumes the right lemma.\n"
-    "- Definition-shaping: shape a leaf so its hard side-conditions are INHERITED from a "
-    "closed structure, not asserted as fresh hypotheses.\n"
-    "- Skeleton-with-sorries: the main theorem's proof must ELABORATE as leaf applications "
-    "with the leaves left `:= by sorry`.\n"
-    "- Scope-fork with declared deferral: a leaf out of reach is split off and marked "
-    "deferred, never silently dropped.\n"
-    "- Keep leaves FEW and short (a handful at most); a split that needs many leaves is "
-    "mis-shaped.\n"
-    "- Every leaf MUST be dispatched to by the main proof — directly (its name appears in "
-    "your `proof`) or transitively (a sibling's `depends_on`). A leaf the main never uses is "
-    "rejected as dead weight.\n"
-    "Structural splits — when the difficulty lives INSIDE one proof (not in a reusable "
-    "sub-fact), the main's `proof` DISPATCHES to sorried leaves via a tactic; three moves:\n"
-    "- CASE-SPLIT: for a piecewise goal (a payoff branching on a sign/threshold, a "
-    "definition by cases), state ONE leaf per branch carrying its branch hypothesis "
-    "(`(h : 0 ≤ x)`, `(h : x ≤ 0)`) and dispatch `by rcases <disc> with h | h` (or "
-    "`by_cases h : <prop>`), one bullet per leaf. Prefer a stable Mathlib discriminant "
-    "(`le_total`, `lt_or_ge`, `em`); the skeleton gate rejects a non-exhaustive split for "
-    "free (a missing branch leaves an extra goal).\n"
-    "- INDUCTION: for a goal over ℕ or a recursive structure (n-period pricing, a finite "
-    "sum/product), state a BASE leaf (the goal at 0) and a STEP leaf that takes the "
-    "predecessor's result as an EXPLICIT premise — the induction hypothesis becomes a leaf "
-    "hypothesis: `theorem <name>_step (k : ℕ) (ih : P k) : P (k+1)`; dispatch `by induction n "
-    "with | zero => exact <base> | succ k ih => exact <step> k ih`.\n"
-    "- GOAL-REDUCTION: when it suffices to show a core fact Q, isolate Q as its OWN leaf and "
-    "state the reduction leaf carrying Q to the goal; dispatch `by suffices h : Q by "
-    "<apply the reduction>` then close Q via its leaf, or `by exact <reduce> <core>`. Keeps "
-    "the hard core Q as its own prove target instead of hoisting the whole proof.\n"
-    "Each leaf stays an ordinary single-`sorry` target; the skeleton must still elaborate "
-    "with exactly one `sorry` per leaf.\n"
-    "Respond with ONLY a JSON object:\n"
-    '{"main": {"name": "<snake_case>", "statement": "theorem <name> <binders> : <conclusion>", '
-    '"proof": "<Lean proof applying the leaves — a term or `by ...`, NO sorry>"}, '
-    '"leaves": [{"name": "<snake_case>", "statement": "theorem <name> <binders> : <conclusion>", '
-    '"pointers": ["MathFin/.../X.lean"], "depends_on": ["<sibling leaf name>", ...], '
-    '"applied_to": ["<Mathlib/MathFin lemma this leaf will consume>", ...]}]}. '
-    "Every `statement` is a COMPLETE Lean 4 theorem HEAD (`theorem <name> ... : ...`) with NO "
-    "`:=` — the leaves are assembled with `:= by sorry` and the main with your `proof`, and the "
-    "whole skeleton must elaborate. pointers name the modules whose defs a leaf consumes; "
-    "applied_to (optional) names the specific lemmas the leaf's proof will apply, surfaced to "
-    "the prover as a hint."
-)
+# (the playbook prose itself: domains/<name>/prompts/decompose-system.md)
 
 
-def decompose_messages(target: str, context_pack: str, *, feedback: str | None = None,
+def decompose_messages(pack: DomainPack, target: str, context_pack: str, *,
+                       feedback: str | None = None,
                        system_preamble: str = "") -> list[dict]:
-    system = (system_preamble + "\n" + DECOMPOSE_SYSTEM) if system_preamble else DECOMPOSE_SYSTEM
+    base = pack.prompt("decompose-system")
+    system = (system_preamble + "\n" + base) if system_preamble else base
     user = f"HARD TARGET:\n{target}\n"
     if context_pack:
         user += "\nAvailable declarations to consume:\n" + context_pack
@@ -277,7 +229,7 @@ def dag_to_dict(dag: Dag) -> dict:
     }
 
 
-def draft_decomposition(target: str, context_pack: str, *, chat_fn,
+def draft_decomposition(pack: DomainPack, target: str, context_pack: str, *, chat_fn,
                         system_preamble: str = "", feedback: str | None = None,
                         max_reask: int = 1, max_leaves: int | None = None) -> dict:
     """Stage: Claude SPLITS a hard target into a validated lemma-DAG. A malformed/invalid
@@ -288,7 +240,8 @@ def draft_decomposition(target: str, context_pack: str, *, chat_fn,
     tokens = 0
     last_err = "no reply"
     for _ in range(max(1, max_reask + 1)):
-        content, tk = chat_fn(decompose_messages(target, context_pack, feedback=feedback,
+        content, tk = chat_fn(decompose_messages(pack, target, context_pack,
+                                                 feedback=feedback,
                                                  system_preamble=system_preamble))
         tokens += tk
         raw = _extract_json_object(content)
@@ -303,30 +256,29 @@ def draft_decomposition(target: str, context_pack: str, *, chat_fn,
 
 # --- the skeleton-elaboration gate (2.3, the load-bearing check) --------------
 
-_LICENSE = ("/-\nCopyright (c) 2026 Raphael Coelho. All rights reserved.\n"
-            "Released under Apache 2.0 license as described in the file LICENSE.\n"
-            "Authors: Raphael Coelho\n-/")
+# (the license header is the domain's: `pack.license`)
 
 
-def _module_text(pointers, body: str) -> str:
-    """Wrap a declaration `body` in the MathFin module boilerplate: license, `module`
-    header, Mathlib + `.lean`-pointer imports, autoImplicit off, the `@[expose] public
-    section` (without which the decls are module-private), and the `MathFin` namespace."""
+def _module_text(pack: DomainPack, pointers, body: str) -> str:
+    """Wrap a declaration `body` in the target library's module boilerplate: license,
+    `module` header, Mathlib + `.lean`-pointer imports, autoImplicit off, the
+    `@[expose] public section` (without which the decls are module-private), and the
+    pack's namespace."""
     mods = sorted({p for p in pointers if p.endswith(".lean")})
     imports = "\n".join(["public import Mathlib"]
-                        + [f"public import {p[:-5].replace('/', '.')}" for p in mods])
+                        + [pack.import_line(p) for p in mods])
     return (
-        f"{_LICENSE}\nmodule\n\n"
+        f"{pack.license}\nmodule\n\n"
         f"{imports}\n\n"
         "set_option autoImplicit false\n\n"
         "@[expose] public section\n\n"
-        "namespace MathFin\n\n"
+        f"namespace {pack.namespace}\n\n"
         + body
-        + "\n\nend MathFin\n"
+        + f"\n\nend {pack.namespace}\n"
     )
 
 
-def assemble_skeleton(dag: Dag, meta: dict | None = None) -> str:
+def assemble_skeleton(pack: DomainPack, dag: Dag, meta: dict | None = None) -> str:
     """The skeleton module: every leaf `<statement> := by sorry`, the main theorem
     `<statement> := <main.proof>` (its proof applying the leaves, NOT sorry). If a
     good decomposition, this elaborates with exactly `len(leaves)` sorries — that is
@@ -335,7 +287,7 @@ def assemble_skeleton(dag: Dag, meta: dict | None = None) -> str:
               else f"{n.statement} := by sorry"
               for n in topo_order(dag)]   # leaves first, main last
     pointers = [p for leaf in dag.leaves for p in leaf.pointers]
-    return _module_text(pointers, "\n\n".join(blocks))
+    return _module_text(pack, pointers, "\n\n".join(blocks))
 
 
 # --- leaf routing: DAG leaves as ordinary single-sorry prove targets (2.4) ----
@@ -344,7 +296,7 @@ def _leaf_filename(parent_id: str, name: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]", "_", f"leaf-{parent_id}-{name}") + ".lean"
 
 
-def _leaf_stub(leaf: Node, proved: dict) -> str:
+def _leaf_stub(pack: DomainPack, leaf: Node, proved: dict) -> str:
     """A single-sorry stub module for one leaf: any already-proved dependency decls
     (no sorry) inlined ABOVE `<leaf.statement> := by sorry`, so a dependent leaf's
     proof can consume them while the stub stays a single-sorry target."""
@@ -354,11 +306,12 @@ def _leaf_stub(leaf: Node, proved: dict) -> str:
     # consume (a Lean line comment — no sorry, no effect on elaboration; sliced off by
     # `extract_leaf_decl` at recompose since it starts at the `theorem` keyword)
     hint = f"-- apply: {', '.join(leaf.applied_to)}\n" if leaf.applied_to else ""
-    return _module_text(pointers, "\n\n".join([*deps, f"{hint}{leaf.statement} := by sorry"]))
+    return _module_text(pack, pointers, "\n\n".join([*deps, f"{hint}{leaf.statement} := by sorry"]))
 
 
-def build_leaf_manifest(dag: Dag, meta: dict, out_dir: str, *, toolchain: str = "",
-                        main_commit: str = "", proved: dict | None = None) -> dict:
+def build_leaf_manifest(pack: DomainPack, dag: Dag, meta: dict, out_dir: str, *,
+                        toolchain: str = "", main_commit: str = "",
+                        proved: dict | None = None) -> dict:
     """Write per-leaf single-sorry stubs + a `manifest.json` for the DAG's leaves, in
     the shape `vibe_prove.py run/gate` consumes VERBATIM (they are ordinary single-sorry
     targets). Each leaf target carries `parent` (the main theorem name), `parent_id` (the
@@ -372,7 +325,7 @@ def build_leaf_manifest(dag: Dag, meta: dict, out_dir: str, *, toolchain: str = 
     leaves = [n for n in topo_order(dag) if not n.is_main]   # dependencies first
     targets = []
     for i, leaf in enumerate(leaves):
-        stub = _leaf_stub(leaf, proved)
+        stub = _leaf_stub(pack, leaf, proved)
         fname = _leaf_filename(parent_id, leaf.name)
         with open(os.path.join(out_dir, fname), "w", encoding="utf-8") as f:
             f.write(stub)
@@ -391,9 +344,9 @@ def build_leaf_manifest(dag: Dag, meta: dict, out_dir: str, *, toolchain: str = 
 
 # --- recompose + keep-and-revise (2.5) ----------------------------------------
 
-def extract_leaf_decl(module_text: str, name: str) -> str | None:
+def extract_leaf_decl(pack: DomainPack, module_text: str, name: str) -> str | None:
     """The `theorem/lemma <name> ... := <proof>` block from a proved leaf module (from
-    its keyword to just before `end MathFin` / end of file). None if absent. The generated
+    its keyword to just before the namespace's `end` / end of file). None if absent. The generated
     leaf modules hold exactly one declaration, so the slice is unambiguous."""
     m = re.search(
         rf"(?m)^\s*(?:@\[[^\]]*\]\s*)?(?:private\s+|protected\s+)?(?:theorem|lemma)\s+{re.escape(name)}\b",
@@ -401,12 +354,13 @@ def extract_leaf_decl(module_text: str, name: str) -> str | None:
     if not m:
         return None
     start = m.start()
-    tail = re.search(r"(?m)^end MathFin\b", module_text[start:])
+    tail = re.search(rf"(?m)^end {re.escape(pack.namespace)}\b", module_text[start:])
     end = start + tail.start() if tail else len(module_text)
     return module_text[start:end].strip()
 
 
-def recompose(dag: Dag, proved_leaves: dict, *, check_fn, meta: dict | None = None) -> dict:
+def recompose(pack: DomainPack, dag: Dag, proved_leaves: dict, *, check_fn,
+              meta: dict | None = None) -> dict:
     """Assemble proved leaves + the main theorem into ONE module and run the FULL gate.
     `proved_leaves` maps a leaf name -> its proved module text (what `vibe_prove` writes).
 
@@ -421,7 +375,7 @@ def recompose(dag: Dag, proved_leaves: dict, *, check_fn, meta: dict | None = No
     decls: dict[str, str] = {}
     for leaf in dag.leaves:
         mod = proved_leaves.get(leaf.name)
-        d = extract_leaf_decl(mod, leaf.name) if mod else None
+        d = extract_leaf_decl(pack, mod, leaf.name) if mod else None
         if d:
             decls[leaf.name] = d
     banked = [leaf.name for leaf in dag.leaves if leaf.name in decls]
@@ -431,7 +385,8 @@ def recompose(dag: Dag, proved_leaves: dict, *, check_fn, meta: dict | None = No
                 "deferred": True, "reason": f"leaves not proved: {', '.join(remainder)}"}
     body = [decls[leaf.name] for leaf in topo_order(dag) if not leaf.is_main]
     body.append(f"{dag.main.statement} := {dag.main.proof}")
-    module = _module_text([p for leaf in dag.leaves for p in leaf.pointers], "\n\n".join(body))
+    module = _module_text(pack, [p for leaf in dag.leaves for p in leaf.pointers],
+                          "\n\n".join(body))
     g = check_fn(module)
     if g.get("passed"):
         return {"ok": True, "partial": False, "module": module, "banked": banked,

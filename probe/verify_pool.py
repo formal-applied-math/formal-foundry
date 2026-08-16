@@ -102,11 +102,13 @@ class VerifyPool:
 
 # --- real Lean worker: `lake env lean` per check (CI wiring) ------------------
 
-def lake_env_check(main_repo: str, code: str, *, timeout: int = 600) -> dict:
+def lake_env_check(main_repo: str, code: str, *, lake_root: str,
+                   timeout: int = 600) -> dict:
     """Elaborate `code` via `lake env lean` on a temp module in `main_repo` (reusing the
     shared on-disk olean cache — the env-cache). Returns `{ok, errors, sorry_count,
     exit_code}`; an exit 137/143 (OOM/kill) becomes an `error` so the pool recycles."""
-    fd, path = tempfile.mkstemp(suffix=".lean", dir=os.path.join(main_repo, "MathFin"))
+    fd, path = tempfile.mkstemp(suffix=".lean",
+                                dir=os.path.join(main_repo, lake_root))
     os.close(fd)
     try:
         with open(path, "w", encoding="utf-8") as f:
@@ -133,6 +135,8 @@ def lake_env_check(main_repo: str, code: str, *, timeout: int = 600) -> dict:
 def _cmd(args) -> int:
     """Pool a list of `{id, code}` tasks through `lake env lean` on N workers. Tasks come
     from --tasks (a json list) or a manifest's leaf/prove stubs via --manifest."""
+    import domain_pack
+    pack = domain_pack.load(args.domain or domain_pack.DEFAULT_NAME)
     if args.manifest:
         man = json.load(open(args.manifest))
         root = os.path.dirname(os.path.abspath(args.manifest))
@@ -142,7 +146,8 @@ def _cmd(args) -> int:
         tasks = json.load(open(args.tasks))
     pool = VerifyPool(args.workers, spawn_fn=lambda: object(),
                       check_fn=lambda _w, t: lake_env_check(args.main_repo, t["code"],
-                                                            timeout=args.timeout),
+                                                           lake_root=pack.lake_root,
+                                                           timeout=args.timeout),
                       log=lambda m: print(f"[verify-pool] {m}", file=sys.stderr, flush=True))
     try:
         results = pool.run(tasks)
@@ -163,6 +168,8 @@ def main() -> int:
     ap.add_argument("--manifest", help="a prove/leaf manifest.json (checks each stub file)")
     ap.add_argument("--workers", type=int, default=int(os.environ.get("VERIFY_POOL_WORKERS", "2")))
     ap.add_argument("--timeout", type=int, default=600)
+    ap.add_argument("--domain", default=None,
+                    help="domain pack naming the Lake root the scratch module lands in")
     args = ap.parse_args()
     if not args.tasks and not args.manifest:
         print("need --tasks or --manifest", file=sys.stderr)

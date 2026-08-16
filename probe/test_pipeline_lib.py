@@ -6,6 +6,11 @@ import tempfile
 import pipeline_lib as P
 from pipeline_lib import PipelineConfig
 
+import domain_pack
+
+PACK = domain_pack.load("mathfin")
+
+
 DAY = P.SECONDS_PER_DAY
 
 
@@ -189,20 +194,20 @@ class _Res:
 
 def test_pr_claimed_matches_only_a_closing_reference():
     rows = '[{"number": 163, "title": "autoform: GainToPain", "body": "closes #161"}]'
-    assert P.pr_claimed({"id": "cal-bk-161"}, run_fn=lambda *a, **k: _Res(rows)) is True
-    assert P.pr_claimed({"id": "cal-bk-162"}, run_fn=lambda *a, **k: _Res(rows)) is False
+    assert P.pr_claimed({"id": "cal-bk-161"}, repo=PACK.slug, run_fn=lambda *a, **k: _Res(rows)) is True
+    assert P.pr_claimed({"id": "cal-bk-162"}, repo=PACK.slug, run_fn=lambda *a, **k: _Res(rows)) is False
 
 
 def test_pr_claimed_ignores_a_bare_mention():
     rows = '[{"number": 9, "title": "x", "body": "related to #161 but not closing it"}]'
-    assert P.pr_claimed({"id": "cal-bk-161"}, run_fn=lambda *a, **k: _Res(rows)) is False
+    assert P.pr_claimed({"id": "cal-bk-161"}, repo=PACK.slug, run_fn=lambda *a, **k: _Res(rows)) is False
 
 
 def test_pr_claimed_is_false_when_gh_is_unavailable():
     def boom(*a, **k):
         raise FileNotFoundError("gh")
-    assert P.pr_claimed({"id": "cal-bk-161"}, run_fn=boom) is False
-    assert P.pr_claimed({"id": "cal-bk-161"},
+    assert P.pr_claimed({"id": "cal-bk-161"}, repo=PACK.slug, run_fn=boom) is False
+    assert P.pr_claimed({"id": "cal-bk-161"}, repo=PACK.slug,
                         run_fn=lambda *a, **k: _Res("not json")) is False
 
 
@@ -213,5 +218,5 @@ def test_pr_claimed_reads_the_issue_number_off_the_target_id():
         seen["cmd"] = cmd
         return _Res('[{"number": 1, "title": "t", "body": "Closes #162"}]')
 
-    assert P.pr_claimed({"id": "cal-bk-162"}, run_fn=fake) is True
+    assert P.pr_claimed({"id": "cal-bk-162"}, repo=PACK.slug, run_fn=fake) is True
     assert "--state" in seen["cmd"] and "open" in seen["cmd"]

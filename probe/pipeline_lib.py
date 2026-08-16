@@ -82,7 +82,7 @@ class AutoformalizeConfig:
     gate_budget: int = 20_000
     prover_model: str = "labs-leanstral-1-5"   # leanstral: the kernel gate battery
     # pointers-scoped depth gate: reject a true-but-shallow stub whose TYPE consumes
-    # no def from its `-- pointers:` MathFin modules (a Mathlib identity in domain
+    # no def from its `-- pointers:` library modules (a Mathlib identity in domain
     # clothing). `false` disables it (rely on the kernel/judge gates + human merge).
     depth_gate: bool = True
     formalize_rounds: int = 3   # round-count cited in the formalize-miss telemetry (agentic self-iterates)
@@ -273,13 +273,17 @@ def queue_claimed(candidate: dict, queue_dir: str) -> bool:
     return bool(tid) and os.path.exists(os.path.join(queue_dir, f"{tid}.entry.json"))
 
 
-def pr_claimed(candidate: dict, *, run_fn=None, repo: str = "formal-applied-math/formal-mathfin") -> bool:
+def pr_claimed(candidate: dict, *, repo: str, run_fn=None) -> bool:
     """Is there an OPEN pull request that already closes this candidate's issue?
 
     The ground-truth half of the duplicate guard. Asks `gh` for open PRs mentioning the
     issue number and matches a closing keyword, so a PR that merely references the issue
     in prose does not block the target. Any failure — no `gh`, no network, unparseable
-    output — returns False: this is a backstop, and a broken lookup must not stop work."""
+    output — returns False: this is a backstop, and a broken lookup must not stop work.
+
+    `repo` is required: it is the DOMAIN's target slug (`pack.slug`), and a default
+    here would silently ask the flagship whether a second library's issue is
+    claimed — always answering no, and always looking like it worked."""
     import json
     import re
     import subprocess

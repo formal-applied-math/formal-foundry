@@ -7,6 +7,11 @@ import pytest
 
 from decompose import MAX_LEAVES, DagError, parse_dag, topo_order
 
+import domain_pack
+
+PACK = domain_pack.load("mathfin")
+
+
 _FIXTURE = {
     "main": {"name": "main", "statement": "P", "proof_sketch": "apply lemA then lemB"},
     "leaves": [
@@ -61,7 +66,7 @@ def test_draft_decomposition_returns_valid_dag_or_error():
     from decompose import draft_decomposition
 
     good = lambda msgs, **_kw: (json.dumps(_FIXTURE), 5)   # noqa: E731
-    r = draft_decomposition("prove P", "", chat_fn=good)
+    r = draft_decomposition(PACK, "prove P", "", chat_fn=good)
     assert r["ok"] and r["dag"].main.name == "main" and r["tokens"] == 5
 
     calls = {"n": 0}
@@ -69,7 +74,7 @@ def test_draft_decomposition_returns_valid_dag_or_error():
     def bad(msgs, **_kw):
         calls["n"] += 1
         return ("here is my answer: not a dag", 3)
-    r2 = draft_decomposition("prove P", "", chat_fn=bad, max_reask=1)
+    r2 = draft_decomposition(PACK, "prove P", "", chat_fn=bad, max_reask=1)
     assert not r2["ok"] and r2["error"]
     assert calls["n"] == 2   # initial + exactly one re-ask, then stop (no infinite loop)
 
@@ -92,7 +97,7 @@ def test_draft_decomposition_seeds_feedback_into_first_message():
     def cap(msgs, **_kw):
         seen["user"] = msgs[-1]["content"]
         return (json.dumps(_FIXTURE), 1)
-    draft_decomposition("prove P", "", chat_fn=cap, feedback="skeleton did not elaborate: boom")
+    draft_decomposition(PACK, "prove P", "", chat_fn=cap, feedback="skeleton did not elaborate: boom")
     assert "boom" in seen["user"]
 
 
@@ -103,7 +108,7 @@ def test_draft_decomposition_extracts_json_with_lean_braces():
              '"leaves": [{"name": "a", "statement": "theorem a {x : ℝ} : P x := by sorry", '
              '"pointers": [], "depends_on": []}]}\n```')
     from decompose import draft_decomposition
-    r = draft_decomposition("t", "", chat_fn=lambda msgs, **_kw: (reply, 1))
+    r = draft_decomposition(PACK, "t", "", chat_fn=lambda msgs, **_kw: (reply, 1))
     assert r["ok"] and r["dag"].leaves[0].name == "a"
 
 
@@ -121,7 +126,7 @@ def test_skeleton_gate_requires_full_elaboration_with_n_sorries():
     from decompose import assemble_skeleton, skeleton_gate
     dag = parse_dag(_SKEL_FIXTURE)
     n = len(dag.leaves)
-    lean = assemble_skeleton(dag)
+    lean = assemble_skeleton(PACK, dag)
     assert "theorem lem_refl (x : ℝ) : x = x := by sorry" in lean
     assert "theorem main_thm (x : ℝ) : x = x := by exact lem_refl x" in lean
     assert "public import MathFin.Foundations.X" in lean
@@ -157,7 +162,7 @@ _DAG_FIXTURE = {
 def test_manifest_accepts_dag_leaf_targets(tmp_path):
     from decompose import build_leaf_manifest
     dag = parse_dag(_DAG_FIXTURE)
-    man = build_leaf_manifest(dag, {"id": "cal-bk-99", "main_module": "MathFin/M.lean"},
+    man = build_leaf_manifest(PACK, dag, {"id": "cal-bk-99", "main_module": "MathFin/M.lean"},
                               str(tmp_path), toolchain="leanprover/lean4:v4.31.0",
                               main_commit="deadbeef")
     # one target per leaf, in topo order (dependency first), each linked to the parent
@@ -182,7 +187,7 @@ def test_leaf_stub_inlines_proved_dependency(tmp_path):
     from decompose import build_leaf_manifest
     dag = parse_dag(_DAG_FIXTURE)
     proved = {"lem_one": "theorem lem_one (y : ℝ) : y = y := rfl"}
-    man = build_leaf_manifest(dag, {"id": "cal-bk-99"}, str(tmp_path), proved=proved)
+    man = build_leaf_manifest(PACK, dag, {"id": "cal-bk-99"}, str(tmp_path), proved=proved)
     two = next(t for t in man["targets"] if t["sorry_name"] == "lem_two")
     stub = (tmp_path / two["file"]).read_text(encoding="utf-8")
     assert "theorem lem_one (y : ℝ) : y = y := rfl" in stub
@@ -200,8 +205,8 @@ _PROVED_LEM = (
 
 def test_extract_leaf_decl():
     from decompose import extract_leaf_decl
-    assert extract_leaf_decl(_PROVED_LEM, "lem_refl") == "theorem lem_refl (x : ℝ) : x = x := rfl"
-    assert extract_leaf_decl(_PROVED_LEM, "nope") is None
+    assert extract_leaf_decl(PACK, _PROVED_LEM, "lem_refl") == "theorem lem_refl (x : ℝ) : x = x := rfl"
+    assert extract_leaf_decl(PACK, _PROVED_LEM, "nope") is None
 
 
 def test_recompose_full_and_partial():
@@ -209,14 +214,14 @@ def test_recompose_full_and_partial():
     dag = parse_dag(_SKEL_FIXTURE)
 
     # all leaves proved + the assembled module passes the full gate → ok
-    full = recompose(dag, {"lem_refl": _PROVED_LEM}, check_fn=lambda m: {"passed": True})
+    full = recompose(PACK, dag, {"lem_refl": _PROVED_LEM}, check_fn=lambda m: {"passed": True})
     assert full["ok"] and not full["partial"] and full["banked"] == ["lem_refl"]
     assert "theorem lem_refl (x : ℝ) : x = x := rfl" in full["module"]
     assert "theorem main_thm (x : ℝ) : x = x := by exact lem_refl x" in full["module"]
     assert "sorry" not in full["module"]
 
     # all proved but the RECOMPOSITION fails the full gate → not ok, not partial
-    rej = recompose(dag, {"lem_refl": _PROVED_LEM},
+    rej = recompose(PACK, dag, {"lem_refl": _PROVED_LEM},
                     check_fn=lambda m: {"passed": False, "reason": "recompose mismatch"})
     assert not rej["ok"] and not rej["partial"] and rej["reason"] == "recompose mismatch"
     assert "module" in rej
@@ -224,7 +229,7 @@ def test_recompose_full_and_partial():
     # partial: a leaf unproved → banked + declared remainder (deferred, refs not closes),
     # never a silent gap; no module assembled and the gate is not even called.
     called = {"n": 0}
-    part = recompose(dag, {}, check_fn=lambda m: called.__setitem__("n", called["n"] + 1) or {"passed": True})
+    part = recompose(PACK, dag, {}, check_fn=lambda m: called.__setitem__("n", called["n"] + 1) or {"passed": True})
     assert not part["ok"] and part["partial"] and part["deferred"]
     assert part["banked"] == [] and part["remainder"] == ["lem_refl"]
     assert called["n"] == 0
@@ -240,8 +245,7 @@ def test_recompose_full_and_partial():
 # them.
 
 def test_decompose_system_teaches_structural_split_patterns():
-    from decompose import DECOMPOSE_SYSTEM
-    s = DECOMPOSE_SYSTEM
+    s = PACK.prompt("decompose-system")
     low = s.lower()
     # case-split: dispatch to one leaf per branch
     assert "rcases" in s or "by_cases" in s
@@ -275,7 +279,7 @@ _INDUCTION_DAG = {
 def test_cases_dag_assembles_and_gates():
     from decompose import assemble_skeleton, skeleton_gate
     dag = parse_dag(_CASES_DAG)
-    lean = assemble_skeleton(dag)
+    lean = assemble_skeleton(PACK, dag)
     # the case-dispatch tactic survives verbatim into the main theorem's proof
     assert "rcases le_total 0 x with h | h" in lean
     # each branch is an ordinary single-sorry leaf carrying its branch hypothesis
@@ -290,7 +294,7 @@ def test_cases_dag_assembles_and_gates():
 def test_induction_dag_assembles_and_gates():
     from decompose import assemble_skeleton, skeleton_gate
     dag = parse_dag(_INDUCTION_DAG)
-    lean = assemble_skeleton(dag)
+    lean = assemble_skeleton(PACK, dag)
     # `induction ... with` dispatches zero/succ to the base and step leaves
     assert "induction n with" in lean
     assert "| succ k ih => exact foo_step k ih" in lean
@@ -342,7 +346,7 @@ def test_applied_to_roundtrips_and_surfaces_as_prove_hint(tmp_path):
     assert again.leaves[0].applied_to == ["mul_self_nonneg", "le_total"]
     # the per-leaf stub carries the hint as a comment the vibe prover reads,
     # while staying an ordinary single-sorry target
-    man = build_leaf_manifest(dag, {"id": "t1"}, str(tmp_path))
+    man = build_leaf_manifest(PACK, dag, {"id": "t1"}, str(tmp_path))
     stub = (tmp_path / man["targets"][0]["file"]).read_text(encoding="utf-8")
     assert "-- apply: mul_self_nonneg, le_total" in stub
     assert stub.count("sorry") == 1
@@ -351,7 +355,7 @@ def test_applied_to_roundtrips_and_surfaces_as_prove_hint(tmp_path):
 def test_applied_to_absent_leaves_no_hint_comment(tmp_path):
     from decompose import build_leaf_manifest
     dag = parse_dag(_INDUCTION_DAG)   # its leaves carry no applied_to
-    man = build_leaf_manifest(dag, {"id": "t2"}, str(tmp_path))
+    man = build_leaf_manifest(PACK, dag, {"id": "t2"}, str(tmp_path))
     for t in man["targets"]:
         stub = (tmp_path / t["file"]).read_text(encoding="utf-8")
         assert "-- apply:" not in stub

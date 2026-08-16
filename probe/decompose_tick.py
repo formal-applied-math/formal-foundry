@@ -21,8 +21,18 @@ import json
 import os
 import sys
 
+import domain_pack
+
 from decompose import (assemble_skeleton, build_leaf_manifest, dag_to_dict,
                        draft_decomposition, parse_dag, recompose, skeleton_gate)
+
+
+def _pack(args):
+    """The domain pack this tick targets — the CLI flag, else pipeline.toml's
+    `[domain] name`, else the flagship."""
+    return domain_pack.load(getattr(args, "domain", None)
+                            or domain_pack.name_from_config(
+                                getattr(args, "config", None) or ""))
 
 
 def _dag_path(runs_dir, tag, tid):
@@ -33,7 +43,7 @@ def _leafdir(runs_dir, tag, tid):
     return os.path.join(runs_dir, f"{tag}-{tid}-leaves")
 
 
-def do_draft(tid, tag, runs_dir, *, target_text, context_pack, drafter_preamble,
+def do_draft(pack, tid, tag, runs_dir, *, target_text, context_pack, drafter_preamble,
              cfg_max_leaves, cfg_max_reask, chat_fn, check_fn, toolchain="",
              main_commit="", meta=None) -> dict:
     """Split the target and gate the skeleton. On pass, persist `<tag>-<id>.dag.json` and a
@@ -41,17 +51,17 @@ def do_draft(tid, tag, runs_dir, *, target_text, context_pack, drafter_preamble,
     (skeleton passed), `fail_draft` (no valid DAG after re-asks), `fail_skeleton` (split did
     not elaborate after one re-decompose), `indeterminate` (wedged daemon — retryable)."""
     meta = dict(meta or {}); meta.setdefault("id", tid)
-    r = draft_decomposition(target_text, context_pack, chat_fn=chat_fn,
+    r = draft_decomposition(pack, target_text, context_pack, chat_fn=chat_fn,
                             system_preamble=drafter_preamble, max_leaves=cfg_max_leaves,
                             max_reask=cfg_max_reask)
     if not r["ok"]:
         return {"outcome": "fail_draft", "reason": r["error"], "tokens": r["tokens"]}
     dag, tokens = r["dag"], r["tokens"]
 
-    g = skeleton_gate(assemble_skeleton(dag), len(dag.leaves), check_fn=check_fn)
+    g = skeleton_gate(assemble_skeleton(pack, dag), len(dag.leaves), check_fn=check_fn)
     if not g["passed"] and not g["indeterminate"]:
         # one bounded re-decomposition, feedback = the elaboration errors (Task 2.3.2)
-        r2 = draft_decomposition(target_text, context_pack, chat_fn=chat_fn,
+        r2 = draft_decomposition(pack, target_text, context_pack, chat_fn=chat_fn,
                                  system_preamble=drafter_preamble, max_leaves=cfg_max_leaves,
                                  max_reask=cfg_max_reask,
                                  feedback="the skeleton did not elaborate: " + g["verdict"]
@@ -60,7 +70,8 @@ def do_draft(tid, tag, runs_dir, *, target_text, context_pack, drafter_preamble,
         tokens += r2["tokens"]
         if r2["ok"]:
             dag = r2["dag"]
-            g = skeleton_gate(assemble_skeleton(dag), len(dag.leaves), check_fn=check_fn)
+            g = skeleton_gate(assemble_skeleton(pack, dag), len(dag.leaves),
+                              check_fn=check_fn)
     if g["indeterminate"]:
         return {"outcome": "indeterminate", "reason": g["verdict"], "tokens": tokens}
     if not g["passed"]:
@@ -68,13 +79,13 @@ def do_draft(tid, tag, runs_dir, *, target_text, context_pack, drafter_preamble,
 
     with open(_dag_path(runs_dir, tag, tid), "w", encoding="utf-8") as f:
         json.dump(dag_to_dict(dag), f, indent=2)
-    man = build_leaf_manifest(dag, meta, _leafdir(runs_dir, tag, tid),
+    man = build_leaf_manifest(pack, dag, meta, _leafdir(runs_dir, tag, tid),
                               toolchain=toolchain, main_commit=main_commit)
     return {"outcome": "drafted", "leaves_total": len(dag.leaves),
             "leaf_ids": [t["id"] for t in man["targets"]], "tokens": tokens}
 
 
-def do_recompose(tid, tag, runs_dir, *, check_fn) -> dict:
+def do_recompose(pack, tid, tag, runs_dir, *, check_fn) -> dict:
     """Gather the proved leaf modules vibe wrote, assemble them + the main, run the full
     gate. On pass write `<tag>-<id>.lean` (the candidate open-pr reads). Outcomes: `pass`,
     `partial` (proved leaves banked, the rest a declared remainder), `fail_gate` (all leaves
@@ -88,7 +99,7 @@ def do_recompose(tid, tag, runs_dir, *, check_fn) -> dict:
             proved[t["sorry_name"]] = open(leaf_lean, encoding="utf-8").read()
     leaves_total, leaves_closed = len(dag.leaves), len(proved)
 
-    r = recompose(dag, proved, check_fn=check_fn)
+    r = recompose(pack, dag, proved, check_fn=check_fn)
     base = {"leaves_total": leaves_total, "leaves_closed": leaves_closed}
     if r["ok"]:
         with open(os.path.join(runs_dir, f"{tag}-{tid}.lean"), "w", encoding="utf-8") as f:
@@ -122,8 +133,9 @@ def _cmd_draft(args) -> int:
     target_text = open(os.path.join(qroot, target["file"]), encoding="utf-8").read()
     pointers = target.get("pointers", [])
     context_pack = extract_signatures(args.main_repo, pointers) if pointers else ""
-    preamble = build_drafter_prompt(args.main_repo)
+    preamble = build_drafter_prompt(args.main_repo, _pack(args))
     r = do_draft(
+        _pack(args),
         args.id, args.tag, args.runs, target_text=target_text, context_pack=context_pack,
         drafter_preamble=preamble, cfg_max_leaves=cfg.max_leaves, cfg_max_reask=cfg.max_reask,
         chat_fn=lambda msgs: claude_draft_fn(msgs, model=drafter.claude_model),
@@ -139,7 +151,7 @@ def _cmd_recompose(args) -> int:
     from gate import gate as run_gate
     from probe import daemon_check
     dag = parse_dag(json.load(open(_dag_path(args.runs, args.tag, args.id))))
-    r = do_recompose(args.id, args.tag, args.runs,
+    r = do_recompose(_pack(args), args.id, args.tag, args.runs,
                      check_fn=lambda m: run_gate(m, dag.main.name, check_fn=daemon_check))
     print(json.dumps(r))
     return 0

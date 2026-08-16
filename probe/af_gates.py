@@ -5,6 +5,7 @@ from probe_lib import DEF_RE, append_jsonl, extract_lean_code, lint_violations
 import re
 
 from af_parse import *  # noqa: F401,F403
+from domain_pack import DomainPack
 
 __all__ = ['_probed_conclusion', '_probed_signature', '_DEPTH_MARKER', '_mod_name', 'depth_probe', 'depth_rejection', '_TRIV_TACTIC', '_SORRY_RE', 'triviality_goal', 'triviality_rejection', '_DEFS_MARKER', 'drafted_def_names', 'defs_probe', 'defs_rejection', '_INSTANCE_PROBE_TACTIC_RE', '_example_blocks', '_example_probes_def', 'instance_probe_rejection']
 
@@ -57,39 +58,40 @@ def _probed_signature(text: str, name: str) -> str | None:
 # The kernel gates catch a FALSE or vacuous statement; they do NOT catch a
 # TRUE-but-shallow one — a Mathlib identity in domain clothing (cal-bk-53 reduced to
 # `integral_add_compl`; cal-bk-67 inlined the forward-rate formula as `let`s over raw
-# reals instead of consuming `MathFin.zcb`). The depth gate is a structural,
+# reals instead of consuming the library's own def). The depth gate is a structural,
 # ELABORATOR-grounded check (not an LLM judge, per the rigorous-vs-soft rule): elaborate
 # the stub, then a `run_cmd` meta block inspects the theorem's TYPE and requires it to
-# USE at least one constant DEFINED in one of the issue's `-- pointers:` MathFin modules.
+# USE at least one constant DEFINED in one of the issue's `-- pointers:` library modules.
 # If none, the meta throwErrors — surfacing as a daemon error the gate keys on by its
 # `depth-gate:` marker. With no pointers there is nothing to scope to, so it falls back
-# to requiring any `MathFin.*` constant (namespace fallback).
+# to requiring any own-namespace constant (namespace fallback).
 
 _DEPTH_MARKER = "depth-gate:"
 
 
 
 
-def _mod_name(pointer: str) -> str:
-    """`MathFin/FixedIncome/ZCB.lean` -> the Lean module name `MathFin.FixedIncome.ZCB`."""
-    stem = pointer[:-5] if pointer.endswith(".lean") else pointer
-    return stem.replace("/", ".")
+def _mod_name(pack: DomainPack, pointer: str) -> str:
+    """`<LakeRoot>/FixedIncome/ZCB.lean` -> the Lean module name
+    `<LakeRoot>.FixedIncome.ZCB`. Delegates to the pack so the emitter and the gate
+    cannot disagree about how a pointer path becomes a module name."""
+    return pack.module_of(pointer)
 
 
 
 
-def depth_probe(lean_text: str, name: str, pointers: list[str]) -> str:
+def depth_probe(pack: DomainPack, lean_text: str, name: str, pointers: list[str]) -> str:
     """The stub + a `run_cmd` meta block that FAILS elaboration unless the theorem's
     TYPE uses a constant DEFINED in one of its pointer modules (pointers-scoped).
-    `name` is the decl name (under `namespace MathFin`); `pointers` are repo-relative
-    `MathFin/…/X.lean` paths (assumed non-empty — `depth_rejection` skips otherwise)."""
-    mods = [_mod_name(p) for p in pointers if p.endswith(".lean")]
+    `name` is the decl name (under the pack's namespace); `pointers` are repo-relative
+    `<LakeRoot>/…/X.lean` paths (assumed non-empty — `depth_rejection` skips otherwise)."""
+    mods = [_mod_name(pack, p) for p in pointers if p.endswith(".lean")]
     ptr_list = ", ".join(f"`{m}" for m in mods)
     meta = (
         "\nopen Lean in\n"
         "run_cmd do\n"
         "  let env ← getEnv\n"
-        f"  let some ci := env.find? `MathFin.{name}\n"
+        f"  let some ci := env.find? `{pack.qualified(name)}\n"
         f'    | throwError "{_DEPTH_MARKER} declaration {name} not found"\n'
         "  let mods := env.header.moduleNames\n"
         f"  let ptr : List Name := [{ptr_list}]\n"
@@ -106,18 +108,19 @@ def depth_probe(lean_text: str, name: str, pointers: list[str]) -> str:
 
 
 
-def depth_rejection(lean_text: str, name: str, pointers: list[str], *, check_fn) -> dict:
+def depth_rejection(pack: DomainPack, lean_text: str, name: str, pointers: list[str],
+                    *, check_fn) -> dict:
     """Elaborate the depth probe via `check_fn` (the daemon). `shallow=True` iff the meta
     block reported a `depth-gate:` error (the type consumes no pointer-module def). With
     NO pointers the gate is inapplicable — it SKIPS (a missing Pointers section is a
-    metadata gap, not a shallowness verdict; the stub carries no MathFin import to consume
+    metadata gap, not a shallowness verdict; the stub carries no library import to consume
     anyway). Fails OPEN too: a daemon-communication error is NOT a depth verdict, so an
     infra hiccup never rejects a good target (like the prover gates). No prover call ⇒
     `tokens=0`."""
     mods = [p for p in pointers if p.endswith(".lean")]
     if not mods:
         return {"shallow": False, "tokens": 0, "verdict": "no pointers — depth gate skipped"}
-    res = check_fn(depth_probe(lean_text, name, mods))
+    res = check_fn(depth_probe(pack, lean_text, name, mods))
     if res.get("error"):   # H5: wedged daemon is NOT a depth verdict — retryable, never a pass
         return {"shallow": False, "indeterminate": True, "tokens": 0,
                 "verdict": "indeterminate: " + str(res["error"])[:120]}
@@ -202,16 +205,17 @@ def drafted_def_names(stub: str) -> list[str]:
 
 
 
-def defs_probe(lean_text: str, thm_name: str, def_names: list[str]) -> str:
+def defs_probe(pack: DomainPack, lean_text: str, thm_name: str,
+               def_names: list[str]) -> str:
     """The stub + a `run_cmd` meta block that FAILS elaboration unless (a) the
     theorem's type uses ≥1 drafted def (newdef_depth) and (b) every drafted def's
     value uses ≥1 imported constant (ungrounded)."""
-    names = ", ".join(f"`MathFin.{d}" for d in def_names)
+    names = ", ".join(f"`{pack.qualified(d)}" for d in def_names)
     meta = (
         "\nopen Lean in\n"
         "run_cmd do\n"
         "  let env ← getEnv\n"
-        f"  let some thm := env.find? `MathFin.{thm_name}\n"
+        f"  let some thm := env.find? `{pack.qualified(thm_name)}\n"
         f'    | throwError "{_DEFS_MARKER} theorem {thm_name} not found"\n'
         f"  let newDefs : List Name := [{names}]\n"
         "  let used := thm.type.getUsedConstants\n"
@@ -240,7 +244,8 @@ def defs_probe(lean_text: str, thm_name: str, def_names: list[str]) -> str:
 
 
 
-def defs_rejection(lean_text: str, thm_name: str, def_names: list[str], *, check_fn) -> dict:
+def defs_rejection(pack: DomainPack, lean_text: str, thm_name: str,
+                   def_names: list[str], *, check_fn) -> dict:
     """Elaborate the defs probe via `check_fn` (the daemon). Returns
     `{failed, gate: "newdef_depth"|"ungrounded"|None, verdict, tokens}`. No defs
     drafted ⇒ instant `newdef_depth` fail (no daemon call — the route's contract
@@ -248,7 +253,7 @@ def defs_rejection(lean_text: str, thm_name: str, def_names: list[str], *, check
     if not def_names:
         return {"failed": True, "gate": "newdef_depth", "tokens": 0,
                 "verdict": "no definitions drafted — the defs route requires 1-3 new defs"}
-    res = check_fn(defs_probe(lean_text, thm_name, def_names))
+    res = check_fn(defs_probe(pack, lean_text, thm_name, def_names))
     if res.get("error"):   # H5: wedged daemon is NOT a defs verdict — retryable
         return {"failed": False, "gate": None, "indeterminate": True, "tokens": 0,
                 "verdict": "indeterminate: " + str(res["error"])[:120]}

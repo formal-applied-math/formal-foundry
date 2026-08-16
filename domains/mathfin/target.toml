@@ -1,0 +1,103 @@
+# The mathfin domain pack — the flagship target.
+#
+# Everything in this directory is DATA the foundry reads; `probe/domain_pack.py`
+# is the single access path. Retargeting the foundry at another library is meant
+# to be writing a sibling directory, not editing Python.
+#
+# Runbook of record:
+# formal-mathfin/docs/plans/2026-08-09-program-execution/02-foundry-domain-packs.md
+#
+# NOTE the runbook specified `areas.yaml`; the areas map lives here instead. The
+# foundry is stdlib-only (see house_context's docstring, and pipeline_lib already
+# reads TOML via the stdlib `tomllib`), and a YAML file would have bought a PyYAML
+# dependency for one flat string map.
+
+[library]
+# The Lean namespace every emitted declaration is wrapped in, and the Lake source
+# root. These two drive the five namespace-keyed GENERATED-CODE sites the runbook
+# flagged (gate meta-blocks, module skeleton, splice anchor, the pointer/location/
+# import regexes) — they are not prose, so a prompt extraction would not have
+# reached them.
+namespace = "MathFin"
+lake_root = "MathFin"
+
+# The Lean namespaces this library AUTHORS or VENDORS — kept in the retrieval index
+# in FULL, where an external module is admitted only if an own declaration actually
+# reaches it (`index_filter.py`). BrownianMotion is here because we vendor Degenne's
+# package and treat its lemmas as ours to consume. Note these are Lean NAMESPACES,
+# not the lake-manifest package names in `[[library.deps]]`.
+own_namespaces = ["MathFin", "BrownianMotion"]
+
+# Prose identity, for the prompt templates: "a {field} specifier for {namespace}",
+# "a library of formally verified {field} theorems".
+field = "mathematical-finance"
+
+# How the dependency set reads inline in a prompt sentence
+# ("a Lean 4 proof ARCHITECT for MathFin (on Mathlib + BrownianMotion)").
+dependencies_inline = "Mathlib + BrownianMotion"
+
+# The pin block every prompt opens with — one row per dependency, rendered as
+# `- {label}: {upstream} @ {rev}` from the target's live lake-manifest. `manifest`
+# is the package name to look up there; the toolchain row is implicit and comes
+# from `lean-toolchain`. A domain with a different dependency set writes its own
+# rows and the prompt follows — this is why the pin block is data, not an f-string.
+[[library.deps]]
+manifest = "mathlib"
+label = "Mathlib"
+upstream = "leanprover-community/mathlib4"
+
+[[library.deps]]
+manifest = "brownianmotion"
+label = "BrownianMotion"
+upstream = "RemyDegenne/brownian-motion"
+
+[repo]
+slug = "formal-applied-math/formal-mathfin"
+benchmark = "benchmarks/mathematical_finance.json"
+domain = "mathematical_finance"
+
+[infra]
+# The lean-lsp-mcp container the agentic drafter and the vibe prover both exec
+# into, and the GHCR image carrying this library's oleans. Runbook 06 lifts the
+# shell scripts and workflows onto these same two values.
+lean_lsp_container = "mathfin-lean-lsp"
+verify_image = "ghcr.io/formal-applied-math/mathfin-verify:latest"
+# scratch file the agentic formalize session drafts into, repo-relative
+scratch_module = "MathFin/_AutoformAgentic.lean"
+
+[module]
+# The house preamble every emitted module opens. Girsanov.lean:50-51 — 155 of 262
+# MathFin modules open exactly these, so the drafter emits bare
+# `IsProbabilityMeasure`/`IntegrableOn`/`Measure` as a MathFin author would and the
+# module must carry the namespaces holding them. An unused open is harmless; a
+# missing one is a silent bare-name death (run 29667784310, #60 + #109).
+opens = ["open MeasureTheory ProbabilityTheory", "open scoped NNReal ENNReal"]
+
+# The line `_extract_core_stub` splices from — the LAST preamble open. Keeping it
+# an explicit field rather than deriving it from `opens[-1]` makes the coupling
+# between the emitter and the splice reader visible in one place.
+splice_anchor = "open scoped NNReal ENNReal"
+
+license = """\
+/-
+Copyright (c) 2026 Raphael Coelho. All rights reserved.
+Released under Apache 2.0 license as described in the file LICENSE.
+Authors: Raphael Coelho
+-/"""
+
+# issue `area:` label -> `<lake_root>/<Section>/` subdirectory. Areas without a
+# directory yet (fx) map to a new one the umbrella import + lake build absorb;
+# anything unmapped falls back to a CamelCase of the area itself.
+[areas]
+fixed-income = "FixedIncome"
+actuarial = "Actuarial"
+fx = "FX"
+black-scholes = "BlackScholes"
+futures = "Futures"
+binomial = "Binomial"
+portfolio = "Portfolio"
+performance = "Performance"
+risk = "RiskMeasures"
+defi = "DeFi"
+credit = "FixedIncome"
+execution = "Portfolio"

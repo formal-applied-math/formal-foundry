@@ -1,5 +1,5 @@
-"""Turn a proven candidate into edits on a formal-mathfin checkout: the real
-proof in a MathFin module + a re-export benchmark entry. Pure file ops (no git,
+"""Turn a proven candidate into edits on the target library's checkout: the real
+proof in a library module + a re-export benchmark entry. Pure file ops (no git,
 no network) so it is testable on a temp tree. `scripts/open-pr.sh` owns
 branch/commit/PR.
 
@@ -17,14 +17,14 @@ import re
 
 
 def _module_name(main_module: str) -> str:
-    """'MathFin/FX/Siegel.lean' -> 'MathFin.FX.Siegel'."""
+    """'<LakeRoot>/FX/Siegel.lean' -> '<Namespace>.FX.Siegel'."""
     p = main_module[:-5] if main_module.endswith(".lean") else main_module
     return p.replace("/", ".")
 
 
 def ensure_umbrella_import(main_repo: str, main_module: str,
-                           umbrella: str = "MathFin.lean") -> list[str]:
-    """Append `import <Module>` to the `MathFin.lean` umbrella so `lake build`
+                           umbrella: str) -> list[str]:
+    """Append `import <Module>` to the `<Namespace>.lean` umbrella so `lake build`
     puts the new module in the build graph (a benchmark snippet importing an
     unbuilt module gets a silently-empty environment — the umbrella header even
     warns about this). No-op if already present. Returns [umbrella] if it
@@ -101,12 +101,17 @@ def append_entry(benchmark_text: str, entry: dict) -> str:
     return out + "\n" if had_newline else out
 
 
-_NAMESPACE_RE = re.compile(r"(?m)^namespace\s+MathFin\s*$")
-_END_RE = re.compile(r"(?m)^end\s+MathFin\s*$")
+# The splice's anchors are namespace-keyed, so they are DERIVED from the pack
+# rather than stored — see `probe/domain_pack.py`. A module that does not open and
+# close the pack's namespace is not a module we will splice into.
+def _namespace_res(pack) -> tuple[re.Pattern[str], re.Pattern[str]]:
+    ns = re.escape(pack.namespace)
+    return (re.compile(rf"(?m)^namespace\s+{ns}\s*$"),
+            re.compile(rf"(?m)^end\s+{ns}\s*$"))
 _IMPORT_RE = re.compile(r"(?m)^(?:public\s+)?import\s+\S+\s*$")
 
 
-def splice_into_module(existing: str, candidate: str) -> str | None:
+def splice_into_module(pack, existing: str, candidate: str) -> str | None:
     """Merge a candidate module's declarations into an EXISTING module.
 
     Backlog S: both #161 and #162 named `Performance/RatiosExtended.lean` as the
@@ -118,14 +123,15 @@ def splice_into_module(existing: str, candidate: str) -> str | None:
     Keeps the existing file's licence header, module docstring, options and
     namespace; adds the candidate's imports that are not already present (in the
     header, above the docstring, where Lean requires them) and its declarations
-    just before `end MathFin`. Returns None when either side is not a recognisable
-    `namespace MathFin … end MathFin` module — the caller must then refuse rather
+    just before the namespace's `end`. Returns None when either side is not a
+    recognisable `namespace … end` module — the caller must then refuse rather
     than guess."""
+    ns_re, end_re = _namespace_res(pack)
     for text in (existing, candidate):
-        if not (_NAMESPACE_RE.search(text) and _END_RE.search(text)):
+        if not (ns_re.search(text) and end_re.search(text)):
             return None
-    cand_ns = _NAMESPACE_RE.search(candidate)
-    cand_end = list(_END_RE.finditer(candidate))[-1]
+    cand_ns = ns_re.search(candidate)
+    cand_end = list(end_re.finditer(candidate))[-1]
     body = candidate[cand_ns.end():cand_end.start()].strip("\n")
     if not body.strip():
         return None
@@ -140,11 +146,11 @@ def splice_into_module(existing: str, candidate: str) -> str | None:
         at = last[-1].end()
         out = out[:at] + "\n" + "\n".join(m.rstrip() for m in missing) + out[at:]
 
-    end = list(_END_RE.finditer(out))[-1]
+    end = list(end_re.finditer(out))[-1]
     return out[:end.start()].rstrip("\n") + "\n\n" + body + "\n\n" + out[end.start():]
 
 
-def apply_contribution(candidate_code: str, target: dict, benchmark_entry: dict,
+def apply_contribution(pack, candidate_code: str, target: dict, benchmark_entry: dict,
                        main_repo: str) -> list[str]:
     """Write the proven candidate to `target['main_module']` and append
     `benchmark_entry` to `target['benchmark']`, both under `main_repo`.
@@ -171,11 +177,12 @@ def apply_contribution(candidate_code: str, target: dict, benchmark_entry: dict,
                 f"main_module {mod_rel} already exists — a new-object contribution must "
                 "create a fresh module, not overwrite an existing one. Set "
                 "target['append'] (from the issue's `location:`) to splice instead.")
-        merged = splice_into_module(open(mod_abs, encoding="utf-8").read(), candidate_code)
+        merged = splice_into_module(pack, open(mod_abs, encoding="utf-8").read(),
+                                    candidate_code)
         if merged is None:
             raise ValueError(
                 f"cannot splice into {mod_rel} — the existing file or the candidate is "
-                "not a recognisable `namespace MathFin … end MathFin` module. Refusing "
+                "not a recognisable `namespace … end` module. Refusing "
                 "rather than overwriting.")
         candidate_code = merged
     os.makedirs(os.path.dirname(mod_abs), exist_ok=True)
