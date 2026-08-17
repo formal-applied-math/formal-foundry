@@ -857,3 +857,90 @@ remains the blunt fallback.
 Nothing auto-embeds: `autoformalize.build_retrieve_fns` only *loads* a cache and
 falls back to loogle when absent, so the 68k corpus costs nothing until someone
 runs `embed.py`.
+
+---
+
+## 2026-08-17 — MathCode harvest round
+
+Source: [`math-ai-org/mathcode`](https://github.com/math-ai-org/mathcode), read for
+[`docs/research/2026-08-17-mathcode-harvest.md`](research/2026-08-17-mathcode-harvest.md).
+Their published surface is almost entirely *proving*-side, and the live obstruction
+report puts **19 of 22 obstructions on the drafting half** — so the harvest is
+deliberately small. Three items, all with the finding traced and the fix explicitly
+a hypothesis.
+
+### X. Lean-slot flips are inside the attempt loop [UNTRACED]
+
+**Finding (observed, from the code).** `probe/autoformalize.py` flips the single Lean
+slot to `lean-lsp` for the agentic formalize and back to `daemon` for the gate battery
+**per attempt** — the `slot_switch_fn("lean-lsp") … finally slot_switch_fn("daemon")`
+pair sits inside the per-attempt loop, not around the phase. With
+`semantic_rounds = 2` and `max_attempt_issues = 3` that is up to six flip pairs in one
+refill, plus the prove phase's pair. Each pair costs a daemon restart with a cold
+Mathlib load (`scripts/slot-switch.sh` allows 5 minutes behind `wait_daemon.py`) and a
+`--force-recreate`d lean-lsp whose exec'd MCP session then imports Mathlib itself.
+This matters because the binding constraint is **wall-clock** (2000 Actions-min/month,
+46–85 min per tick), not tokens.
+
+**Reproduction:** `probe/autoformalize.py` — the `slot_switch_fn` try/finally is inside
+`for attempt in …`, not outside it; `scripts/slot-switch.sh` shows both sides paying a
+cold load per flip.
+
+**Fix — a hypothesis, and the wrong version is the obvious one.** Running both slots at
+once is refuted by our own infra: the memory doctrine forbids two Mathlib processes on
+the 10 GB dev box, and CI is *worse* — `.github/workflows/batch-verify.yml` documents
+ubuntu-latest as 2-core/7 GB and gates `workers > 1` on a ≥16 GB runner. So the lever is
+**fewer transitions**, one of:
+
+1. phase-major ordering (all draft-side work under one lean-lsp uptime, all
+   kernel-grade gates under one daemon uptime) — cuts against the semantic-repair
+   cascade, which wants gate feedback to reach the next draft;
+2. a programmatic check path *inside* the lean-lsp container, so the elaboration-level
+   gates (depth, triviality, elaboration) never need the daemon — the two slots run the
+   same image; the daemon exists for its socket API, not for a capability lean-lsp lacks.
+
+**Do the stopwatch first.** Nothing in `schema/run_record.v1.json` times a phase. First
+commit is flip count + seconds per flip in the run record. If flips are 3 of 85 minutes,
+this item dies — which is the point of measuring.
+
+### Y. No bank between kernel-green and human-merged [UNTRACED]
+
+**Finding (observed).** MathCode appends every proved theorem to `TheoremLib/Stored.lean`
+and re-injects it. Our reuse horizon is the human merge: `house_context` reads the live
+target repo, so a lemma is invisible to the next target until R merges the PR. We already
+*compute* the list in one place and then drop it — `decompose.recompose`'s partial path
+returns `banked` (kernel-green, gate-passed leaves), `decompose_tick.do_recompose` writes
+it into the summary row, and nothing reads it back.
+
+**Reproduction:** `probe/decompose.py` `recompose()` returns `banked`;
+`probe/decompose_tick.py` puts `"banked": r["banked"]` in the outcome; grep for any
+consumer outside `probe/test_decompose.py` returns nothing.
+
+**Fix — hypothesis.** Persist banked leaves to `runs/lemma-bank.jsonl` (statement +
+proof + pin generation) and *offer* them in the context pack as unmerged candidates —
+a hint to prove or restate, never an import, since an unmerged lemma is not
+house-reviewed and scout-not-author still binds. Same self-gating shape as the state
+cache: it renders nothing until the store is non-empty.
+
+**Gate on evidence, not enthusiasm.** Today the bank would be empty — the A/B rows for
+`cal-bk-144` in `runs/ab-decomposer.jsonl` show `leaves_total: 0, leaves_closed: 0`.
+Build the store after the decompose path banks its first leaf, not before.
+
+### Z. A failed attempt leaves prose, not Lean [UNTRACED]
+
+**Finding (observed).** The interesting half of MathCode's multi-planner is that lemmas
+discovered by *losing* planners are still saved. Our failure memory,
+`probe/experience.py`, saves a rolling prose summary — the next attempt is told which
+tactic died, not handed the `have` blocks that elaborated. The extraction machinery
+already exists: `state_cache` replays an *accepted* proof prefix-by-prefix on the daemon
+and reads the goal at a spliced `sorry`; pointing the same replay at a failed candidate
+yields its longest elaborating prefix as Lean text.
+
+**Reproduction:** `runs/obstructions-report.md` — the `prover-max-rounds` family is
+`cal-bk-144` ×3, one target retried across three ticks re-walking the same ground, which
+is exactly the case the notebook exists for and where a paraphrase is thinnest.
+
+**Fix — hypothesis**, and the cost is real: the replay costs daemon time on the failure
+path, which item X says is the constrained resource. Measure the prefix length first —
+if failed candidates die in the first tactic, there is nothing to harvest and this item
+dies with it.
