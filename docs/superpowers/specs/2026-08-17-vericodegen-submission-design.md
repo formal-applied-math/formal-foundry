@@ -86,14 +86,20 @@ not a prover. So what we report is a **lower bound**, and it must be labelled as
 the abstract, not just in a limitations paragraph. A reviewer who reads it as a two-sided
 estimate has been misled by us, not by the instrument.
 
-**Non-uniform power, and how we report around it.** The sweep is algebra-shaped. It will
-find far more in `mathematical_finance` than in `stochastic_calculus`, where the
+**Non-uniform power, and the control that handles it.** The sweep is algebra-shaped. It
+will find far more in `mathematical_finance` than in `stochastic_calculus`, where the
 hypotheses guard measurability and integrability and no fixed tactic list will discharge
-them. Reporting one pooled rate would therefore be close to meaningless. We report
-**per-domain**, and alongside each rate the sweep's **reach** on that domain — the fraction
-of probes it closed at all — so the reader can separate "few unnecessary hypotheses here"
-from "the instrument is blind here". Both arms are measured with the same instrument, so
-the *comparison* survives the bias even where the absolute level does not.
+them. Reporting one pooled rate would therefore be close to meaningless.
+
+The control (sharpened while writing the plan, and stronger than the "reach" fraction this
+spec first proposed): for each theorem, **first ask the sweep to prove it with every
+hypothesis present**. If it cannot, the instrument is blind on that theorem, and its
+failure on a hypothesis-reduced version says nothing about the hypothesis. Those theorems
+leave the rate's denominator entirely and are reported beside every rate as the **blind
+fraction**, so a low rate can never be read as a clean library when it is really
+instrument blindness. Cost is one extra daemon call per theorem. Rates are reported
+per-domain and per-arm; both arms use the same instrument, so the comparison survives the
+bias even where the absolute level does not.
 
 **Outputs.** A per-hypothesis JSONL under `runs/necessity-sweep/`, a per-domain table, and
 for every positive a diff that strengthens the library. Committed as telemetry, in the
