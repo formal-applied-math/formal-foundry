@@ -81,7 +81,10 @@ EOF
 #    an off-pin public loogle as its only Mathlib channel. index_filter keeps
 #    the middle: ours in full, plus every Mathlib module hosting a constant a
 #    library proof depends on. See probe/index_filter.py for the reasoning.
-python3 "$FOUNDRY/probe/index_filter.py" "$INDEX"
+# --domain is REQUIRED, not decorative: without it index_filter falls back to the
+# default pack and slices THIS extraction against the flagship namespaces, which
+# keeps 0 of 766k records and reports a successful build of an empty index.
+python3 "$FOUNDRY/probe/index_filter.py" "$INDEX" --domain "$DOMAIN_NAME"
 
 # 3. Stamp the pin so staleness is detectable.
 {

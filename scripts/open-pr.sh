@@ -257,7 +257,8 @@ FIDELITY_NOTES="$(python3 "$FOUNDRY/probe/fidelity_notes.py" \
 # candidate — the MECHANICAL half of the 8-lens pass (unused constructs, wrapper smell,
 # register, obvious golf) as a checklist the human refiner starts from. NEVER gates:
 # refinery_notes.py falls back to a skip line without a key or on any API error.
-REFINERY_NOTES="$(python3 "$FOUNDRY/probe/refinery_notes.py" --lean-file "$CAND" 2>/dev/null \
+REFINERY_NOTES="$(python3 "$FOUNDRY/probe/refinery_notes.py" --lean-file "$CAND" \
+  --domain "$DOMAIN_NAME" 2>/dev/null \
   || echo "_(first-pass refinery notes unavailable)_")"
 
 # Phase 2 (Task 2.5): a decompose-path candidate carries a DAG sidecar — list the split in
