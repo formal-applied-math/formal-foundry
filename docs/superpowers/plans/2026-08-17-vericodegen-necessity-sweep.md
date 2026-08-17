@@ -21,6 +21,84 @@
 
 ---
 
+### Task 0: Make the daemon survive consecutive checks (BLOCKING)
+
+**Files:**
+- Create: `runs/necessity-sweep/daemon-stability.md`
+- Possibly modify (host, not repo): `/mnt/c/Users/rapha/.wslconfig`, `formal-mathfin/docker/docker-compose.yml`
+
+**Measured 2026-08-17, and the reason this task exists.** With the daemon up and READY:
+
+| check | wall-clock |
+|---|---|
+| `example : 2+2 = 4 := by rfl` (no import) | 3.2 s |
+| `import MathFin` + the same trivial example | 196 s |
+| three consecutive `import MathFin` checks | 110 s, 70 s, 258 s |
+| `import MathFin.Performance.RatiosExtended` (single module) | 215 s |
+
+The daemon's own docstring promises 5-30 s per check, because the Mathlib load is meant to
+be paid once per daemon lifetime. The container log says why it is not:
+
+```
+Lean REPL died (attempt 1/2): The Lean server closed unexpectedly.
+- Not enough memory and/or compute available
+Lean server respawned (fresh REPL against prebuilt project)
+```
+
+The REPL is OOM-killed inside its cgroup on nearly every check and respawns cold, so every
+probe re-pays the full import. Narrowing the import does not help — a single MathFin module
+still pulls Mathlib transitively. At the observed ~150 s median the 943-call MathFin census
+is **~39 hours**, against this plan's own 12-hour kill threshold.
+
+**The envelope:** Windows physical RAM 15.7 GB; `.wslconfig` `memory=10GB`; `lean-repl`
+`mem_limit: 6g`; `LEAN_NUM_THREADS=1` already. Mathlib + BrownianMotion + MathFin resident
+is ~4-5 GB, leaving under 2 GB of elaboration headroom inside a 6 GiB cap.
+
+- [ ] **Step 1: Raise the ceiling (requires R — it restarts WSL)**
+
+Edit `/mnt/c/Users/rapha/.wslconfig`: `memory=10GB` -> `memory=12GB` (Windows keeps ~3.7 GB).
+Edit `formal-mathfin/docker/docker-compose.yml`, `lean-repl` service: `mem_limit: 6g` -> `8g`.
+Then, from Windows: `wsl --shutdown`, reopen the shell, and restart the daemon.
+
+- [ ] **Step 2: Verify the REPL now survives**
+
+```bash
+cd probe && python3 -c "
+import sys, time; sys.path.insert(0,'.')
+from probe import daemon_check
+for i in range(5):
+    t=time.monotonic(); r=daemon_check(f'import MathFin\nexample : ({i}:Nat) + 0 = {i} := by simp\n')
+    print(f'call {i+1}: {time.monotonic()-t:6.1f}s errors={len(r.get(\"errors\") or [])}', flush=True)
+"
+docker logs --tail 20 docker-lean-repl-1 2>&1 | grep -c "respawned"
+```
+
+**Pass:** calls 2-5 land in the 5-30 s band and the respawn count is 0. **Fail:** any respawn,
+or a median above 30 s.
+
+- [ ] **Step 3: Record the outcome and pick the population accordingly**
+
+Write `runs/necessity-sweep/daemon-stability.md` with the before/after timings and the
+respawn count.
+
+**Decision rule, fixed in advance:**
+- **Stable (median <= 30 s)** -> run the full census: 943 calls is 1.3-8 h. Tasks 6 and 7 as written.
+- **Not stable, or R declines the memory change** -> **switch from census to a stratified
+  random sample** and say so in the paper. At the degraded ~150 s, a 200-binder sample is
+  ~8 h. Sampling is not a retreat: it lets the paper report a rate with a confidence
+  interval rather than a point estimate from one library's census, which is the more
+  defensible claim anyway. Sample proportionally by domain, seed `20260913`, and report
+  the seed and the per-domain draw.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add runs/necessity-sweep/daemon-stability.md
+git commit -m "measure(sweep): the daemon OOMs on every check — the ceiling, and what it costs"
+```
+
+---
+
 ### Task 1: Corpus loader and the sound binder pre-filter
 
 **Files:**
@@ -740,9 +818,10 @@ EOF
 
 Write the numbers into `runs/necessity-sweep/latency.md` together with the decision.
 
-**Decision rule, fixed in advance so the result cannot bend it:**
-- MathFin full arm projected **> 12 h** → cut the arm to `mathematical_finance` + `stochastic_calculus` (605 of 689 binders) and say so in the paper.
+**Decision rule, fixed in advance so the result cannot bend it.** Task 0 already decided
+census-vs-sample; this task sizes the Mathlib arm within that decision:
 - Mathlib sample: take the largest of {1000, 500, 250, 100} whose projection is **≤ 10 h**. If even n=100 exceeds 10 h, the Mathlib arm is **dropped**, and §2.2 of the spec is amended to record that it was dropped on measured cost rather than quietly omitted.
+- If Task 0 landed on sampling, the MathFin arm is a proportional stratified draw of 200 binders under seed `20260913`, not the 689-binder census, and every rate in the paper carries a Wilson confidence interval.
 
 - [ ] **Step 4: Commit**
 
