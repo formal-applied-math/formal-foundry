@@ -52,7 +52,7 @@ pipeline around it. Per theorem, per explicit hypothesis:
 3. **Verdict** — a hypothesis whose removal leaves a statement the sweep closes is
    **certified unnecessary**, and we hold the stronger theorem *with its proof in hand*.
 
-**Population.** The 358 catalogued entries in `formal-mathfin/benchmarks/*.json`, which
+**Population.** The 358 catalogued entries (309 carry an explicit hypothesis-bearing binder) in `formal-mathfin/benchmarks/*.json`, which
 carry provenance mechanically in `metadata.provenance.source`:
 
 | arm | n | what it is |
@@ -66,6 +66,17 @@ library that has been reviewed for statement quality on a CI-enforced cadence �
 knowledge the rate at which such a library carries hypotheses its theorems do not need has
 never been measured. That base rate is what makes 4/4 interpretable, and it is a
 contribution on its own whichever way it lands.
+
+**Stratify by faithfulness status, or the result is an artifact of wrappers.** Grounding
+the design against the entries turned this up: many carry a thin proof that just applies
+the underlying result (`bs_put_formula ... := MathFin.bs_put_formula h`). Dropping such a
+binder is unprovable by construction — not because the mathematics needs it, but because
+the *wrapper* does, relative to a lemma we did not probe. Pooling those with real proofs
+would depress the rate for a reason that has nothing to do with statement quality. So the
+sweep runs over all 309 hypothesis-bearing entries but reports stratified by the existing
+`full` / `library_wrapper` / `reduced_core` status, and the headline rate is computed on
+`full` only. Wrappers are reported separately as what they are: a measurement of the
+wrapper layer, not of the mathematics.
 
 **The asymmetry, which is the methodological spine.** Every positive is kernel-certified:
 the reduced statement was proved. No negative is evidence of anything — a hypothesis the
