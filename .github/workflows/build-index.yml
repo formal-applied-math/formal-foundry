@@ -56,7 +56,16 @@ on:
         default: mathfin
 
 concurrency:
-  group: build-index
+  # PER-DOMAIN, and the pairing with `cancel-in-progress: true` is why. On one
+  # shared group one library's index build KILLS another's mid-flight and
+  # silently discards ~34 minutes of work. Superseding a build of the SAME domain
+  # is the wanted behaviour; superseding a different library's is data loss.
+  #
+  # Deliberately NOT copied to pipeline.yml: that one shares a group on purpose.
+  # Two concurrent ticks would race on `pipeline_state.json` and `runs/`, which are
+  # single files both would commit to main. Serialising them is correct there;
+  # `cancel-in-progress: false` makes them queue rather than clobber.
+  group: build-index-${{ inputs.domain || 'mathfin' }}
   cancel-in-progress: true
 
 jobs:
