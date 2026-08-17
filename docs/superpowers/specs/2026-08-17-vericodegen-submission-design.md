@@ -52,20 +52,21 @@ pipeline around it. Per theorem, per explicit hypothesis:
 3. **Verdict** — a hypothesis whose removal leaves a statement the sweep closes is
    **certified unnecessary**, and we hold the stronger theorem *with its proof in hand*.
 
-**Population.** The 358 catalogued entries (309 carry an explicit hypothesis-bearing binder) in `formal-mathfin/benchmarks/*.json`, which
-carry provenance mechanically in `metadata.provenance.source`:
+**Population, measured 2026-08-17 (not estimated).** The instrument was run in parse-only
+mode over `formal-mathfin/benchmarks/*.json`:
 
-| arm | n | what it is |
-|---|---|---|
-| human-authored | 352 | hand-written, and reviewed under the repo's 8-lens values panel and idiomatic sweeps |
-| machine (`leanstral-autoform`) | 4 | the merged pipeline output |
-| translated (`afp-actuarial-mathematics`) | 2 | re-formalized from an external development |
+| | |
+|---|---|
+| entries with a locatable primary declaration | **348 / 348** (the parser never failed) |
+| `full`-status entries with a buildable probe | **320** |
+| explicit binders in those | **1,465** |
+| after a sound syntactic pre-filter | **689** across **254** entries |
 
-The human arm is the point. It is a **strong** baseline — not naive code, but a mature
-library that has been reviewed for statement quality on a CI-enforced cadence — and to our
-knowledge the rate at which such a library carries hypotheses its theorems do not need has
-never been measured. That base rate is what makes 4/4 interpretable, and it is a
-contribution on its own whichever way it lands.
+The pre-filter is the cost lever and it is sound: if a binder's name occurs free in the
+rest of the signature or in the conclusion, dropping it *cannot* elaborate, so the daemon
+call is a certain failure and skipping it removes no possible positive. It cuts the
+workload 1,465 → 689 (47%). Most of what it removes are data binders (`r`, `δ`, `K`, `μ`,
+`σ`) rather than hypotheses.
 
 **Stratify by faithfulness status, or the result is an artifact of wrappers.** Grounding
 the design against the entries turned this up: many carry a thin proof that just applies
@@ -98,14 +99,48 @@ the *comparison* survives the bias even where the absolute level does not.
 for every positive a diff that strengthens the library. Committed as telemetry, in the
 repo's existing style.
 
+### 2.1 Two corrections that grounding forced
+
+**The merged corpus cannot reproduce 4/4, and expecting it to was an error in the first
+draft of this spec.** The four autoformalized entries in the corpus are the *post-refinery*
+state: `mf_performance_gain_to_pain` carries no hypothesis at all today, because the review
+that merged it stripped the spurious one. What the corpus measures is therefore the
+**residual** rate — what survives human review and the strengthen passes — not the
+drafter's output. That is still worth measuring, and it is arguably the more interesting
+number, but it is a different number and the paper must not conflate them.
+
+**The refinery already recorded the defects, in machine-readable form.** Every autoform
+entry carries `metadata.provenance.refined`, a prose record of what review changed about
+the machine's statement — e.g. *"spurious `0 < pain` hypothesis dropped (the drafter
+guarded a division Lean does not need guarding — x/0 = 0)"* and *"spurious `∑ b ≠ 0`
+hypothesis dropped (mul_div_assoc needs no nonvanishing denominator)"*. This is ground
+truth about what the gate stack passed and a human caught, written at merge time rather
+than reconstructed for the paper. It is n=4, and it is evidence rather than inference.
+
+So the paper measures **two populations, kept separate**: the drafts (pre-review, from
+`runs/*.candidate` and the `refined` records) for what the gates miss, and the shipped
+corpus (post-review) for the residual base rate.
+
+### 2.2 The second arm is Mathlib, not a sibling library
+
+The first draft assumed `formal-econometrics` / `formal-macroeconomics` could supply a
+cross-library arm. Measured: they hold 1 catalogued entry and 5 Lean files between them.
+They cannot. The arm that actually strengthens the paper is **Mathlib**, sampled — the
+most heavily reviewed Lean corpus in existence, and the one where a nonzero rate of
+removable hypotheses is a result people will care about independently of anything we built.
+Same instrument, same lower-bound semantics, no new machinery. Sampling size is set by the
+measured daemon latency (step 1 of the plan), not chosen in advance.
+
 ## 3. Honest limitations, stated up front
 
 - **One library, one domain, one curated queue.** Mathematical finance, one author's
   issue backlog. We do not claim the rate generalizes; we claim the *failure mode* does,
   and that the instrument transfers to any Lean development.
-- **n=4 on the machine arm.** The comparison is a 352-entry base rate against four
-  observations. We report it as such and refuse a p-value; the honest statement is "all
-  four, against a base rate of X%", and if X is high the finding is *weaker* and we say so.
+- **n=4 on the machine arm.** Four `refined` records against a 689-binder base rate. We
+  report it as such and refuse a p-value; the honest statement is "four of four, against a
+  residual base rate of X%", and if X is high the finding is *weaker* and we say so.
+- **The two populations measure different things** (§2.1) and the paper says so in the
+  results section, not only in limitations.
 - **Lower bound, per §2.**
 - **The pipeline's own numbers are small**: 40 refill rows, 22 live obstructions, 16
   stored drafts. These support the supporting sections, not the headline.
