@@ -205,6 +205,16 @@ portable across toolchain versions; two tracks (closed-source API under a per-pr
 budget, open-source under a compute budget). That is what the refinery already does, and
 `docs/patterns.md` (1,473 lines) is a written refactoring policy.
 
+**Two lanes, discovered by search after the first draft of this spec.** The arena is
+actively soliciting proofs for the benchmark — it wants long proofs with room to shorten,
+expensive to compile, and stable across toolchains, which is a precise description of the
+Ito tower (62 modules, ~20,000 lines, pinned and re-elaborated in CI on every commit).
+Donating is cheap, independent of competing, and lands our library in a benchmark others
+will run against. That is **Lane A**, and it is the higher expected value of the two.
+**Lane B** is competing, and its bar is a published method: Lean Refactor
+(arXiv:2605.20244) reports >70% token compression and up to 60% compile-time reduction.
+We enter only on measured evidence that the refinery is in that range.
+
 Prep before 10-01, in order:
 1. Confirm the rules and register for the warm-up.
 2. Build a measurement harness over our own corpus for the three metrics — proof length,
