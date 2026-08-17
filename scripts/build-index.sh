@@ -48,10 +48,13 @@ docker run --rm \
   --entrypoint bash "$IMAGE" -euo pipefail -c '
     cd /app
     # add lean_scout as an ephemeral dependency of the baked library project.
-    # EVERY $VAR below is expanded by the CONTAINER's shell, so each one must be
-    # passed with `-e` above — an unpassed host variable is unset here, and under
-    # `set -u` that is a hard failure (it is how the missing DOMAIN_NAMESPACE was
+    # EVERY $VAR below is expanded by the shell INSIDE the container, so each one
+    # must be passed with `-e` above; an unpassed host variable is unset here, and
+    # under `set -u` that is a hard failure (how the missing DOMAIN_NAMESPACE was
     # caught). $REV additionally feeds the unquoted heredoc below.
+    # AND: this whole block is ONE single-quoted argument, so it must contain no
+    # apostrophe anywhere, comments included. One closes the quote early and
+    # silently drops everything after it onto the HOST shell. That has happened.
     cat >> lakefile.lean <<EOF
 
 require lean_scout from git

@@ -67,6 +67,57 @@ def _docker_run_blocks(src: str) -> list[tuple[str, str]]:
     return out
 
 
+def _stray_apostrophes(src: str) -> list[str]:
+    """Blocks whose closing `'` lands mid-word — i.e. an apostrophe inside the
+    single-quoted argument ended it early.
+
+    A single-quoted shell argument cannot contain an apostrophe at all; there is no
+    escape for it. So the quote that closes `-c '…'` must be followed by whitespace,
+    a line continuation, or end of input. If it is followed by a word character, the
+    argument was terminated in the middle of a word and everything after it is now
+    running on the HOST.
+
+    This is not hypothetical. A comment reading "the CONTAINER's shell" did exactly
+    that in build-index.sh: `lake` then ran on the runner, which has no Lean, and
+    the job died `lake: command not found` (run 31993083138).
+    """
+    bad = []
+    for m in re.finditer(r"docker run\b.*?-l?c\s+'", src, re.S):
+        start = m.end()
+        close = src.find("'", start)
+        if close == -1:
+            bad.append("unterminated single-quoted block")
+            continue
+        nxt = src[close + 1: close + 2]
+        if nxt and (nxt.isalnum() or nxt == "_"):
+            line = src[:close].count("\n") + 1
+            bad.append(f"line {line}: closing quote followed by {nxt!r} — "
+                       "an apostrophe ended the block early")
+    return bad
+
+
+def test_no_stray_apostrophe_closes_a_container_block_early():
+    problems = []
+    for path in _script_files():
+        for msg in _stray_apostrophes(open(path, encoding="utf-8").read()):
+            problems.append(f"{os.path.basename(path)}: {msg}")
+    assert not problems, (
+        "a single-quoted `docker run -c` block was ended early by an apostrophe, so "
+        "the rest of it runs on the HOST. There is no escape for `'` inside single "
+        "quotes — reword the text:\n  " + "\n  ".join(problems))
+
+
+def test_the_apostrophe_gate_would_catch_it():
+    """The exact shape that got through: an apostrophe in a comment."""
+    bad = ("docker run --rm --entrypoint bash img -c '\n"
+           "  # expanded by the CONTAINER's shell\n"
+           "  lake build X\n'\n")
+    assert _stray_apostrophes(bad), "gate missed the real failure shape"
+
+    good = bad.replace("CONTAINER's shell", "the shell inside the container")
+    assert not _stray_apostrophes(good)
+
+
 def test_every_domain_var_used_in_a_container_is_passed_into_it():
     problems: list[str] = []
     checked = 0
