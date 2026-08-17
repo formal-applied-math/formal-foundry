@@ -163,6 +163,27 @@ foundry write access to main:
 Without `MAIN_PR_TOKEN` the tick falls back to candidate-notify and opens no PR,
 so the pipeline is safe before the grant. Revoking the PAT fully disables auto-PR.
 
+### The PAT's repository list, once there is a second library
+
+**A PAT scoped to the flagship cannot see a private sibling, and GitHub says so with
+a 404, not a 403.** `formal-econometrics` and `formal-macroeconomics` are private;
+`actions/checkout` against either with a flagship-only PAT fails
+`Not Found — /rest/repos/repos#get-a-repository`, which reads like the repository has
+been deleted rather than like a token is missing a grant. Measured, not guessed: run
+[31980239248](https://github.com/formal-applied-math/formal-foundry/actions/runs/31980239248).
+
+So any workflow targeting a second domain needs that repository **added to the PAT's
+repository access** (Settings → Developer settings → Fine-grained tokens → the token →
+Repository access). Note the consequence before doing it: a fine-grained PAT applies
+ONE permission set across every repo it selects, so adding a library for read also
+grants it Contents: write and Pull requests: write. For this program that is the
+direction of travel — the pipeline's job on those repos is to open PRs — but it is a
+real widening and worth doing deliberately.
+
+`publish-verify-image.yml` preflights this with a plain API call before the build, so
+the failure costs ~30 seconds instead of dying after a Mathlib prebuild. Any new
+workflow that checks out a sibling should do the same.
+
 Flow: `pipeline-tick.sh` (prove) → on pass `open-pr.sh` (assemble the proof into
 its `MathFin/` module + a re-export benchmark entry + umbrella import; regen
 `formalization.yaml` and, in the verify image, `lake build` + `AxiomAuditGen`;
