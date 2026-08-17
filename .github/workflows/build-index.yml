@@ -140,7 +140,9 @@ jobs:
       - name: Upload the index
         uses: actions/upload-artifact@v4
         with:
-          name: lean-scout-index
+          # domain-qualified: two libraries produce two different indexes, and a
+          # shared artifact name makes them indistinguishable once downloaded.
+          name: lean-scout-index-${{ env.DOMAIN_NAME }}
           path: |
             index/*.jsonl
             index/PIN
