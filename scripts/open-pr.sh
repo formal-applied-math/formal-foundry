@@ -175,6 +175,9 @@ docker stop lean-repl docker-lean-repl-1 "$DOMAIN_LEAN_LSP_CONTAINER" >/dev/null
 # CI-parity: this block must run EVERYTHING the main repo's build.yml gates on —
 # lake build AND lake lint (PRs #123/#124 opened red because lint never ran here:
 # defsWithUnderscore + docBlame are lint-only classes the build accepts).
+# SINGLE-quoted on purpose: `$DOMAIN_NAMESPACE` must survive to the CONTAINER's
+# shell, which means the container needs it in its env (`-e` below). Left
+# unpassed it expands to empty and this silently becomes `lake build ""`.
 REGEN='set -e
        lake exe cache get >/dev/null 2>&1 || true
        lake build "$DOMAIN_NAMESPACE"
@@ -193,6 +196,7 @@ if command -v docker >/dev/null 2>&1; then
   # 2026-07-17: 8558 Mathlib modules came from `cache get`, then heavy library
   # modules like DoobLpMaximalInequality rebuilt at ~400s each).
   docker run --rm --entrypoint bash \
+    -e DOMAIN_NAMESPACE="$DOMAIN_NAMESPACE" \
     -v "$MAIN":/app \
     -v "${COMPOSE_PROJECT_NAME:-docker}_lake_build_cache":/app/.lake \
     -w /app "$IMAGE" -lc "$REGEN" \

@@ -44,10 +44,14 @@ docker run --rm \
   --cpuset-cpus="${VERIFY_CPUSET:-0-3}" --memory="${VERIFY_MEM:-6g}" \
   -v "$INDEX":/out \
   -e REV="$REV" -e DO_TACTICS="$DO_TACTICS" \
+  -e DOMAIN_NAMESPACE="$DOMAIN_NAMESPACE" \
   --entrypoint bash "$IMAGE" -euo pipefail -c '
     cd /app
     # add lean_scout as an ephemeral dependency of the baked library project.
-    # $REV comes from the container env (-e REV); the unquoted heredoc expands it.
+    # EVERY $VAR below is expanded by the CONTAINER's shell, so each one must be
+    # passed with `-e` above — an unpassed host variable is unset here, and under
+    # `set -u` that is a hard failure (it is how the missing DOMAIN_NAMESPACE was
+    # caught). $REV additionally feeds the unquoted heredoc below.
     cat >> lakefile.lean <<EOF
 
 require lean_scout from git
