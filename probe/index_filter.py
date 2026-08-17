@@ -129,6 +129,20 @@ def filter_file(path: str, keep_modules: set[str], *,
     return (kept, total)
 
 
+def namespace_census(types_path: str, limit: int = 12) -> list[tuple[str, int]]:
+    """(top-level namespace, record count) for a raw index, commonest first.
+
+    The `module` field is the thing the slice keys on, so this reports exactly what
+    it saw. A record with no module at all is counted under `<no module field>`,
+    which is a different diagnosis from a namespace that is merely absent."""
+    counts: dict[str, int] = {}
+    for rec in _stream(types_path):
+        mod = rec.get("module")
+        head = mod.split(".", 1)[0] if isinstance(mod, str) and mod else "<no module field>"
+        counts[head] = counts.get(head, 0) + 1
+    return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:limit]
+
+
 def slice_index(index_dir: str, *, own: tuple[str, ...],
                 allow: tuple[str, ...] = DEFAULT_ALLOW) -> dict:
     """Slice types/const_dep to own + reached-neighborhood, tactics to own only.
@@ -142,18 +156,30 @@ def slice_index(index_dir: str, *, own: tuple[str, ...],
     reached = reached_constants(const_dep_path, own)
     mods = neighborhood_modules(types_path, reached, own=own, allow=allow)
 
+    # BEFORE filtering: `filter_file` rewrites in place, so the raw records are gone
+    # by the time we would know the slice kept nothing. One extra pass over the input
+    # costs a few seconds on a job that takes half an hour, and only its result is
+    # conditional — the census is attached below solely when there is a 0% to explain.
+    pre_census = namespace_census(types_path)
+
     t_kept, t_total = filter_file(types_path, mods, own=own)
     c_kept, c_total = filter_file(const_dep_path, mods, own=own)
     # Own-only: house-style exemplars, see the module docstring.
     x_kept, x_total = filter_file(tactics_path, set(), own=own)
 
-    return {
+    out = {
         "reached_constants": len(reached),
         "neighborhood_modules": len(mods),
         "types": {"kept": t_kept, "total": t_total},
         "const_dep": {"kept": c_kept, "total": c_total},
         "tactics": {"kept": x_kept, "total": x_total},
     }
+    # A slice that keeps nothing from a non-empty input is a FINDING, not a result.
+    # Report the namespaces the input actually held so the cause is visible in the
+    # same run rather than costing another extraction to discover.
+    if t_total and not t_kept:
+        out["census"] = pre_census
+    return out
 
 
 def main(argv=None) -> int:
@@ -182,10 +208,18 @@ def main(argv=None) -> int:
         pct = (100.0 * d["kept"] / d["total"]) if d["total"] else 0.0
         print(f"  {label:<10} {d['kept']:>8} / {d['total']:<8} ({pct:5.2f}%)", file=sys.stderr)
 
+    def census(stats):
+        if "census" not in stats:
+            return
+        print(f"  KEPT NOTHING. own={own} — the input's namespaces were:", file=sys.stderr)
+        for ns, n in stats["census"]:
+            print(f"    {n:>8}  {ns}", file=sys.stderr)
+
     print(f"[index_filter] frontier: {stats['reached_constants']} constants reached "
           f"in {stats['neighborhood_modules']} external modules", file=sys.stderr)
     for k in ("types", "const_dep", "tactics"):
         line(k, stats[k])
+    census(stats)
     return 0
 
 
