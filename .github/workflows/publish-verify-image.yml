@@ -139,18 +139,33 @@ jobs:
         # cannot be a typo worth guessing at.
         env:
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          # `permissions: packages: write` above makes this able to push to GHCR.
+          FALLBACK_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ACTOR: ${{ github.actor }}
           EXTRA_TAG: ${{ inputs.tag }}
         run: |
-          if [ -z "$GHCR_TOKEN" ]; then
-            echo "::error::push requested but GHCR_TOKEN is not set — built and verified, not published"
+          # GHCR_TOKEN if you have one, else the built-in GITHUB_TOKEN — and the
+          # difference is not cosmetic. GITHUB_TOKEN can CREATE a package in this org
+          # (it gets linked to this repo), which covers a NEW domain's image and every
+          # future one. It CANNOT write to a package linked to a DIFFERENT repo — and
+          # the flagship's image is linked to the flagship's own repo, not to the
+          # foundry — so re-publishing THAT one from here still needs a real GHCR_TOKEN,
+          # or a package-level grant of write access to this repo.
+          TOKEN="${GHCR_TOKEN:-$FALLBACK_TOKEN}"
+          if [ -z "$TOKEN" ]; then
+            echo "::error::push requested but no token available — built and verified, not published"
             exit 1
+          fi
+          if [ -z "$GHCR_TOKEN" ]; then
+            echo "no GHCR_TOKEN — using the built-in GITHUB_TOKEN (packages: write)." >&2
+            echo "if this 403s, the package is linked to another repo: set GHCR_TOKEN" >&2
+            echo "or grant this repo write access on the package's settings page." >&2
           fi
           if [ -n "$EXTRA_TAG" ] && ! printf '%s' "$EXTRA_TAG" | grep -Eq '^[A-Za-z0-9._-]{1,64}$'; then
             echo "::error::refusing tag '$EXTRA_TAG' — a docker tag is [A-Za-z0-9._-], max 64"
             exit 1
           fi
-          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+          printf '%s' "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
           docker push "$DOMAIN_VERIFY_IMAGE"
           if [ -n "$EXTRA_TAG" ]; then
             DATED="${DOMAIN_VERIFY_IMAGE%:*}:$EXTRA_TAG"
