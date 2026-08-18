@@ -59,6 +59,25 @@ Retired on this bar:
   The non-vacuous version of #128 needs jumps as actual random variables rather than
   `mertonSpot`'s abstract `k`, which is a corpus development, not a stub.
 
+Removed as COMPLETED (a different thing from retired on the bar above):
+
+- **#161 / #162** (`gain-to-pain`, `upside-capture`, removed 2026-08-18). Both were
+  proved, merged as `formal-mathfin` PR #169, and their defs now live in
+  `MathFin/Performance/RatiosExtended.lean`. A merged target's stub stops elaborating
+  the moment the real declaration exists — `` `MathFin.gainToPain` has already been
+  declared `` — and `build_manifest` validates the queue as a BATCH, so two finished
+  targets were failing activation for every live one. That is how a freshly seeded
+  `cal-bk-71` sat unactivatable behind work that had already shipped
+  (run 32094892342).
+
+  The queue holds work to do, not history: provenance for a merged target lives in
+  the corpus, in `pipeline_state.json`'s history, and on the PR. Delete the pair
+  (`.lean` + `.entry.json`) once its PR merges.
+
+  Worth noting and NOT fixed here: batch-failing is brittle. One dead stub blocking
+  every other target is a gate design question, not a stale-file question, and it
+  should be decided on its own rather than in passing.
+
 ## Validate + activate (needs the daemon; does NOT spend Leanstral tokens)
 
 ```bash
