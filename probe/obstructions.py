@@ -24,6 +24,13 @@ FAMILIES = [
     "prover-max-rounds",
     "gate-fail",
     "infra-indeterminate",
+    # An outcome none of the above recognises. It used to classify as None and be
+    # DROPPED, which made the census silently incomplete: 8 of 42 refill records
+    # were `error`, 7 of them issue #71 failing the same way every tick, and not
+    # one appeared in a report. This footer promises "the family with the largest
+    # count names the fix the pipeline needs next" — a family that cannot be
+    # counted can never be largest.
+    "drafter-error",
 ]
 
 
@@ -47,7 +54,10 @@ def _family_from_signals(gates: set, has_unknowns: bool) -> str | None:
         return "no-elaborating-draft"
     if gates & _GATE_FAIL:
         return "gate-fail"
-    return None
+    # NOT None. Both callers filter `seeded` before reaching here, so anything left
+    # is a real obstruction whose outcome this function does not recognise — an
+    # exception in the draft/emit path, most often. Returning None dropped it.
+    return "drafter-error"
 
 
 def _refill_family(row: dict) -> str | None:

@@ -319,16 +319,36 @@ def extract_location(pack: DomainPack, body: str) -> str | None:
     return m.group(1) if m else None
 
 
-def prepare_issues(pack: DomainPack, raw: list[dict], *,
-                   max_difficulty: str = "medium") -> list[dict]:
+def prepare_issues(pack: DomainPack, raw: list[dict], *, main_repo: str | None = None,
+                   max_difficulty: str = "medium", log=lambda m: None) -> list[dict]:
     """Filter+order the raw `gh issue list` output to the tractable
     `status:ready`+`type:proof` queue (via `issues.select_issues`) and enrich each
-    with its `body` + extracted `pointers` for drafting."""
+    with its `body` + extracted `pointers` for drafting.
+
+    With `main_repo`, a pointer path that does NOT exist in the checkout is dropped.
+    A pointer names a module to CONSUME; an issue writing "New module suggestion:
+    `<LakeRoot>/Foo/Bar.lean`" is naming a module to CREATE, and the regex cannot
+    tell them apart. Left in, emit imports the phantom, the drafter names its new
+    module the same thing, and the collision check refuses — a module cannot import
+    itself. #71 failed that way seven times without ever reaching an obstruction
+    report. Filtering here rather than in `extract_pointers` keeps extraction a pure
+    parser; this is validation, and it belongs where the checkout is known."""
     by_num = {r.get("number"): r for r in raw}
     out = []
     for s in select_issues(raw, max_difficulty=max_difficulty):
         body = by_num.get(s["number"], {}).get("body") or ""
-        out.append({**s, "body": body, "pointers": extract_pointers(pack, body)})
+        pointers = extract_pointers(pack, body)
+        if main_repo:
+            live = [p for p in pointers if os.path.isfile(os.path.join(main_repo, p))]
+            phantom = [p for p in pointers if p not in live]
+            if phantom:
+                # Loud on purpose: silently dropping a pointer would hide a
+                # mis-written issue just as effectively as silently keeping one.
+                log(f"#{s['number']}: dropped pointer(s) not in the checkout "
+                    f"{phantom} — a pointer names a module to CONSUME; a module to "
+                    f"CREATE belongs in `location:` or in the task prose")
+            pointers = live
+        out.append({**s, "body": body, "pointers": pointers})
     return out
 
 
@@ -792,7 +812,10 @@ def main() -> int:
     queue_dir = args.queue_dir or os.path.join(_foundry_root(), "targets", "queue")
 
     seeded_nums = _already_seeded(queue_dir)
-    issues = [i for i in prepare_issues(pack, _fetch_issues(slug))
+    issues = [i for i in prepare_issues(pack, _fetch_issues(slug),
+                                        main_repo=args.main_repo,
+                                        log=lambda m: print(f"[refill] {m}",
+                                                            file=sys.stderr))
               if i["number"] not in seeded_nums
               and (args.only is None or i["number"] == args.only)]
     if not issues:
