@@ -265,12 +265,14 @@ def next_target(candidates: list[dict], state: dict, *, claimed_fn=None) -> dict
     return None
 
 
-def queue_claimed(candidate: dict, queue_dir: str) -> bool:
-    """Is this target already sitting in `targets/queue/`? A drafted-but-unmerged
-    target leaves its `<id>.entry.json` behind, which is durable in the repo in a way
-    `pipeline_state.json` is not."""
-    tid = candidate.get("id") or ""
-    return bool(tid) and os.path.exists(os.path.join(queue_dir, f"{tid}.entry.json"))
+# `queue_claimed` lived here and is gone. It answered "is this issue already staged
+# in the queue?" — a re-DRAFT guard — but was wired into the PROVE selector, where the
+# answer is yes for every candidate, because `_write_target` writes `<id>.entry.json`
+# at seed time. A target was therefore born claimed and could never be proved.
+#
+# The question it asked is still asked, on the side that needs it and with the same
+# durability property (reads the queue off disk, not `pipeline_state.json`):
+# `autoformalize._already_seeded`. The prove side keeps `pr_claimed` below.
 
 
 def pr_claimed(candidate: dict, *, repo: str, run_fn=None) -> bool:
