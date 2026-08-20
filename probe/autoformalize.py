@@ -28,6 +28,7 @@ import time
 
 import embed as _embed
 import domain_pack
+import issue_state
 from domain_pack import DomainPack
 from house_context import (build_drafter_prompt, build_system_prompt,
                            extract_signatures)
@@ -499,7 +500,7 @@ def refill(pack: DomainPack, issues: list[dict], *, reason_fn, prove_fn, check_f
            proactive_fn=None, depth_gate: bool = True, triviality_gate: bool = True,
            semantic_rounds: int = 2, system_prompt=None,
            feasibility_fn=None, gate_cache=None, experience=None, summarize_fn=None,
-           log=lambda m: None) -> dict:
+           issue_slug: str | None = None, log=lambda m: None) -> dict:
     """Draft + gate + stage up to `max_issues` targets from `issues`.
 
     For each candidate (up to `max_attempt_issues`): intent (`reason_fn`, Claude
@@ -643,6 +644,15 @@ def refill(pack: DomainPack, issues: list[dict], *, reason_fn, prove_fn, check_f
                     seeded.append({"id": f"cal-bk-{n}", "issue": n, "paths": paths})
                     staged = True
                     log(f"#{n}: staged cal-bk-{n} (attempt {attempt})")
+                    # The ISSUE is the state machine; the queue is a cache of it.
+                    # Marking it in-progress is what stops the next refill re-drafting
+                    # work that is already staged — `select_issues` filters on
+                    # `status:ready`, so this de-duplicates at the source instead of
+                    # in a local file that can drift. Fail-open: a label write is
+                    # bookkeeping, and `_already_seeded` still catches a missed one.
+                    if issue_slug:
+                        issue_state.set_status(issue_slug, n, "status:in-progress",
+                                               log=lambda m: log(m))
                     break
                 row = {"attempt": attempt, **fail}
                 if unknowns:
@@ -929,6 +939,7 @@ def main() -> int:
         print("[refill] experience memory ON", file=sys.stderr)
 
     res = refill(pack, issues, reason_fn=judge_fn, intent_fn=draft_intent_fn,
+                 issue_slug=slug,
                  drafter_preamble=drafter_preamble, prove_fn=prove_fn,
                  agentic_formalize_fn=agentic_fn, slot_switch_fn=slot_switch_fn, check_fn=daemon_check,
                  context_fn=context_fn, queue_dir=queue_dir, budget=budget,

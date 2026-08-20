@@ -231,6 +231,58 @@ def due(state: dict, cfg: PipelineConfig, now_epoch: int) -> bool:
     return (now_epoch - last) >= cfg.interval_days * SECONDS_PER_DAY - DUE_GRACE_SECONDS
 
 
+def attempted_ids(state: dict) -> set[str]:
+    """Every target this pipeline has attempted, per BOTH records that hold the fact.
+
+    `record_attempt` appends the id to `attempted_issues` AND a row carrying it to
+    `history`, so the two cannot legitimately disagree — they are one fact stored
+    twice. Reading their UNION means losing either one no longer loses the answer,
+    which is the failure that actually happened: `attempted_issues` dropped the
+    2026-07-20 attempts, `history` still had them, nobody asked, and #161/#162 were
+    re-drafted into duplicate PRs (formal-mathfin#163/#165, #164/#167).
+
+    Cannot regress: where the two agree the union is either one of them."""
+    ids = set(state.get("attempted_issues", []) or [])
+    ids |= {h.get("id") for h in (state.get("history") or []) if h.get("id")}
+    return ids
+
+
+def selection_census(candidates: list[dict], state: dict, *, claimed_fn=None,
+                     queue_dir: str | None = None) -> dict:
+    """Why did selection return what it returned? Counts per exclusion reason, plus
+    whether the candidate list actually covers the stubs on disk.
+
+    A null selection has to explain itself. `no_unattempted_targets` was emitted over
+    six unattempted targets because the manifest feeding `candidates` was stale — the
+    message was true about its inputs and useless about reality, and it cost several
+    ticks to notice."""
+    attempted = attempted_ids(state)
+    n_attempted = n_claimed = 0
+    for c in candidates:
+        if c.get("id") in attempted:
+            n_attempted += 1
+            continue
+        if claimed_fn is not None:
+            try:
+                if claimed_fn(c):
+                    n_claimed += 1
+            except Exception:      # a backstop that raises is not a verdict
+                pass
+    out = {
+        "candidates": len(candidates),
+        "excluded_attempted": n_attempted,
+        "excluded_claimed": n_claimed,
+        "selectable": len(candidates) - n_attempted - n_claimed,
+    }
+    if queue_dir and os.path.isdir(queue_dir):
+        on_disk = {f[:-5] for f in os.listdir(queue_dir) if f.endswith(".lean")}
+        listed = {c.get("id") for c in candidates}
+        out["stubs_on_disk"] = len(on_disk)
+        # the stale-manifest signature: stubs exist that the candidate list omits
+        out["missing_from_candidates"] = sorted(on_disk - listed)
+    return out
+
+
 def next_target(candidates: list[dict], state: dict, *, claimed_fn=None) -> dict | None:
     """First candidate that is neither already attempted nor already claimed.
 
@@ -251,7 +303,7 @@ def next_target(candidates: list[dict], state: dict, *, claimed_fn=None) -> dict
     stall the tick, since the fast path is still doing its job. Note the standing
     exposure it covers: a passing tick leaves the issue `status:ready` until a human
     merges, so every target awaiting review is re-selectable for the whole window."""
-    attempted = set(state.get("attempted_issues", []))
+    attempted = attempted_ids(state)
     for c in candidates:
         if c.get("id") in attempted:
             continue

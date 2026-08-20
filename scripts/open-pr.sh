@@ -324,3 +324,12 @@ gh pr create --repo "$SLUG" --head "$BRANCH" --label autoform "${PR_FLAGS[@]}" \
   --title "autoform: $(basename "$MODULE" .lean) $TITLE_SUFFIX" \
   --body "$BODY" || transient "gh pr create failed (candidate is green — retry next tick)"
 echo "[open-pr] PR opened for $ID ($CLOSE_KW #$ISSUE)" >&2
+
+# The ISSUE is the state machine; move it to `status:review` now that a PR exists.
+# Without this the issue stays `status:ready` for the whole review window and the
+# refill can re-draft work that is already awaiting a human — the exposure
+# `next_target`'s docstring names. FAIL-OPEN: the PR is the deliverable and this is
+# bookkeeping about it, so a missing `issues: write` scope must not fail the run.
+python3 "$FOUNDRY/probe/issue_state.py" --repo "$SLUG" --issue "$ISSUE" \
+  --status status:review >&2 || \
+  echo "[open-pr] could not mark #$ISSUE status:review — PR is open regardless" >&2

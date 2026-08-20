@@ -47,6 +47,20 @@ if ! ( cd "$MAIN" && python3 -m pytest tests/ -q ) >"$FOUNDRY/runs/preflight-pyt
   exit 0
 fi
 
+# 0b. The ISSUE is the state machine — reconcile it BEFORE planning, so the refill
+# reads a truthful backlog. Without this the pipeline only ever writes state forward
+# (seed → in-progress, PR → review) and nothing walks it back: a PR closed unmerged,
+# a retired stub, or a fail-open label write that did not stick each strand a target
+# outside `status:ready` permanently. It also repairs the reverse drift, which is the
+# one that actually bit — six stubs staged while every issue still said `ready`, so
+# the refill kept re-drafting work already in the queue.
+#
+# Never fails a tick: this is bookkeeping, and it refuses to act on a lookup it could
+# not complete. Human statuses (blocked-design, needs-triage, ...) are never touched.
+GH_TOKEN="${MAIN_PR_TOKEN:-${GH_TOKEN:-}}" python3 issue_state.py \
+  --repo "$MAIN_REPO_SLUG" --reconcile --queue "$(dirname "$QUEUE")" --apply \
+  >/dev/null 2>>/dev/stderr || echo "[tick] issue reconcile failed — continuing" >&2
+
 # 1. Plan (a helper, so we can re-plan after a refill).
 plan() { python3 pipeline.py plan --config "$CFG" --state "$STATE" --queue "$QUEUE" ${FORCE:+--force}; }
 jget() { printf '%s' "$1" | python3 -c "import sys,json;print(json.load(sys.stdin).get('$2',''))" 2>/dev/null || true; }

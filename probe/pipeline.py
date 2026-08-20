@@ -71,7 +71,20 @@ def cmd_plan(args) -> int:
         candidates, state,
         claimed_fn=lambda c: bool(ask_gh) and P.pr_claimed(c, repo=pack.slug))
     if target is None:
-        return emit({"action": "skip", "reason": "no_unattempted_targets"})
+        # Say WHY. This skipped over six unattempted targets once because the
+        # manifest feeding `candidates` was stale, and the message was true about
+        # its inputs while being useless about reality.
+        census = P.selection_census(
+            candidates, state,
+            claimed_fn=lambda c: bool(ask_gh) and P.pr_claimed(c, repo=pack.slug),
+            queue_dir=os.path.dirname(os.path.abspath(args.queue)))
+        print(f"[plan] nothing selectable: {census}", file=sys.stderr)
+        if census.get("missing_from_candidates"):
+            print("[plan] STALE MANIFEST: stubs on disk absent from the candidate "
+                  f"list: {census['missing_from_candidates']} — rebuild it with "
+                  "`probe/build_manifest.py`", file=sys.stderr)
+        return emit({"action": "skip", "reason": "no_unattempted_targets",
+                     "census": census})
 
     difficulty = target.get("difficulty")
     if not P.can_afford(state, cfg, difficulty):
