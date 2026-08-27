@@ -881,6 +881,14 @@ Expected: `duplicates: []`
 
 The four autoform entries are post-refinery and carry no spurious hypothesis, so they must NOT show `certified_unnecessary`. If they do, the instrument disagrees with a human review that already ran — investigate before trusting anything else.
 
+**Two of the four print nothing, by construction.** `mf-performance-gain_to_pain` and
+`mf-performance-upside_capture` have no probe-worthy binders left — the refinery already
+dropped the guards that made them cases #161 and #162 — so the check actually exercises
+`mf-fixedincome-swap` (`hδ`, `hs`) and `mf-insurance-premium-principles` (`hμ`, `hσ2`,
+`hσ`, `hθ`, `hα`, `hβ`): eight binders, not four entries. Expect eight lines, all
+`not_shown_unnecessary`. Silence from the other two is the pre-filter working, not the
+check passing.
+
 ```bash
 python3 -c "
 import json, glob
@@ -1046,7 +1054,7 @@ git commit -m "feat(sweep): the Mathlib arm — same instrument, the most-review
 
 **The rate's denominator is the whole point:** count a binder only when its entry passed the power control (`sweep_proves_original`), and never count `daemon_error`. Report alongside every rate the blind fraction — entries the sweep could not prove at all — so a low rate cannot be read as a clean bill of health when it is really instrument blindness.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # probe/test_sweep_report.py
@@ -1105,12 +1113,12 @@ def test_refined_defects_are_pulled_from_provenance(tmp_path):
     assert got == [{"entry_id": "x", "issue": 161, "refined": "spurious guard dropped"}]
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 Run: `cd probe && python3 -m pytest test_sweep_report.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'sweep_report'`
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 ```python
 # probe/sweep_report.py
@@ -1204,7 +1212,7 @@ def render_report(rate_table: dict, defects: list[dict]) -> str:
     return "\n".join(lines) + "\n"
 ```
 
-- [ ] **Step 4: Run to verify they pass**
+- [x] **Step 4: Run to verify they pass**
 
 Run: `cd probe && python3 -m pytest test_sweep_report.py -v`
 Expected: PASS, 4 tests.
