@@ -6,7 +6,8 @@
     "cal-bk-162",
     "cal-bk-144",
     "cal-bk-129",
-    "cal-bk-56"
+    "cal-bk-56",
+    "cal-bk-57"
   ],
   "history": [
     {
@@ -50,9 +51,15 @@
       "id": "cal-bk-56",
       "outcome": "max_rounds",
       "tokens": 0
+    },
+    {
+      "epoch": 1787855122,
+      "id": "cal-bk-57",
+      "outcome": "max_rounds",
+      "tokens": 0
     }
   ],
-  "last_tick_epoch": 1787469512,
+  "last_tick_epoch": 1787855122,
   "month": "2026-08",
   "tokens_spent_this_month": 0
 }
