@@ -622,7 +622,7 @@ git commit -m "feat(sweep): per-binder verdicts, with daemon trouble excluded fr
 
 **Why resumable:** the MathFin arm is 254 entries and ~943 daemon calls (689 binders + 254 power controls). At the latency measured in Task 5 this is hours, and the box is shared with whatever else wants the Lean slot. Losing a run to a wedged daemon must cost the last entry, not the run.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 def test_done_keys_reads_back_what_was_written(tmp_path):
@@ -657,12 +657,12 @@ def test_run_sweep_skips_entries_already_recorded(tmp_path):
     assert second["entries"] == 0 and second["skipped"] == 1
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 Run: `cd probe && python3 -m pytest test_necessity_sweep.py -k "done_keys or run_sweep" -v`
 Expected: FAIL — `AttributeError: ... 'done_keys'`
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 ```python
 def done_keys(path: str) -> set[tuple[str, str]]:
@@ -748,12 +748,12 @@ if __name__ == "__main__":
     raise SystemExit(main())
 ```
 
-- [ ] **Step 4: Run to verify they pass**
+- [x] **Step 4: Run to verify they pass**
 
 Run: `cd probe && python3 -m pytest test_necessity_sweep.py -v`
 Expected: PASS, 17 tests.
 
-- [ ] **Step 5: Write the shell entrypoint**
+- [x] **Step 5: Write the shell entrypoint**
 
 ```bash
 # scripts/necessity-sweep.sh
@@ -780,7 +780,7 @@ echo "[sweep] arm=${ARM} out=${OUT}"
 
 Run: `chmod +x scripts/necessity-sweep.sh`
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add probe/necessity_sweep.py probe/test_necessity_sweep.py scripts/necessity-sweep.sh

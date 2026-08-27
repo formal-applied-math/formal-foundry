@@ -17,7 +17,8 @@ import re
 from dataclasses import dataclass
 
 __all__ = ["PRIMARY_DECL", "Entry", "primary_decl", "probe_worthy_binders",
-           "load_mathfin_entries", "sweep_can_prove", "sweep_entry"]
+           "load_mathfin_entries", "sweep_can_prove", "sweep_entry", "done_keys",
+           "run_sweep", "main"]
 
 PRIMARY_DECL = re.compile(
     r"^(?:@\[[^\]]*\]\s*)?(?:private\s+|protected\s+|nonrec\s+)?"
@@ -194,3 +195,86 @@ def sweep_entry(entry: "Entry", *, check_fn, prove_fn, regate_fn) -> list[dict]:
         out.append(rec(nm, "certified_unnecessary", proves_original,
                        _closing_tactic(probe, proved), time.monotonic() - t1))
     return out
+
+
+def done_keys(path: str) -> set[tuple[str, str]]:
+    """`(arm, entry_id)` pairs already present in an output file. A run killed mid-write
+    can leave a truncated final line; that line is dropped rather than raising, so a
+    resume never needs the file repaired by hand."""
+    out: set[tuple[str, str]] = set()
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    d = json.loads(line)
+                except ValueError:
+                    continue
+                out.add((d.get("arm", ""), d.get("entry_id", "")))
+    except FileNotFoundError:
+        return set()
+    return out
+
+
+def run_sweep(entries, out_path: str, *, check_fn, prove_fn, regate_fn,
+              log=print) -> dict:
+    """Sweep `entries`, appending records to `out_path` and skipping entries already
+    there. Flushes after every entry so a kill costs one entry, not the run."""
+    import os
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+    seen = done_keys(out_path)
+    stats = {"entries": 0, "records": 0, "skipped": 0}
+    with open(out_path, "a", encoding="utf-8") as f:
+        for e in entries:
+            if (e.arm, e.entry_id) in seen:
+                stats["skipped"] += 1
+                continue
+            recs = sweep_entry(e, check_fn=check_fn, prove_fn=prove_fn,
+                              regate_fn=regate_fn)
+            for r in recs:
+                f.write(json.dumps(r, ensure_ascii=False) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+            stats["entries"] += 1
+            stats["records"] += len(recs)
+            hits = sum(1 for r in recs if r["verdict"] == "certified_unnecessary")
+            log(f"[sweep] {e.entry_id}: {len(recs)} records, {hits} certified")
+    return stats
+
+
+def main(argv=None) -> int:
+    import argparse
+    import sys
+    from probe import daemon_check
+    from strengthen import tactic_sweep_prover
+
+    ap = argparse.ArgumentParser(description="necessity sweep over a Lean corpus")
+    ap.add_argument("--arm", choices=("mathfin", "mathlib"), default="mathfin")
+    ap.add_argument("--bench", default="../../formal-mathfin/benchmarks/*.json")
+    ap.add_argument("--out", required=True)
+    ap.add_argument("--status", default="full",
+                    help="only sweep entries with this formalization_status; 'all' for every one")
+    ap.add_argument("--limit", type=int, default=0, help="stop after N entries (0 = all)")
+    args = ap.parse_args(argv)
+
+    entries = load_mathfin_entries(args.bench)
+    if args.status != "all":
+        entries = [e for e in entries if e.status == args.status]
+    if args.limit:
+        entries = entries[:args.limit]
+
+    prove_fn = tactic_sweep_prover(daemon_check)
+
+    def regate_fn(code):
+        res = daemon_check(code)
+        if res.get("error"):
+            return {"passed": False, "reason": res["error"]}
+        return {"passed": not res.get("errors") and res.get("sorry_count", 0) == 0}
+
+    stats = run_sweep(entries, args.out, check_fn=daemon_check, prove_fn=prove_fn,
+                      regate_fn=regate_fn)
+    print(f"[sweep] done: {stats}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -155,3 +155,35 @@ def test_daemon_trouble_records_an_error_and_never_a_verdict():
     verdicts = {r["verdict"] for r in recs if r["binder"] is not None}
     assert verdicts <= {"daemon_error"}
     assert "certified_unnecessary" not in verdicts
+
+
+def test_done_keys_reads_back_what_was_written(tmp_path):
+    p = tmp_path / "out.jsonl"
+    import json as _j
+    p.write_text("\n".join(_j.dumps({"arm": "mathfin", "entry_id": x})
+                           for x in ("a", "b")) + "\n", encoding="utf-8")
+    assert ns.done_keys(str(p)) == {("mathfin", "a"), ("mathfin", "b")}
+
+
+def test_done_keys_is_empty_when_the_file_does_not_exist(tmp_path):
+    assert ns.done_keys(str(tmp_path / "nope.jsonl")) == set()
+
+
+def test_done_keys_tolerates_a_truncated_final_line(tmp_path):
+    p = tmp_path / "out.jsonl"
+    p.write_text('{"arm": "mathfin", "entry_id": "a"}\n{"arm": "mathfin", "ent',
+                 encoding="utf-8")
+    assert ns.done_keys(str(p)) == {("mathfin", "a")}
+
+
+def test_run_sweep_skips_entries_already_recorded(tmp_path):
+    check_fn, prove_fn = _fakes({"h"})
+    e = ns.Entry("mathfin", "e1", "d", "gainToPain_nonneg_of_denom_pos", "full",
+                 "human", GUARDED)
+    out = str(tmp_path / "out.jsonl")
+    first = ns.run_sweep([e], out, check_fn=check_fn, prove_fn=prove_fn,
+                         regate_fn=lambda c: {"passed": True}, log=lambda m: None)
+    second = ns.run_sweep([e], out, check_fn=check_fn, prove_fn=prove_fn,
+                          regate_fn=lambda c: {"passed": True}, log=lambda m: None)
+    assert first["entries"] == 1 and first["skipped"] == 0
+    assert second["entries"] == 0 and second["skipped"] == 1
