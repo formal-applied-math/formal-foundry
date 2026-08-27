@@ -114,7 +114,7 @@ git commit -m "measure(sweep): the daemon OOMs on every check — the ceiling, a
   - `load_mathfin_entries(bench_glob: str) -> list[Entry]`
   - `probe_worthy_binders(code: str, thm: str) -> list[str]` — explicit binders whose name does NOT occur free in the rest of the signature or in the conclusion.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # probe/test_necessity_sweep.py
@@ -181,12 +181,12 @@ def test_loader_partitions_by_provenance_and_status(tmp_path):
     assert entries[0].domain == "d"
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cd probe && python3 -m pytest test_necessity_sweep.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'necessity_sweep'`
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 ```python
 # probe/necessity_sweep.py
@@ -289,12 +289,12 @@ def load_mathfin_entries(bench_glob: str) -> list[Entry]:
     return out
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cd probe && python3 -m pytest test_necessity_sweep.py -v`
 Expected: PASS, 6 tests.
 
-- [ ] **Step 5: Verify against the real corpus (still daemon-free)**
+- [x] **Step 5: Verify against the real corpus (still daemon-free)**
 
 Run:
 ```bash
@@ -306,9 +306,21 @@ n = sum(len(ns.probe_worthy_binders(e.code, e.thm)) for e in full)
 print(f'entries={len(E)} full={len(full)} probe-worthy binders={n}')
 "
 ```
-Expected: `entries=348 full=320 probe-worthy binders=689`. If the binder count differs from 689, the pre-filter changed meaning — stop and reconcile before proceeding, because the spec quotes this number.
+Expected: `entries=357 full=330 probe-worthy binders=700`, against `formal-mathfin`
+`benchmarks/` at corpus commit `48cb004`. If the binder count differs, the corpus moved or
+the pre-filter changed meaning — stop and reconcile before proceeding, because the spec
+quotes this number.
 
-- [ ] **Step 6: Commit**
+**Reconciled 2026-08-27.** This step first read `entries=357 full=330 worthy=700` against a
+plan that pinned `348 / 320 / 689`. Replaying the loader over `benchmarks/` at each commit
+that touched it shows the shipped filter returns exactly `348 / 689` at `8e52f446` — the
+snapshot the plan was measured against — and `357 / 700` from `c419f0f0` onward, nine
+entries added later the same day by the reified-payoff-language feature. The pre-filter's
+meaning did not move; the population did. (`full=320` in the original was a transcription
+slip: that snapshot measures 321.) The numbers above and in spec §2 are now pinned to a
+named corpus commit, and the sweep records the commit it actually ran against.
+
+- [x] **Step 6: Commit**
 
 ```bash
 git add probe/necessity_sweep.py probe/test_necessity_sweep.py

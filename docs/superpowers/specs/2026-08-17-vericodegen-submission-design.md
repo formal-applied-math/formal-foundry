@@ -52,21 +52,29 @@ pipeline around it. Per theorem, per explicit hypothesis:
 3. **Verdict** — a hypothesis whose removal leaves a statement the sweep closes is
    **certified unnecessary**, and we hold the stronger theorem *with its proof in hand*.
 
-**Population, measured 2026-08-17 (not estimated).** The instrument was run in parse-only
-mode over `formal-mathfin/benchmarks/*.json`:
+**Population, measured (not estimated).** The instrument was run in parse-only mode over
+`formal-mathfin/benchmarks/*.json`, pinned at corpus commit `48cb004` (2026-08-20):
 
 | | |
 |---|---|
-| entries with a locatable primary declaration | **348 / 348** (the parser never failed) |
-| `full`-status entries with a buildable probe | **320** |
-| explicit binders in those | **1,465** |
-| after a sound syntactic pre-filter | **689** across **254** entries |
+| entries with a locatable primary declaration | **357 / 357** (the parser never failed) |
+| `full`-status entries with a buildable probe | **330** |
+| explicit binders in those | **1,489** |
+| after a sound syntactic pre-filter | **700** across **262** entries |
 
 The pre-filter is the cost lever and it is sound: if a binder's name occurs free in the
 rest of the signature or in the conclusion, dropping it *cannot* elaborate, so the daemon
 call is a certain failure and skipping it removes no possible positive. It cuts the
-workload 1,465 → 689 (47%). Most of what it removes are data binders (`r`, `δ`, `K`, `μ`,
+workload 1,489 → 700 (47%). Most of what it removes are data binders (`r`, `δ`, `K`, `μ`,
 `σ`) rather than hypotheses.
+
+The first draft of this section quoted 348 / 320 / 1,465 / 689, measured the same day at
+corpus commit `8e52f446`. The shipped `probe_worthy_binders` still reproduces that row
+exactly on that snapshot; the corpus then grew by nine entries in `c419f0f0` (the reified
+payoff language). The filter's meaning did not move — the population did, and the numbers
+above are re-pinned to a named commit so the next drift is legible rather than alarming.
+The run itself records the corpus commit it swept, and the paper quotes that row, not
+this one.
 
 **Stratify by faithfulness status, or the result is an artifact of wrappers.** Grounding
 the design against the entries turned this up: many carry a thin proof that just applies
@@ -74,7 +82,7 @@ the underlying result (`bs_put_formula ... := MathFin.bs_put_formula h`). Droppi
 binder is unprovable by construction — not because the mathematics needs it, but because
 the *wrapper* does, relative to a lemma we did not probe. Pooling those with real proofs
 would depress the rate for a reason that has nothing to do with statement quality. So the
-sweep runs over all 309 hypothesis-bearing entries but reports stratified by the existing
+sweep runs over all 282 hypothesis-bearing entries but reports stratified by the existing
 `full` / `library_wrapper` / `reduced_core` status, and the headline rate is computed on
 `full` only. Wrappers are reported separately as what they are: a measurement of the
 wrapper layer, not of the mathematics.
@@ -142,7 +150,7 @@ measured daemon latency (step 1 of the plan), not chosen in advance.
 - **One library, one domain, one curated queue.** Mathematical finance, one author's
   issue backlog. We do not claim the rate generalizes; we claim the *failure mode* does,
   and that the instrument transfers to any Lean development.
-- **n=4 on the machine arm.** Four `refined` records against a 689-binder base rate. We
+- **n=4 on the machine arm.** Four `refined` records against a 700-binder base rate. We
   report it as such and refuse a p-value; the honest statement is "four of four, against a
   residual base rate of X%", and if X is high the finding is *weaker* and we say so.
 - **The two populations measure different things** (§2.1) and the paper says so in the
