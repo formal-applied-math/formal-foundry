@@ -447,7 +447,15 @@ Record schema (every key always present):
  "sweep_proves_original": bool, "closing_tactic": str | None, "elapsed_s": float}
 ```
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
+
+**Fixture corrected during execution.** As written below, `_fakes` returns the probe
+untouched whenever `(h :` is still present — and the power-control probe keeps every
+binder, so the fake reports the instrument blind on a theorem whose real proof is
+`positivity`, the sweep's own first tactic. That contradicts the same test's
+`sweep_proves_original is True`. The shipped fixture instead closes a probe when nothing
+was dropped, and closes a reduced probe exactly when every binder it dropped is named in
+`closes`. The assertion was right; the fake was wrong.
 
 ```python
 def _fakes(closes: set[str]):
@@ -511,12 +519,12 @@ def test_daemon_trouble_records_an_error_and_never_a_verdict():
     assert "certified_unnecessary" not in verdicts
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 Run: `cd probe && python3 -m pytest test_necessity_sweep.py -k "certified or power_control_record or regate or daemon_trouble" -v`
 Expected: FAIL — `AttributeError: ... 'sweep_entry'`
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 ```python
 def _closing_tactic(probe: str, proved: str) -> str | None:
@@ -584,12 +592,12 @@ def sweep_entry(entry: "Entry", *, check_fn, prove_fn, regate_fn) -> list[dict]:
 
 Add `"sweep_entry"` to `__all__`.
 
-- [ ] **Step 4: Run to verify they pass**
+- [x] **Step 4: Run to verify they pass**
 
 Run: `cd probe && python3 -m pytest test_necessity_sweep.py -v`
 Expected: PASS, 13 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add probe/necessity_sweep.py probe/test_necessity_sweep.py

@@ -88,3 +88,70 @@ def test_power_control_false_when_the_declaration_cannot_be_located():
         raise AssertionError("must not be called")
 
     assert ns.sweep_can_prove(GUARDED, "no_such_theorem", prove_fn=fake_prove) is False
+
+
+#: every explicit binder of GUARDED, so a fake prover can tell which one a probe dropped
+GUARDED_BINDERS = ("finset_S", "r", "h")
+
+
+def _fakes(closes: set[str]):
+    """check_fn accepts everything; prove_fn closes the untouched original — so the
+    power control passes, as it must for a theorem whose real proof is `positivity`,
+    the sweep's own first tactic — and closes a reduced probe exactly when every
+    binder it dropped is named in `closes`."""
+    def check_fn(code):
+        return {"errors": [], "sorry_count": 1 if "sorry" in code else 0}
+
+    def prove_fn(probe):
+        dropped = {nm for nm in GUARDED_BINDERS if f"({nm} :" not in probe}
+        closed = True if not dropped else dropped <= closes
+        return {"lean_text": probe.replace("sorry", "positivity") if closed else probe,
+                "tokens": 0}
+    return check_fn, prove_fn
+
+
+def test_a_removable_hypothesis_is_certified_unnecessary():
+    check_fn, prove_fn = _fakes({"h"})
+    e = ns.Entry("mathfin", "e1", "d", "gainToPain_nonneg_of_denom_pos", "full",
+                 "human", GUARDED)
+    recs = ns.sweep_entry(e, check_fn=check_fn, prove_fn=prove_fn,
+                          regate_fn=lambda c: {"passed": True})
+    binder = [r for r in recs if r["binder"] == "h"][0]
+    assert binder["verdict"] == "certified_unnecessary"
+    assert binder["closing_tactic"] == "positivity"
+    assert binder["sweep_proves_original"] is True
+
+
+def test_every_entry_emits_exactly_one_power_control_record():
+    check_fn, prove_fn = _fakes({"h"})
+    e = ns.Entry("mathfin", "e1", "d", "gainToPain_nonneg_of_denom_pos", "full",
+                 "human", GUARDED)
+    recs = ns.sweep_entry(e, check_fn=check_fn, prove_fn=prove_fn,
+                          regate_fn=lambda c: {"passed": True})
+    assert sum(1 for r in recs if r["verdict"] == "power_control") == 1
+
+
+def test_a_red_regate_is_not_a_positive():
+    check_fn, prove_fn = _fakes({"h"})
+    e = ns.Entry("mathfin", "e1", "d", "gainToPain_nonneg_of_denom_pos", "full",
+                 "human", GUARDED)
+    recs = ns.sweep_entry(e, check_fn=check_fn, prove_fn=prove_fn,
+                          regate_fn=lambda c: {"passed": False, "reason": "axioms"})
+    binder = [r for r in recs if r["binder"] == "h"][0]
+    assert binder["verdict"] == "not_shown_unnecessary"
+
+
+def test_daemon_trouble_records_an_error_and_never_a_verdict():
+    def check_fn(code):
+        return {"error": "connection refused", "errors": ["connection refused"]}
+
+    def prove_fn(probe):
+        return {"lean_text": probe, "tokens": 0}
+
+    e = ns.Entry("mathfin", "e1", "d", "gainToPain_nonneg_of_denom_pos", "full",
+                 "human", GUARDED)
+    recs = ns.sweep_entry(e, check_fn=check_fn, prove_fn=prove_fn,
+                          regate_fn=lambda c: {"passed": True})
+    verdicts = {r["verdict"] for r in recs if r["binder"] is not None}
+    assert verdicts <= {"daemon_error"}
+    assert "certified_unnecessary" not in verdicts

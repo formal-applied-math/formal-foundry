@@ -17,7 +17,7 @@ import re
 from dataclasses import dataclass
 
 __all__ = ["PRIMARY_DECL", "Entry", "primary_decl", "probe_worthy_binders",
-           "load_mathfin_entries", "sweep_can_prove"]
+           "load_mathfin_entries", "sweep_can_prove", "sweep_entry"]
 
 PRIMARY_DECL = re.compile(
     r"^(?:@\[[^\]]*\]\s*)?(?:private\s+|protected\s+|nonrec\s+)?"
@@ -131,3 +131,66 @@ def sweep_can_prove(code: str, thm: str, *, prove_fn) -> bool:
         return False
     text = (got or {}).get("lean_text") or ""
     return bool(text) and "sorry" not in text
+
+
+def _closing_tactic(probe: str, proved: str) -> str | None:
+    """The tactic the sweep substituted for `sorry`, recovered by diffing the probe
+    against what came back. Recorded so a reader can see which sweep slot did the work."""
+    i = probe.find("sorry")
+    if i < 0 or not proved:
+        return None
+    tail = len(probe) - (i + len("sorry"))
+    return proved[i:len(proved) - tail].strip() or None
+
+
+def sweep_entry(entry: "Entry", *, check_fn, prove_fn, regate_fn) -> list[dict]:
+    """Probe every probe-worthy binder of one entry. Returns one record per binder plus
+    exactly one `power_control` record. Never raises: infrastructure trouble becomes a
+    `daemon_error` record, which is excluded from every rate."""
+    import time
+    from strengthen import necessity_probe
+
+    def rec(binder, verdict, proves, tactic, elapsed):
+        return {"arm": entry.arm, "entry_id": entry.entry_id, "domain": entry.domain,
+                "thm": entry.thm, "status": entry.status, "provenance": entry.provenance,
+                "binder": binder, "verdict": verdict, "sweep_proves_original": proves,
+                "closing_tactic": tactic, "elapsed_s": round(elapsed, 3)}
+
+    t0 = time.monotonic()
+    proves_original = sweep_can_prove(entry.code, entry.thm, prove_fn=prove_fn)
+    out = [rec(None, "power_control", proves_original, None, time.monotonic() - t0)]
+
+    for nm in probe_worthy_binders(entry.code, entry.thm):
+        t1 = time.monotonic()
+        probe = necessity_probe(entry.code, entry.thm, {nm})
+        if probe is None:
+            out.append(rec(nm, "free_filter_rejected", proves_original, None,
+                           time.monotonic() - t1))
+            continue
+        res = check_fn(probe)
+        if res.get("error"):
+            out.append(rec(nm, "daemon_error", proves_original, None,
+                           time.monotonic() - t1))
+            continue
+        if res.get("errors"):
+            out.append(rec(nm, "free_filter_rejected", proves_original, None,
+                           time.monotonic() - t1))
+            continue
+        try:
+            attempt = prove_fn(probe)
+        except Exception:
+            out.append(rec(nm, "daemon_error", proves_original, None,
+                           time.monotonic() - t1))
+            continue
+        proved = (attempt or {}).get("lean_text") or ""
+        if not proved or "sorry" in proved:
+            out.append(rec(nm, "not_shown_unnecessary", proves_original, None,
+                           time.monotonic() - t1))
+            continue
+        if not regate_fn(proved).get("passed"):
+            out.append(rec(nm, "not_shown_unnecessary", proves_original, None,
+                           time.monotonic() - t1))
+            continue
+        out.append(rec(nm, "certified_unnecessary", proves_original,
+                       _closing_tactic(probe, proved), time.monotonic() - t1))
+    return out
