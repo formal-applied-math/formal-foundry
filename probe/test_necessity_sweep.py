@@ -59,3 +59,32 @@ def test_loader_partitions_by_provenance_and_status(tmp_path):
     assert [(e.entry_id, e.status, e.provenance) for e in entries] == [
         ("a", "full", "human"), ("b", "library_wrapper", "leanstral-autoform")]
     assert entries[0].domain == "d"
+
+
+def test_power_control_true_when_the_sweep_closes_the_original():
+    calls = []
+
+    def fake_prove(probe):
+        calls.append(probe)
+        return {"lean_text": probe.replace("sorry", "positivity"), "tokens": 0}
+
+    assert ns.sweep_can_prove(GUARDED, "gainToPain_nonneg_of_denom_pos",
+                              prove_fn=fake_prove) is True
+    # the control probes the ORIGINAL signature — no binder was dropped
+    assert "(h : 0 < " in calls[0]
+    assert "sorry" in calls[0]
+
+
+def test_power_control_false_when_the_sweep_returns_the_probe_untouched():
+    def fake_prove(probe):
+        return {"lean_text": probe, "tokens": 0}    # unchanged == not closed
+
+    assert ns.sweep_can_prove(GUARDED, "gainToPain_nonneg_of_denom_pos",
+                              prove_fn=fake_prove) is False
+
+
+def test_power_control_false_when_the_declaration_cannot_be_located():
+    def fake_prove(probe):
+        raise AssertionError("must not be called")
+
+    assert ns.sweep_can_prove(GUARDED, "no_such_theorem", prove_fn=fake_prove) is False

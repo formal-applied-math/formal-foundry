@@ -17,7 +17,7 @@ import re
 from dataclasses import dataclass
 
 __all__ = ["PRIMARY_DECL", "Entry", "primary_decl", "probe_worthy_binders",
-           "load_mathfin_entries"]
+           "load_mathfin_entries", "sweep_can_prove"]
 
 PRIMARY_DECL = re.compile(
     r"^(?:@\[[^\]]*\]\s*)?(?:private\s+|protected\s+|nonrec\s+)?"
@@ -101,3 +101,33 @@ def load_mathfin_entries(bench_glob: str) -> list[Entry]:
                              thm=thm, status=md.get("formalization_status") or "(none)",
                              provenance=prov, code=code))
     return out
+
+
+def _statement_only(code: str, thm: str) -> str | None:
+    """`code` with the theorem's proof replaced by `sorry` and NO binder dropped —
+    the power-control probe."""
+    from autoformalize import _locate_named
+    try:
+        bstart, sep, end = _locate_named(code, thm)
+    except ValueError:
+        return None
+    return code[:bstart] + code[bstart:sep] + code[sep:end] + ":= by sorry\n"
+
+
+def sweep_can_prove(code: str, thm: str, *, prove_fn) -> bool:
+    """Whether the fixed tactic sweep closes this theorem with ALL hypotheses present.
+
+    The power control. A theorem that fails it is one the instrument cannot speak about:
+    the sweep's failure on a REDUCED statement then says nothing about the dropped
+    hypothesis. Such theorems are excluded from the rate denominator and reported as the
+    blind fraction. Fails closed — any trouble reads as "cannot prove", which only ever
+    shrinks the population we make claims about."""
+    probe = _statement_only(code, thm)
+    if probe is None:
+        return False
+    try:
+        got = prove_fn(probe)
+    except Exception:
+        return False
+    text = (got or {}).get("lean_text") or ""
+    return bool(text) and "sorry" not in text

@@ -341,7 +341,7 @@ git commit -m "feat(sweep): corpus loader + the sound binder pre-filter (1465 ->
 
 **Why this task exists:** without it the result is uninterpretable. If the eight-tactic sweep cannot prove a theorem even with every hypothesis in place, then its failure to prove a hypothesis-reduced version carries no information — the instrument is blind on that theorem, not the hypothesis load-bearing. Theorems that fail this control are excluded from the rate's denominator and reported as the instrument's blind fraction.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 def test_power_control_true_when_the_sweep_closes_the_original():
@@ -373,12 +373,12 @@ def test_power_control_false_when_the_declaration_cannot_be_located():
     assert ns.sweep_can_prove(GUARDED, "no_such_theorem", prove_fn=fake_prove) is False
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 Run: `cd probe && python3 -m pytest test_necessity_sweep.py -k power_control -v`
 Expected: FAIL — `AttributeError: module 'necessity_sweep' has no attribute 'sweep_can_prove'`
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 ```python
 def _statement_only(code: str, thm: str) -> str | None:
@@ -413,12 +413,12 @@ def sweep_can_prove(code: str, thm: str, *, prove_fn) -> bool:
 
 Add `"sweep_can_prove"` to `__all__`.
 
-- [ ] **Step 4: Run to verify they pass**
+- [x] **Step 4: Run to verify they pass**
 
 Run: `cd probe && python3 -m pytest test_necessity_sweep.py -v`
 Expected: PASS, 9 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add probe/necessity_sweep.py probe/test_necessity_sweep.py
