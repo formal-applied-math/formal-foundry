@@ -18,7 +18,7 @@ from dataclasses import dataclass
 
 __all__ = ["PRIMARY_DECL", "Entry", "primary_decl", "probe_worthy_binders",
            "load_mathfin_entries", "sweep_can_prove", "sweep_entry", "done_keys",
-           "module_defs", "MATHFIN_IMPORT", "MODULE_DEF",
+           "module_defs", "MATHFIN_IMPORT", "MODULE_DEF", "write_run_meta",
            "run_sweep", "main"]
 
 PRIMARY_DECL = re.compile(
@@ -286,6 +286,37 @@ def run_sweep(entries, out_path: str, *, check_fn, regate_fn, prove_fn=None,
     return stats
 
 
+def write_run_meta(out_path: str, *, arm: str, corpus_root: str, extra=None) -> dict:
+    """Append one line to `<out_path>.meta.jsonl` describing what this run read.
+
+    The corpus is a separate, live checkout: it moved by an entry mid-session while this
+    driver was being built. A rate is meaningless without the population it was taken
+    over, so the run pins its own — commit, tactics, timestamp — beside the records
+    rather than leaving the paper to quote a number measured by hand on another day.
+
+    Kept OUT of the records file on purpose: the record schema is fixed, every key
+    present on every line, and a differently-shaped row in the middle of it would break
+    every consumer that trusts that. `corpus_commit` is `unknown` when the root is not a
+    checkout — a missing provenance line is worth recording, not worth aborting over.
+    """
+    import datetime
+    import subprocess
+    from strengthen import SWEEP_TACTICS
+
+    try:
+        commit = subprocess.run(
+            ["git", "-C", corpus_root, "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=30).stdout.strip() or "unknown"
+    except (OSError, subprocess.SubprocessError):
+        commit = "unknown"
+    meta = {"arm": arm, "corpus_root": corpus_root, "corpus_commit": commit,
+            "started_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "sweep_tactics": list(SWEEP_TACTICS)}
+    meta.update(extra or {})
+    with open(out_path + ".meta.jsonl", "a", encoding="utf-8") as f:
+        f.write(json.dumps(meta, ensure_ascii=False) + "\n")
+    return meta
+
 def main(argv=None) -> int:
     import argparse
     import sys
@@ -323,6 +354,9 @@ def main(argv=None) -> int:
             return {"passed": False, "reason": res["error"]}
         return {"passed": not res.get("errors") and res.get("sorry_count", 0) == 0}
 
+    write_run_meta(args.out, arm=args.arm, corpus_root=args.mathfin_root,
+                   extra={"status": args.status, "limit": args.limit,
+                          "bench": args.bench, "entries_selected": len(entries)})
     stats = run_sweep(entries, args.out, check_fn=daemon_check, prove_for=prove_for,
                       regate_fn=regate_fn)
     print(f"[sweep] done: {stats}")

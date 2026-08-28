@@ -252,3 +252,30 @@ def test_run_sweep_refuses_both_a_prover_and_a_factory(tmp_path):
         ns.run_sweep([], str(tmp_path / "out.jsonl"), check_fn=check_fn,
                      prove_fn=prove_fn, prove_for=lambda e: prove_fn,
                      regate_fn=lambda c: {"passed": True}, log=lambda m: None)
+
+
+def test_run_metadata_pins_the_corpus_the_sweep_actually_read(tmp_path):
+    import json as _j
+    out = str(tmp_path / "out.jsonl")
+    ns.write_run_meta(out, arm="mathfin", corpus_root=str(tmp_path), extra={"status": "full"})
+    lines = open(out + ".meta.jsonl", encoding="utf-8").read().strip().split("\n")
+    meta = _j.loads(lines[-1])
+    assert meta["arm"] == "mathfin" and meta["status"] == "full"
+    assert "corpus_commit" in meta and "started_utc" in meta
+    assert meta["sweep_tactics"][0] == "positivity"
+
+
+def test_run_metadata_appends_one_line_per_resume(tmp_path):
+    out = str(tmp_path / "out.jsonl")
+    ns.write_run_meta(out, arm="mathfin", corpus_root=str(tmp_path))
+    ns.write_run_meta(out, arm="mathfin", corpus_root=str(tmp_path))
+    assert len(open(out + ".meta.jsonl", encoding="utf-8").read().strip().split("\n")) == 2
+
+
+def test_run_metadata_records_an_unknown_commit_rather_than_failing(tmp_path):
+    import json as _j
+    out = str(tmp_path / "out.jsonl")
+    # tmp_path is not a git checkout, so there is no commit to read
+    ns.write_run_meta(out, arm="mathfin", corpus_root=str(tmp_path))
+    meta = _j.loads(open(out + ".meta.jsonl", encoding="utf-8").read().strip())
+    assert meta["corpus_commit"] == "unknown"
