@@ -19,6 +19,7 @@ from dataclasses import dataclass
 __all__ = ["PRIMARY_DECL", "Entry", "primary_decl", "probe_worthy_binders",
            "load_mathfin_entries", "sweep_can_prove", "sweep_entry", "done_keys",
            "module_defs", "MATHFIN_IMPORT", "MODULE_DEF", "write_run_meta",
+           "stratified_binder_sample",
            "run_sweep", "main"]
 
 PRIMARY_DECL = re.compile(
@@ -181,10 +182,15 @@ def _closing_tactic(probe: str, proved: str) -> str | None:
     return proved[i:len(proved) - tail].strip() or None
 
 
-def sweep_entry(entry: "Entry", *, check_fn, prove_fn, regate_fn) -> list[dict]:
-    """Probe every probe-worthy binder of one entry. Returns one record per binder plus
-    exactly one `power_control` record. Never raises: infrastructure trouble becomes a
-    `daemon_error` record, which is excluded from every rate."""
+def sweep_entry(entry: "Entry", *, check_fn, prove_fn, regate_fn,
+                binders=None) -> list[dict]:
+    """Probe an entry's binders. Returns one record per binder plus exactly one
+    `power_control` record. Never raises: infrastructure trouble becomes a
+    `daemon_error` record, which is excluded from every rate.
+
+    `binders` defaults to every probe-worthy binder — the census. Pass a subset to sweep
+    only the binders a sample drew; the power control still runs, since without it the
+    sampled binders' verdicts cannot be read."""
     import time
     from strengthen import necessity_probe
 
@@ -198,7 +204,8 @@ def sweep_entry(entry: "Entry", *, check_fn, prove_fn, regate_fn) -> list[dict]:
     proves_original = sweep_can_prove(entry.code, entry.thm, prove_fn=prove_fn)
     out = [rec(None, "power_control", proves_original, None, time.monotonic() - t0)]
 
-    for nm in probe_worthy_binders(entry.code, entry.thm):
+    for nm in (probe_worthy_binders(entry.code, entry.thm) if binders is None
+               else binders):
         t1 = time.monotonic()
         probe = necessity_probe(entry.code, entry.thm, {nm})
         if probe is None:
@@ -234,6 +241,55 @@ def sweep_entry(entry: "Entry", *, check_fn, prove_fn, regate_fn) -> list[dict]:
     return out
 
 
+def stratified_binder_sample(entries, n: int, seed: int):
+    """Draw `n` probe-worthy binders, allocated across domains in proportion to how many
+    each holds, and return `[(entry, [binder, ...]), ...]` in corpus order.
+
+    The census is out on measured latency (see `runs/necessity-sweep/daemon-stability.md`),
+    so the arm is a sample and the paper reports an interval rather than a point estimate.
+    Two properties this has to have, both load-bearing for that interval:
+
+    * **Reproducible from the seed alone.** The draw is a fact about the result and gets
+      published with it, so a reader can redraw it.
+    * **Binders drawn, not entries.** Sampling whole entries would be cheaper — one power
+      control buys every binder in the entry — but it clusters: a wrapper's binders all
+      fail together, so a cluster sample's binders are not independent and a Wilson
+      interval over them would read narrower than the evidence supports. Drawing binders
+      keeps the trials as close to independent as this corpus allows. Collisions still
+      happen and the report says how many distinct entries the draw touched.
+
+    Allocation is largest-remainder, so the per-domain counts sum to exactly `n` rather
+    than to whatever rounding leaves.
+    """
+    import random
+    pool: dict[str, list] = {}
+    for e in entries:
+        for nm in probe_worthy_binders(e.code, e.thm):
+            pool.setdefault(e.domain, []).append((e, nm))
+    total = sum(len(v) for v in pool.values())
+    if n <= 0 or n >= total:
+        quota = {d: len(v) for d, v in pool.items()}
+    else:
+        exact = {d: n * len(v) / total for d, v in pool.items()}
+        quota = {d: int(x) for d, x in exact.items()}
+        short = n - sum(quota.values())
+        for d in sorted(pool, key=lambda d: (-(exact[d] - quota[d]), d))[:short]:
+            quota[d] += 1
+
+    rng = random.Random(seed)
+    drawn: set[tuple[str, str]] = set()
+    for domain in sorted(pool):
+        for e, nm in rng.sample(pool[domain], quota[domain]):
+            drawn.add((e.entry_id, nm))
+
+    out = []
+    for e in entries:
+        got = [nm for nm in probe_worthy_binders(e.code, e.thm)
+               if (e.entry_id, nm) in drawn]
+        if got:
+            out.append((e, got))
+    return out
+
 def done_keys(path: str) -> set[tuple[str, str]]:
     """`(arm, entry_id)` pairs already present in an output file. A run killed mid-write
     can leave a truncated final line; that line is dropped rather than raising, so a
@@ -253,14 +309,17 @@ def done_keys(path: str) -> set[tuple[str, str]]:
 
 
 def run_sweep(entries, out_path: str, *, check_fn, regate_fn, prove_fn=None,
-              prove_for=None, log=print) -> dict:
+              prove_for=None, binders_for=None, log=print) -> dict:
     """Sweep `entries`, appending records to `out_path` and skipping entries already
     there. Flushes after every entry so a kill costs one entry, not the run.
 
     `prove_fn` is one prover for every entry. `prove_for(entry) -> prove_fn` builds one
     per entry, which is what a real arm needs: the sweep's `{defs}`/`{unfold}` slots are
     filled from the entry's own imported definitions, and those differ entry to entry.
-    Exactly one of the two."""
+    Exactly one of the two.
+
+    `binders_for` maps `entry_id` to the binders to probe, which is how a sample runs;
+    omitted, every entry gets its full probe-worthy set."""
     import os
     if (prove_fn is None) == (prove_for is None):
         raise TypeError("run_sweep takes exactly one of prove_fn or prove_for")
@@ -274,7 +333,9 @@ def run_sweep(entries, out_path: str, *, check_fn, regate_fn, prove_fn=None,
                 stats["skipped"] += 1
                 continue
             recs = sweep_entry(e, check_fn=check_fn, prove_fn=make_prover(e),
-                              regate_fn=regate_fn)
+                              regate_fn=regate_fn,
+                              binders=None if binders_for is None
+                              else binders_for.get(e.entry_id, []))
             for r in recs:
                 f.write(json.dumps(r, ensure_ascii=False) + "\n")
             f.flush()
@@ -330,6 +391,12 @@ def main(argv=None) -> int:
     ap.add_argument("--status", default="full",
                     help="only sweep entries with this formalization_status; 'all' for every one")
     ap.add_argument("--limit", type=int, default=0, help="stop after N entries (0 = all)")
+    ap.add_argument("--sample", type=int, default=0,
+                    help="draw this many binders, stratified by domain (0 = census). "
+                         "The census was ruled out on measured latency; see "
+                         "runs/necessity-sweep/daemon-stability.md")
+    ap.add_argument("--seed", type=int, default=20260913,
+                    help="seed for the stratified draw, reported with the result")
     ap.add_argument("--mathfin-root", default="../../formal-mathfin",
                     help="checkout whose MathFin/*.lean supply the definitions that fill "
                          "the sweep's unfold/simp slots")
@@ -340,6 +407,14 @@ def main(argv=None) -> int:
         entries = [e for e in entries if e.status == args.status]
     if args.limit:
         entries = entries[:args.limit]
+
+    binders_for = None
+    if args.sample:
+        drawn = stratified_binder_sample(entries, args.sample, args.seed)
+        binders_for = {e.entry_id: b for e, b in drawn}
+        entries = [e for e, _b in drawn]
+        print(f"[sweep] sampled {sum(len(b) for _e, b in drawn)} binders across "
+              f"{len(entries)} entries, seed {args.seed}")
 
     def prove_for(entry):
         # Per entry, not once: the sweep's {defs}/{unfold} slots take THIS entry's
@@ -356,9 +431,12 @@ def main(argv=None) -> int:
 
     write_run_meta(args.out, arm=args.arm, corpus_root=args.mathfin_root,
                    extra={"status": args.status, "limit": args.limit,
-                          "bench": args.bench, "entries_selected": len(entries)})
+                          "bench": args.bench, "entries_selected": len(entries),
+                          "sample": args.sample, "seed": args.seed,
+                          "binders_drawn": None if binders_for is None
+                          else sum(len(b) for b in binders_for.values())})
     stats = run_sweep(entries, args.out, check_fn=daemon_check, prove_for=prove_for,
-                      regate_fn=regate_fn)
+                      regate_fn=regate_fn, binders_for=binders_for)
     print(f"[sweep] done: {stats}")
     return 0
 

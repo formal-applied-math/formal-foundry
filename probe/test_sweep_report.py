@@ -51,3 +51,39 @@ def test_refined_defects_are_pulled_from_provenance(tmp_path):
     ]}), encoding="utf-8")
     got = sr.refined_defects(str(tmp_path / "*.json"))
     assert got == [{"entry_id": "x", "issue": 161, "refined": "spurious guard dropped"}]
+
+
+def test_wilson_interval_brackets_the_point_estimate():
+    lo, hi = sr.wilson(5, 20)
+    assert lo < 0.25 < hi and 0.0 < lo and hi < 1.0
+
+
+def test_wilson_interval_stays_inside_the_unit_interval_at_zero_and_one():
+    assert sr.wilson(0, 20)[0] == 0.0
+    assert sr.wilson(20, 20)[1] == 1.0
+
+
+def test_wilson_interval_is_none_when_nothing_was_probed():
+    assert sr.wilson(0, 0) is None
+
+
+def test_rates_carry_an_interval_because_the_arm_is_a_sample():
+    recs = [
+        _rec(entry_id="a", verdict="power_control", binder=None),
+        _rec(entry_id="a", verdict="certified_unnecessary"),
+        _rec(entry_id="a", binder="h2", verdict="not_shown_unnecessary"),
+    ]
+    r = sr.rates(recs)[("mathfin", "d", "full")]
+    lo, hi = r["ci95"]
+    assert lo < r["rate"] < hi
+
+
+def test_a_sampled_rate_reports_how_many_entries_the_draw_touched():
+    recs = [
+        _rec(entry_id="a", verdict="power_control", binder=None),
+        _rec(entry_id="a", verdict="certified_unnecessary"),
+        _rec(entry_id="b", verdict="power_control", binder=None),
+        _rec(entry_id="b", verdict="not_shown_unnecessary"),
+    ]
+    r = sr.rates(recs)[("mathfin", "d", "full")]
+    assert r["probed_entries"] == 2

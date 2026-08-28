@@ -885,9 +885,24 @@ git commit -m "measure(sweep): daemon latency, and the Mathlib sample size it af
 **Files:**
 - Create: `runs/necessity-sweep/<stamp>-mathfin.jsonl`
 
-- [ ] **Step 1: Launch the full arm in the background**
+- [ ] **Step 1: Launch the arm in the background**
 
-Run: `ARM=mathfin scripts/necessity-sweep.sh --status full`
+**Amended 2026-08-28 — this is a sample, not the census.** Task 0's measurement failed both
+halves of its bar (median 35.7 s against 5–30 s; two respawns against zero), so its
+pre-registered rule fires and the arm is a stratified draw:
+
+Run: `ARM=mathfin scripts/necessity-sweep.sh --status full --sample 200 --seed 20260913`
+
+The draw is **200 binders across 135 entries — 335 records**, against the census's 1,030,
+allocated by domain at a uniform ~28% of each domain's pool (largest-remainder, so the
+per-domain counts sum to exactly 200). At the measured 35.7 s per daemon call and two to
+four calls per record, that is **7–13 h**, which is why Task 5's pilot still matters: it
+pins the multiplier, and the 12 h kill threshold is inside the range.
+
+Binders are drawn rather than entries. Drawing entries would be cheaper — one power
+control buys every binder in the entry — but a wrapper's binders fail together, and a
+Wilson interval over clustered trials reads narrower than the evidence supports. The
+report carries `probed_entries` so the residual clustering is visible.
 
 - [ ] **Step 2: While it runs, confirm resumability once**
 

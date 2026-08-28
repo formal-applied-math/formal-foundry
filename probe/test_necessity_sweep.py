@@ -279,3 +279,66 @@ def test_run_metadata_records_an_unknown_commit_rather_than_failing(tmp_path):
     ns.write_run_meta(out, arm="mathfin", corpus_root=str(tmp_path))
     meta = _j.loads(open(out + ".meta.jsonl", encoding="utf-8").read().strip())
     assert meta["corpus_commit"] == "unknown"
+
+
+def _corpus(counts):
+    """One entry per (domain, index), each carrying `counts[domain]` worthy binders is
+    not expressible with real Lean; instead give every entry the single binder `h` of
+    GUARDED and vary how many entries each domain has."""
+    out = []
+    for domain, n in counts.items():
+        for i in range(n):
+            out.append(ns.Entry("mathfin", f"{domain}-{i}", domain,
+                                "gainToPain_nonneg_of_denom_pos", "full", "human",
+                                GUARDED))
+    return out
+
+
+def test_sample_is_deterministic_under_a_seed():
+    E = _corpus({"a": 30, "b": 20})
+    first = ns.stratified_binder_sample(E, 10, seed=20260913)
+    again = ns.stratified_binder_sample(E, 10, seed=20260913)
+    assert [(e.entry_id, b) for e, b in first] == [(e.entry_id, b) for e, b in again]
+
+
+def test_sample_draws_exactly_the_requested_number_of_binders():
+    E = _corpus({"a": 30, "b": 20})
+    got = ns.stratified_binder_sample(E, 17, seed=20260913)
+    assert sum(len(b) for _e, b in got) == 17
+
+
+def test_sample_allocates_across_domains_in_proportion():
+    E = _corpus({"a": 40, "b": 10})          # 40 binders vs 10, so 4:1
+    got = ns.stratified_binder_sample(E, 20, seed=20260913)
+    per = {}
+    for e, b in got:
+        per[e.domain] = per.get(e.domain, 0) + len(b)
+    assert per == {"a": 16, "b": 4}
+
+
+def test_sample_larger_than_the_population_returns_everything():
+    E = _corpus({"a": 3})
+    got = ns.stratified_binder_sample(E, 999, seed=1)
+    assert sum(len(b) for _e, b in got) == 3
+
+
+def test_sweep_entry_probes_only_the_binders_it_was_given():
+    check_fn, prove_fn = _fakes({"h"})
+    e = ns.Entry("mathfin", "e1", "d", "gainToPain_nonneg_of_denom_pos", "full",
+                 "human", GUARDED)
+    recs = ns.sweep_entry(e, check_fn=check_fn, prove_fn=prove_fn,
+                          regate_fn=lambda c: {"passed": True}, binders=[])
+    assert [r["verdict"] for r in recs] == ["power_control"]
+
+
+def test_run_sweep_restricts_to_the_sampled_binders(tmp_path):
+    import json as _j
+    check_fn, prove_fn = _fakes({"h"})
+    e = ns.Entry("mathfin", "e1", "d", "gainToPain_nonneg_of_denom_pos", "full",
+                 "human", GUARDED)
+    out = str(tmp_path / "out.jsonl")
+    ns.run_sweep([e], out, check_fn=check_fn, prove_fn=prove_fn,
+                 regate_fn=lambda c: {"passed": True}, binders_for={"e1": []},
+                 log=lambda m: None)
+    recs = [_j.loads(l) for l in open(out, encoding="utf-8")]
+    assert [r["verdict"] for r in recs] == ["power_control"]
