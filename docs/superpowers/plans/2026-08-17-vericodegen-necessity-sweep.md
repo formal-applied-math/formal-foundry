@@ -60,7 +60,7 @@ Edit `/mnt/c/Users/rapha/.wslconfig`: `memory=10GB` -> `memory=12GB` (Windows ke
 Edit `formal-mathfin/docker/docker-compose.yml`, `lean-repl` service: `mem_limit: 6g` -> `8g`.
 Then, from Windows: `wsl --shutdown`, reopen the shell, and restart the daemon.
 
-- [ ] **Step 2: Verify the REPL now survives**
+- [x] **Step 2: Verify the REPL now survives**
 
 ```bash
 cd probe && python3 -c "
@@ -76,7 +76,7 @@ docker logs --tail 20 docker-lean-repl-1 2>&1 | grep -c "respawned"
 **Pass:** calls 2-5 land in the 5-30 s band and the respawn count is 0. **Fail:** any respawn,
 or a median above 30 s.
 
-- [ ] **Step 3: Record the outcome and pick the population accordingly**
+- [x] **Step 3: Record the outcome and pick the population accordingly**
 
 Write `runs/necessity-sweep/daemon-stability.md` with the before/after timings and the
 respawn count.
@@ -90,7 +90,7 @@ respawn count.
   defensible claim anyway. Sample proportionally by domain, seed `20260913`, and report
   the seed and the per-domain draw.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add runs/necessity-sweep/daemon-stability.md

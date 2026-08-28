@@ -47,15 +47,68 @@ and the second 56.5 s — the second being much cheaper is the first sign that t
 environment *can* persist across calls, which the plan's ten-day-old table (110 s / 70 s /
 258 s) never showed. Suggestive, not decisive: two calls, one of them during a teardown.
 
-## Still open
+## Attempt 2, 2026-08-28 00:20–00:35 UTC — CLEAN, and it decides the population
 
-Re-measure once the slot is free and the daemon is back, five clean consecutive calls, and
-only then apply Task 0 Step 3's decision rule:
+Container recreated (`docker compose up -d lean-repl`) after the build vacated the slot,
+then `wait_daemon.py` to READY, then the same six calls with nothing else on the box.
+Ceiling still unchanged: `memory=10GB`, `mem_limit: 6g`.
 
-- **median ≤ 30 s** → full census, Tasks 6 and 7 as written;
-- **otherwise, or if R declines the memory raise** → stratified random sample, seed
-  `20260913`, proportional by domain, every rate carrying a Wilson interval.
+| call | wall-clock | errors |
+|---|---|---|
+| `example : 2+2 = 4 := by rfl` (no import) | 1.9 s | 0 |
+| `import MathFin` #1 | 10.8 s | 0 |
+| `import MathFin` #2 | 55.2 s | 2 |
+| `import MathFin` #3 | 35.7 s | 0 |
+| `import MathFin` #4 | 81.5 s | 0 |
+| `import MathFin` #5 | 32.7 s | 0 |
 
-The ceiling itself is untouched and still needs R if the re-measure says it does:
-`/mnt/c/Users/rapha/.wslconfig` `memory=10GB` → `12GB`, `docker-compose.yml` `lean-repl`
-`mem_limit: 6g` → `8g`, then `wsl --shutdown` from Windows.
+Median 35.7 s, mean 43.2 s. Respawns during the run: **2**.
+
+**Step 2's bar, and the verdict against it.** The bar was *calls 2–5 in the 5–30 s band and
+zero respawns*. Calls 2–5 are 55.2 / 35.7 / 81.5 / 32.7 — none of them in the band, median
+45.5 s — and there were two respawns. **Fails both halves.**
+
+**But it is four times better than the plan's table**, which recorded 110 / 70 / 258 s at a
+~150 s median ten days ago. Nothing about the memory ceiling changed between those two
+measurements; what changed is that this container is *freshly created*, against a warm
+shared olean volume. Container age is a variable the plan did not have, and it is worth
+more than the diagnosis credited. It does not rescue the census, though: two respawns in
+five calls is still the diagnosed failure — the REPL dying and the next call re-paying the
+import — merely less often. The two slowest calls (55.2 s, 81.5 s) are almost certainly the
+two respawns, and call #2's two errors are what a reply looks like when the server dies
+underneath it.
+
+**Cost of the census at this latency.** The MathFin arm is 1,030 records. At the measured
+35.7 s *per daemon call*, and each record costing between one and eight calls (the sweep
+stops at the first tactic that closes), the census runs **10 h at the impossible floor of
+one call per record, and 30 h at three** — against the plan's own 12-hour kill threshold.
+Task 5's pilot would pin the real multiplier, but no plausible value rescues it.
+
+## Decision: stratified random sample
+
+Task 0 Step 3's rule was fixed before the data existed, and it fires cleanly — *not stable
+(median > 30 s, respawns > 0) → sample rather than census*:
+
+- **MathFin arm**: proportional stratified draw of 200 binders, seed `20260913`, drawn by
+  domain, the seed and the per-domain draw both reported.
+- **Every rate carries a Wilson confidence interval**, and the paper says it sampled.
+
+The plan already argued this is the better claim on its merits — a rate with an interval,
+rather than a point estimate from one library's census — so the instrument's limits and the
+methodology point the same way here.
+
+**The ceiling remains untouched and the decision remains reversible.** If R raises
+`/mnt/c/Users/rapha/.wslconfig` `memory=10GB` → `12GB` and `docker-compose.yml` `lean-repl`
+`mem_limit: 6g` → `8g` and restarts WSL, a third measurement could clear the 30 s bar and
+put the census back on the table. Nothing built for the sample is wasted if it does: a
+census is the sample with the draw removed.
+
+## The slot is the binding constraint, not the memory
+
+Both attempts were shaped by a sibling session in `formal-mathfin` taking the Lean slot —
+it removed the daemon at 23:44, built at 23:46, and took it again at 00:41 for
+`lake build MathFin MathFin.Blueprint blueprint_export && lake lint`. Attempt 2 fitted
+between two builds. A 200-binder sample at this latency is still hours, so it *will* be
+interrupted; `scripts/necessity-sweep.sh` refuses to start into a held slot, and the
+resume path (append-only JSONL, fsync per entry, `done_keys`) is what makes the
+interruption cost one entry. Plan the arm around losing the daemon, not around keeping it.
