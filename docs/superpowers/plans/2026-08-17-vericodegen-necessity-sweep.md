@@ -787,6 +787,34 @@ git add probe/necessity_sweep.py probe/test_necessity_sweep.py scripts/necessity
 git commit -m "feat(sweep): resumable JSONL output + CLI, refusing to fight the build for the Lean slot"
 ```
 
+- [x] **Step 7 (added during execution): fill the sweep's `{defs}`/`{unfold}` slots**
+
+Step 3 above wires `prove_fn = tactic_sweep_prover(daemon_check)`. Passed no `def_names`,
+`tactic_sweep_prover` **skips every tactic carrying a `{defs}` or `{unfold}` slot** — six
+of the eight — so the shipped instrument is `positivity` + `grind`, not the 8-tactic
+sweep spec §2 describes. That is not a small loss: all 331 `full` entries import a
+MathFin module, and `strengthen.py`'s own trace records that on #161 bare `positivity`
+FAILS where `unfold gainToPain; positivity` closes. The power control would have failed
+almost everywhere and the rate's denominator collapsed — the paper would have measured
+its own wiring. R's decision 2026-08-27: derive the defs per entry.
+
+`module_defs(code, mathfin_root)` reads each `import MathFin.X.Y` from the entry, collects
+that module's own `def`/`abbrev` names, and keeps the ones the statement actually names —
+splicing an unnamed def into `unfold` only makes the tactic fail to elaborate. Missing
+modules are skipped, not raised on. `run_sweep` grew a `prove_for(entry) -> prove_fn`
+factory beside `prove_fn`, since the defs differ entry to entry, and `main` passes
+`--mathfin-root` (default `../../formal-mathfin`).
+
+**Measured coverage:** 175 of 331 `full` entries (53%) name at least one definition from
+their own imported module and so get all eight tactics; the remaining 156 name none —
+their statements are about Mathlib entities or `structure`s, where `unfold` has nothing
+to unfold and two tactics is the honest instrument. Report this split beside the blind
+fraction: a theorem swept with two tactics and one swept with eight are not equally
+looked at, and the paper must not average them silently.
+
+Test count after this step: 22 in `test_necessity_sweep.py` (the plan's later steps
+quote 17 and 19, both written before this step existed).
+
 ---
 
 ### Task 5: Latency measurement and the go/no-go on the Mathlib arm

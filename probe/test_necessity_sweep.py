@@ -187,3 +187,68 @@ def test_run_sweep_skips_entries_already_recorded(tmp_path):
                           regate_fn=lambda c: {"passed": True}, log=lambda m: None)
     assert first["entries"] == 1 and first["skipped"] == 0
     assert second["entries"] == 0 and second["skipped"] == 1
+
+
+MODULE_SRC = '''import Mathlib
+
+namespace MathFin
+
+/-- doc -/
+noncomputable def gainToPain {ι : Type*} (s : Finset ι) (r : ι → ℝ) : ℝ :=
+  (∑ i ∈ s, posPart (r i)) / (∑ i ∈ s, negPart (r i))
+
+abbrev painIndex (x : ℝ) : ℝ := -x
+
+theorem gainToPain_nonneg {ι : Type*} (s : Finset ι) (r : ι → ℝ) :
+    0 ≤ gainToPain s r := by positivity
+
+end MathFin
+'''
+
+
+def _mathfin_root(tmp_path):
+    d = tmp_path / "MathFin" / "Performance"
+    d.mkdir(parents=True)
+    (d / "RatiosExtended.lean").write_text(MODULE_SRC, encoding="utf-8")
+    return str(tmp_path)
+
+
+def test_module_defs_reads_the_imported_modules_own_definitions(tmp_path):
+    # WRAPPER imports MathFin.Performance.RatiosExtended and names `gainToPain`.
+    assert ns.module_defs(WRAPPER, _mathfin_root(tmp_path)) == ["gainToPain"]
+
+
+def test_module_defs_drops_definitions_the_statement_never_names(tmp_path):
+    # `painIndex` is defined in the same module but absent from the statement;
+    # splicing it into `unfold` would just make every sweep tactic fail to elaborate.
+    assert "painIndex" not in ns.module_defs(WRAPPER, _mathfin_root(tmp_path))
+
+
+def test_module_defs_ignores_mathlib_imports_and_missing_modules(tmp_path):
+    code = "import Mathlib\nimport MathFin.Nope\n\ntheorem t (n : Nat) : n + 0 = n := by simp\n"
+    assert ns.module_defs(code, _mathfin_root(tmp_path)) == []
+
+
+def test_run_sweep_builds_a_prover_per_entry_when_given_a_factory(tmp_path):
+    check_fn, prove_fn = _fakes({"h"})
+    seen = []
+
+    def prove_for(entry):
+        seen.append(entry.entry_id)
+        return prove_fn
+
+    e = ns.Entry("mathfin", "e1", "d", "gainToPain_nonneg_of_denom_pos", "full",
+                 "human", GUARDED)
+    ns.run_sweep([e], str(tmp_path / "out.jsonl"), check_fn=check_fn,
+                 prove_for=prove_for, regate_fn=lambda c: {"passed": True},
+                 log=lambda m: None)
+    assert seen == ["e1"]
+
+
+def test_run_sweep_refuses_both_a_prover_and_a_factory(tmp_path):
+    import pytest
+    check_fn, prove_fn = _fakes({"h"})
+    with pytest.raises(TypeError):
+        ns.run_sweep([], str(tmp_path / "out.jsonl"), check_fn=check_fn,
+                     prove_fn=prove_fn, prove_for=lambda e: prove_fn,
+                     regate_fn=lambda c: {"passed": True}, log=lambda m: None)
