@@ -4,3 +4,4 @@
 {"target": "cal-bk-56", "arm": "decompose", "outcome": "max_rounds", "ts": "2026-08-23T07:18:32", "leaves_total": 0, "leaves_closed": 0, "tokens": 0, "refinery_minutes": null, "note": ""}
 {"target": "cal-bk-57", "arm": "decompose", "outcome": "error", "ts": "2026-08-25T07:52:28", "leaves_total": 0, "leaves_closed": 0, "tokens": 0, "refinery_minutes": null, "note": ""}
 {"target": "cal-bk-57", "arm": "decompose", "outcome": "max_rounds", "ts": "2026-08-27T18:25:22", "leaves_total": 0, "leaves_closed": 0, "tokens": 0, "refinery_minutes": null, "note": ""}
+{"target": "cal-bk-69", "arm": "decompose", "outcome": "max_rounds", "ts": "2026-08-31T14:03:08", "leaves_total": 0, "leaves_closed": 0, "tokens": 0, "refinery_minutes": null, "note": ""}
