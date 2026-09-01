@@ -12,7 +12,7 @@ import glob as _glob
 import json
 
 __all__ = ["rates", "refined_defects", "render_report", "load_records",
-           "wilson"]
+           "wilson", "domain_area"]
 
 
 def load_records(path_glob: str) -> list[dict]:
@@ -25,6 +25,15 @@ def load_records(path_glob: str) -> list[dict]:
                 except ValueError:
                     continue
     return out
+
+
+def domain_area(domain: str) -> str:
+    """A module path rolled up to its library area — `MathFin.Foundations.PointwiseBracket`
+    to `MathFin.Foundations`. The library arm spans 150 modules and one row each is not a
+    table anyone reads; 13 areas is. Names without a path (the catalogue arm's domains)
+    pass through unchanged."""
+    parts = domain.split(".")
+    return ".".join(parts[:2]) if len(parts) > 2 else domain
 
 
 def wilson(k: int, n: int, z: float = 1.959963984540054):
@@ -49,16 +58,21 @@ def wilson(k: int, n: int, z: float = 1.959963984540054):
     half = z * ((p * (1 - p) / n + z * z / (4 * n * n)) ** 0.5) / d
     return (max(0.0, centre - half), min(1.0, centre + half))
 
-def rates(records) -> dict:
+
+def rates(records, group_by=None) -> dict:
     """Keyed by (arm, domain, status). `rate` is None when nothing was probed —
-    distinct from 0.0, which means probed and nothing found."""
+    distinct from 0.0, which means probed and nothing found.
+
+    `group_by` maps a record's domain to the key it is reported under; pass
+    `domain_area` to roll the library arm's modules up into readable areas."""
     reachable: dict[tuple, set] = collections.defaultdict(set)
     blind: dict[tuple, set] = collections.defaultdict(set)
     probed: collections.Counter = collections.Counter()
     certified: collections.Counter = collections.Counter()
     probed_entries: dict[tuple, set] = collections.defaultdict(set)
+    key_of = group_by or (lambda d: d)
     for r in records:
-        key = (r["arm"], r["domain"], r["status"])
+        key = (r["arm"], key_of(r["domain"]), r["status"])
         if r["verdict"] == "power_control":
             (reachable if r["sweep_proves_original"] else blind)[key].add(r["entry_id"])
             continue

@@ -662,3 +662,17 @@ def test_context_keeps_source_order_around_the_namespace(tmp_path):
     code = {e.thm: e for e in ns.load_library_entries(str(tmp_path))}[
         "one" + ns.PROBE_SUFFIX].code
     assert code.index("namespace MathFin") < code.index("variable {ι : Type*}")
+
+
+def test_library_loader_stays_inside_the_package(tmp_path):
+    """A checkout holds more Lean than the library: vendored upstream sources, exercise
+    files, tests. Their modules do not resolve as imports and they are not the library
+    under study, so a rate over them would be a rate over the wrong thing."""
+    (tmp_path / "MathFin").mkdir()
+    (tmp_path / "MathFin" / "A.lean").write_text(
+        "theorem mine (h : True) : 0 ≤ 1 := by norm_num\n", encoding="utf-8")
+    (tmp_path / "upstream").mkdir()
+    (tmp_path / "upstream" / "B.lean").write_text(
+        "theorem theirs (h : True) : 0 ≤ 1 := by norm_num\n", encoding="utf-8")
+    got = ns.load_library_entries(str(tmp_path))
+    assert [e.domain for e in got] == ["MathFin.A"]

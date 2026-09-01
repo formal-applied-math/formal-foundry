@@ -179,7 +179,8 @@ def _context_at(src: str, pos: int) -> tuple[list[str], list[str]]:
     return [text for _p, text in sorted(items)], stack
 
 
-def load_library_entries(root: str, max_proof_lines: int = 10) -> list[Entry]:
+def load_library_entries(root: str, max_proof_lines: int = 10,
+                         package: str = "MathFin") -> list[Entry]:
     """Theorem declarations from a Lean library's own sources, each wrapped as a probe.
 
     **Why the library and not the catalogue.** Measured 2026-09-01: 330 of 332 catalogued
@@ -199,8 +200,8 @@ def load_library_entries(root: str, max_proof_lines: int = 10) -> list[Entry]:
     and Lean will not take the name twice. Renaming cannot let the sweep cheat by citing
     the original, since applying it would need the very hypothesis the probe dropped.
 
-`root` is the directory *containing* the package directory — the checkout root, not
-    `.../MathFin` — since the module name is the path relative to it.
+`root` is the directory *containing* `package` — the checkout root, not `.../MathFin` —
+    since the module name is the path relative to it. Only `package` is walked.
 
     `status` carries the proof shape — `term`, `tactic_short` (<= `max_proof_lines`),
     `tactic_long` — because the sweep's power varies sharply with it and the report
@@ -208,7 +209,10 @@ def load_library_entries(root: str, max_proof_lines: int = 10) -> list[Entry]:
     """
     import os
     out: list[Entry] = []
-    for dirpath, _dirs, files in os.walk(root):
+    # Only the package: a checkout also holds vendored upstream sources, exercise files
+    # and tests, whose modules do not resolve as imports and which are not the library
+    # under study.
+    for dirpath, _dirs, files in os.walk(os.path.join(root, package)):
         for fn in sorted(files):
             if not fn.endswith(".lean"):
                 continue

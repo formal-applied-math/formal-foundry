@@ -101,3 +101,27 @@ def test_short_circuited_binders_are_in_no_denominator():
     ]
     r = sr.rates(recs)[("mathfin", "d", "full")]
     assert r["probed"] == 0 and r["rate"] is None and r["blind_entries"] == 1
+
+
+def test_domain_area_rolls_a_module_path_up_to_its_library_area():
+    assert sr.domain_area("MathFin.Foundations.PointwiseBracket") == "MathFin.Foundations"
+    assert sr.domain_area("MathFin.Basic") == "MathFin.Basic"
+    assert sr.domain_area("mathematical_finance") == "mathematical_finance"
+
+
+def test_rates_can_group_domains_so_the_table_is_readable():
+    """The library arm spans 150 modules. One row each is not a table anyone reads."""
+    recs = [
+        _rec(entry_id="a", domain="MathFin.Foundations.X", verdict="power_control",
+             binder=None),
+        _rec(entry_id="a", domain="MathFin.Foundations.X",
+             verdict="certified_unnecessary"),
+        _rec(entry_id="b", domain="MathFin.Foundations.Y", verdict="power_control",
+             binder=None),
+        _rec(entry_id="b", domain="MathFin.Foundations.Y",
+             verdict="not_shown_unnecessary"),
+    ]
+    r = sr.rates(recs, group_by=sr.domain_area)
+    assert list(r) == [("mathfin", "MathFin.Foundations", "full")]
+    assert r[("mathfin", "MathFin.Foundations", "full")]["probed"] == 2
+    assert r[("mathfin", "MathFin.Foundations", "full")]["certified"] == 1
