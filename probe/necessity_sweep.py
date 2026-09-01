@@ -19,7 +19,7 @@ from dataclasses import dataclass
 __all__ = ["PRIMARY_DECL", "Entry", "primary_decl", "probe_worthy_binders",
            "load_mathfin_entries", "sweep_can_prove", "sweep_entry", "done_keys",
            "module_defs", "MATHFIN_IMPORT", "MODULE_DEF", "write_run_meta",
-           "stratified_binder_sample",
+           "stratified_binder_sample", "batched_sweep_prover",
            "run_sweep", "main"]
 
 PRIMARY_DECL = re.compile(
@@ -84,6 +84,8 @@ def probe_worthy_binders(code: str, thm: str) -> list[str]:
                 out.append(nm)
     return out
 
+
+_SWEEP_SORRY = re.compile(r"\bsorry\b")
 
 MATHFIN_IMPORT = re.compile(r"^import\s+(MathFin(?:\.[A-Za-z0-9_']+)*)\s*$", re.M)
 MODULE_DEF = re.compile(
@@ -254,6 +256,50 @@ def sweep_entry(entry: "Entry", *, check_fn, prove_fn, regate_fn,
     return out
 
 
+def batched_sweep_prover(check_fn, def_names=(), tactics=None):
+    """The whole sweep in ONE daemon call, then a per-tactic pass only on a hit.
+
+    Same verdict as `strengthen.tactic_sweep_prover`, measured ~6x cheaper. On this
+    corpus a daemon call costs 35.7 s of which 33.8 s is the `import MathFin` — the same
+    import, eight times, to do a few seconds of tactic work. Lean's
+    `first | t1 | t2 | ...` tries alternatives in order inside a single elaboration,
+    which is precisely the sweep's semantics, for one import.
+
+    Two details it would be wrong to skip:
+
+    * **Every alternative is guarded with `done`.** `first` commits to the first
+      alternative that does not throw, and a tactic can succeed while leaving goals
+      open. Unguarded, such a tactic would end the sweep with an unproved goal and be
+      recorded as a failure where the per-call version would have tried the next slot.
+      `(tac; done)` makes closing the goal the condition for winning.
+    * **A hit is re-run per tactic.** The batched probe proves that *something* closes
+      the goal, not what; the record has to name the slot, and the merged proof should
+      be `positivity`, not a `first` chain. Positives are rare, so this pass costs
+      almost nothing in aggregate while keeping the artifact honest.
+
+    Fails open like everything else here: daemon trouble returns the probe untouched.
+    """
+    from strengthen import SWEEP_TACTICS, tactic_sweep_prover
+    if tactics is None:
+        tactics = SWEEP_TACTICS
+    defs = ", ".join(def_names)
+    unfold = " ".join(def_names)
+    live = [t for t in tactics
+            if not (("{defs}" in t and not defs) or ("{unfold}" in t and not unfold))]
+
+    def prove(probe: str) -> dict:
+        if not live:
+            return {"lean_text": probe, "tokens": 0}
+        alts = " ".join(f"| ({t.format(defs=defs, unfold=unfold)}; done)" for t in live)
+        attempt = _SWEEP_SORRY.sub("first " + alts, probe, count=1)
+        res = check_fn(attempt)
+        if res.get("error") or res.get("errors") or res.get("sorry_count", 0):
+            return {"lean_text": probe, "tokens": 0}
+        # Something closed it. Find out what, so the record can name the slot.
+        return tactic_sweep_prover(check_fn, def_names, tactics)(probe)
+
+    return prove
+
 def stratified_binder_sample(entries, n: int, seed: int):
     """Draw `n` probe-worthy binders, allocated across domains in proportion to how many
     each holds, and return `[(entry, [binder, ...]), ...]` in corpus order.
@@ -405,6 +451,10 @@ def main(argv=None) -> int:
     ap.add_argument("--status", default="full",
                     help="only sweep entries with this formalization_status; 'all' for every one")
     ap.add_argument("--limit", type=int, default=0, help="stop after N entries (0 = all)")
+    ap.add_argument("--batched", action="store_true",
+                    help="run the whole tactic sweep in one daemon call via Lean's "
+                         "`first`, re-running per tactic only on a hit (~6x cheaper; "
+                         "same verdict)")
     ap.add_argument("--sample", type=int, default=0,
                     help="draw this many binders, stratified by domain (0 = census). "
                          "The census was ruled out on measured latency; see "
@@ -438,8 +488,10 @@ def main(argv=None) -> int:
         # Per entry, not once: the sweep's {defs}/{unfold} slots take THIS entry's
         # imported definitions. Passed nothing, tactic_sweep_prover skips six of its
         # eight tactics and the instrument silently becomes `positivity` + `grind`.
-        return tactic_sweep_prover(daemon_check,
-                                   module_defs(entry.code, args.mathfin_root))
+        defs = module_defs(entry.code, args.mathfin_root)
+        if args.batched:
+            return batched_sweep_prover(daemon_check, defs)
+        return tactic_sweep_prover(daemon_check, defs)
 
     def regate_fn(code):
         res = daemon_check(code)
@@ -451,6 +503,7 @@ def main(argv=None) -> int:
                    extra={"status": args.status, "limit": args.limit,
                           "bench": args.bench, "entries_selected": len(entries),
                           "sample": args.sample, "seed": args.seed,
+                          "batched": args.batched,
                           "binders_drawn": None if binders_for is None
                           else sum(len(b) for b in binders_for.values())})
     stats = run_sweep(entries, args.out, check_fn=daemon_check, prove_for=prove_for,

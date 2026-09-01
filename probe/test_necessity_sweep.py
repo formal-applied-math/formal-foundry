@@ -415,3 +415,62 @@ def test_a_reachable_entry_still_probes_every_binder():
     recs = ns.sweep_entry(e, check_fn=check_fn, prove_fn=prove_fn,
                           regate_fn=lambda c: {"passed": True})
     assert [r["verdict"] for r in recs if r["binder"]] == ["certified_unnecessary"]
+
+
+PROBE = "import MathFin\n\ntheorem t (h : True) : 0 ≤ 1 := by sorry\n"
+
+
+def test_batched_prover_spends_one_call_when_nothing_closes():
+    calls = []
+
+    def check_fn(code):
+        calls.append(code)
+        return {"errors": ["unsolved goals"], "sorry_count": 0}
+
+    prove = ns.batched_sweep_prover(check_fn, ("gainToPain",))
+    got = prove(PROBE)
+    assert len(calls) == 1                       # not eight
+    assert got["lean_text"] == PROBE             # unchanged == not closed
+
+
+def test_batched_prover_guards_every_alternative_with_done():
+    """Without `done` a tactic that succeeds while leaving goals open would commit
+    `first` to itself, and the sweep would report a failure where the per-tactic
+    version would have moved on."""
+    calls = []
+
+    def check_fn(code):
+        calls.append(code)
+        return {"errors": ["nope"], "sorry_count": 0}
+
+    ns.batched_sweep_prover(check_fn, ("gainToPain",))(PROBE)
+    sent = calls[0]
+    assert "first" in sent
+    assert sent.count("; done)") >= 6            # one per live tactic slot
+    assert "sorry" not in sent
+
+
+def test_batched_prover_hands_back_a_single_tactic_proof_not_the_first_chain():
+    """A positive must carry the tactic that actually did the work — the paper reports
+    which sweep slot closed it, and a `first | ...` chain in the proof is not that."""
+    seen = []
+
+    def check_fn(code):
+        seen.append(code)
+        if "first" in code:
+            return {"errors": [], "sorry_count": 0}       # the batched probe closes
+        # the identifying pass: only `grind` works
+        ok = code.rstrip().endswith("grind")
+        return {"errors": [] if ok else ["no"], "sorry_count": 0}
+
+    got = ns.batched_sweep_prover(check_fn, ())(PROBE)
+    assert "first" not in got["lean_text"]
+    assert got["lean_text"].rstrip().endswith("grind")
+
+
+def test_batched_prover_fails_open_on_daemon_trouble():
+    def check_fn(code):
+        return {"error": "connection refused", "errors": ["connection refused"]}
+
+    got = ns.batched_sweep_prover(check_fn, ("gainToPain",))(PROBE)
+    assert got["lean_text"] == PROBE
