@@ -676,3 +676,25 @@ def test_library_loader_stays_inside_the_package(tmp_path):
         "theorem theirs (h : True) : 0 ≤ 1 := by norm_num\n", encoding="utf-8")
     got = ns.load_library_entries(str(tmp_path))
     assert [e.domain for e in got] == ["MathFin.A"]
+
+
+def test_a_batched_timeout_falls_back_instead_of_becoming_a_negative():
+    """The daemon kills the REPL at LEAN_ELAB_TIMEOUT (180 s), and batching concentrates
+    eight tactics into one elaboration, so it runs into that cap on exactly the hard
+    theorems. Treating the kill as "nothing closed it" would manufacture false negatives
+    that no all-negative A/B could ever detect."""
+    seen = []
+
+    def check_fn(code):
+        seen.append(code)
+        if "first" in code:
+            return {"error": "elaboration timed out after 180.0s (REPL killed)",
+                    "errors": ["elaboration timed out"]}
+        # per tactic, `positivity` closes it
+        ok = code.rstrip().endswith("positivity")
+        return {"errors": [] if ok else ["no"], "sorry_count": 0}
+
+    got = ns.batched_sweep_prover(check_fn, ())(PROBE)
+    assert len(seen) > 1, "a timed-out batch must fall back, not conclude"
+    assert "sorry" not in got["lean_text"]
+    assert got["lean_text"].rstrip().endswith("positivity")

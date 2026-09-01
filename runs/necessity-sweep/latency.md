@@ -36,8 +36,24 @@ Same three entries, both provers:
 | `dist-exp-min` | 334 s | 193 s |
 | **median** | **306.4 s** | **192.8 s** |
 
-**Verdicts moved: 0 of 7 records.** Batching is verdict-preserving on this sample, which
-is the only thing that licenses using it for the paper's instrument.
+**Verdicts moved: 0 of 7 records** — and **this does not validate batching.** Retracted
+2026-09-01, same session. All three entries were blind, so every compared record was a
+negative, and in a negative a timeout and a genuine "no tactic closes it" are
+indistinguishable. The comparison structurally cannot see the one failure mode batching
+introduces.
+
+That failure mode is real and was already happening. The daemon carries a server-side
+`LEAN_ELAB_TIMEOUT` of 180 s that **kills the REPL** on overrun, and a batch is eight
+tactics deep in a single elaboration. Two of the three batched power controls above —
+200.9 s and 192.8 s — were killed at 180 s, not completed. The container log has 20 such
+kills. So the 1.6× was measuring truncation, not efficiency, and a tactic that *would*
+have closed a goal inside a batch would be recorded as not closing it.
+
+`batched_sweep_prover` now falls back to the per-tactic sweep when the daemon reports an
+error, so a kill is a missing measurement rather than a negative. The default stays
+per-tactic: each tactic gets the 180 s budget to itself, which is what the cap is sized
+for. A real validation needs an A/B over a sample containing **positives**, which the
+catalogue arm could never supply.
 
 Speedup is **1.6×**, not the 5.8× the import arithmetic predicted — and that is the more
 interesting number. If the import were the whole cost, batching would have collapsed it;

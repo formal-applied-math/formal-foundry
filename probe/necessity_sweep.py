@@ -417,7 +417,9 @@ def batched_sweep_prover(check_fn, def_names=(), tactics=None):
       be `positivity`, not a `first` chain. Positives are rare, so this pass costs
       almost nothing in aggregate while keeping the artifact honest.
 
-    Fails open like everything else here: daemon trouble returns the probe untouched.
+    Fails open like everything else here — but note *how*: a batch that the daemon kills
+    is not a negative, it is a missing measurement, and it falls back to the per-tactic
+    sweep rather than being recorded as "nothing closed it".
     """
     from strengthen import SWEEP_TACTICS, tactic_sweep_prover
     if tactics is None:
@@ -433,7 +435,15 @@ def batched_sweep_prover(check_fn, def_names=(), tactics=None):
         alts = " ".join(f"| ({t.format(defs=defs, unfold=unfold)}; done)" for t in live)
         attempt = _SWEEP_SORRY.sub("first " + alts, probe, count=1)
         res = check_fn(attempt)
-        if res.get("error") or res.get("errors") or res.get("sorry_count", 0):
+        if res.get("error"):
+            # The daemon kills the REPL at LEAN_ELAB_TIMEOUT (180 s by default) and a
+            # batch is eight tactics deep in ONE elaboration, so it meets that cap on
+            # precisely the hard theorems. A kill is not evidence that nothing closes
+            # the goal — read as one it would manufacture false negatives, and an
+            # all-negative A/B cannot detect them. Pay for the per-tactic sweep, where
+            # each tactic gets the budget to itself.
+            return tactic_sweep_prover(check_fn, def_names, tactics)(probe)
+        if res.get("errors") or res.get("sorry_count", 0):
             return {"lean_text": probe, "tokens": 0}
         # Something closed it. Find out what, so the record can name the slot.
         return tactic_sweep_prover(check_fn, def_names, tactics)(probe)
