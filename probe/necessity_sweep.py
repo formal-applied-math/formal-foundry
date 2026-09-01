@@ -17,7 +17,7 @@ import re
 from dataclasses import dataclass
 
 __all__ = ["PRIMARY_DECL", "Entry", "primary_decl", "probe_worthy_binders",
-           "load_mathfin_entries", "sweep_can_prove", "sweep_entry", "done_keys",
+           "load_mathfin_entries", "load_library_entries", "PROBE_SUFFIX", "sweep_can_prove", "sweep_entry", "done_keys",
            "module_defs", "MATHFIN_IMPORT", "MODULE_DEF", "write_run_meta",
            "stratified_binder_sample", "batched_sweep_prover", "daemon_is_alive",
            "run_sweep", "main"]
@@ -146,6 +146,111 @@ def load_mathfin_entries(bench_glob: str) -> list[Entry]:
                              provenance=prov, code=code))
     return out
 
+
+_LIB_DECL = re.compile(
+    r"^(?:@\[[^\]]*\]\s*\n)?(?:private\s+|protected\s+|nonrec\s+)?"
+    r"(?:theorem|lemma)\s+([A-Za-z_][A-Za-z0-9_'.]*)", re.M)
+_LIB_CONTEXT = re.compile(r"^(open\s.*|open\s+scoped\s.*|variable\s.*)$", re.M)
+_LIB_NAMESPACE = re.compile(r"^(namespace|end)\s+([A-Za-z_][A-Za-z0-9_'.]*)\s*$", re.M)
+
+#: appended to a probed declaration's name. The probe imports the module that already
+#: declares it, and Lean will not accept the same name twice in the same namespace.
+PROBE_SUFFIX = "_necessity_probe"
+
+
+def _context_at(src: str, pos: int) -> tuple[list[str], list[str]]:
+    """The context lines in effect at `pos`, **in source order**, and the namespaces
+    still open there.
+
+    Source order matters: a `variable` written inside a namespace must stay inside it,
+    or a binder whose type is namespace-local stops resolving and the probe fails to
+    elaborate for a reason that has nothing to do with the hypothesis under test."""
+    head = src[:pos]
+    items: list[tuple[int, str]] = [(m.start(), m.group(1).rstrip())
+                                    for m in _LIB_CONTEXT.finditer(head)]
+    stack: list[str] = []
+    for m in _LIB_NAMESPACE.finditer(head):
+        if m.group(1) == "namespace":
+            stack.append(m.group(2))
+            items.append((m.start(), f"namespace {m.group(2)}"))
+        elif stack and stack[-1] == m.group(2):
+            stack.pop()
+            items = [it for it in items if it[1] != f"namespace {m.group(2)}"]
+    return [text for _p, text in sorted(items)], stack
+
+
+def load_library_entries(root: str, max_proof_lines: int = 10) -> list[Entry]:
+    """Theorem declarations from a Lean library's own sources, each wrapped as a probe.
+
+    **Why the library and not the catalogue.** Measured 2026-09-01: 330 of 332 catalogued
+    `full` entries are term-mode re-exports — `:= MathFin.brownian_markov_property hXpb hX
+    t₀` — whose real proof lives here. A tactic sweep cannot reprove a research result
+    from scratch, so sweeping the catalogue makes the power control fail on essentially
+    everything and the blind fraction is 100% by construction, measuring the re-export
+    layer rather than the mathematics. The two cases that motivated this whole gate,
+    #161 `gainToPain_nonneg` and #162 `upCapture_smul`, are library lemmas.
+
+    Each entry imports its own module and re-opens the context the declaration was
+    elaborated in — `open`, `open scoped`, `variable`, and the enclosing `namespace`s —
+    without which half these declarations would fail to elaborate for reasons that have
+    nothing to do with hypothesis necessity.
+
+    The declaration is **renamed**: the probe imports the module that already declares it,
+    and Lean will not take the name twice. Renaming cannot let the sweep cheat by citing
+    the original, since applying it would need the very hypothesis the probe dropped.
+
+`root` is the directory *containing* the package directory — the checkout root, not
+    `.../MathFin` — since the module name is the path relative to it.
+
+    `status` carries the proof shape — `term`, `tactic_short` (<= `max_proof_lines`),
+    `tactic_long` — because the sweep's power varies sharply with it and the report
+    stratifies on `status`.
+    """
+    import os
+    out: list[Entry] = []
+    for dirpath, _dirs, files in os.walk(root):
+        for fn in sorted(files):
+            if not fn.endswith(".lean"):
+                continue
+            path = os.path.join(dirpath, fn)
+            rel = os.path.relpath(path, root)
+            module = rel[:-len(".lean")].replace(os.sep, ".")
+            try:
+                with open(path, encoding="utf-8") as f:
+                    src = f.read()
+            except (OSError, UnicodeDecodeError):
+                continue
+            starts = [(m.start(), m.group(1)) for m in _LIB_DECL.finditer(src)]
+            for i, (pos, name) in enumerate(starts):
+                end = starts[i + 1][0] if i + 1 < len(starts) else len(src)
+                body = src[pos:end].rstrip()
+                # a trailing `end <ns>` belongs to the file, not the declaration
+                body = re.sub(r"\n\s*end\s+[A-Za-z_][A-Za-z0-9_'.]*\s*$", "", body)
+                # ... and a trailing docstring or attribute belongs to the NEXT one. A
+                # `/-- ... -/` with no declaration after it is a syntax error, so
+                # leaving it here would break the probe and read as the theorem
+                # failing to elaborate.
+                body = re.sub(r"(?:\n\s*(?:/--.*?-/|@\[[^\]]*\]))+\s*$", "", body,
+                              flags=re.S).rstrip()
+                nlines = len([l for l in body.splitlines() if l.strip()])
+                if ":= by" in body or re.search(r"\bby\b", body):
+                    status = "tactic_short" if nlines <= max_proof_lines else "tactic_long"
+                else:
+                    status = "term"
+                context, stack = _context_at(src, pos)
+                probe_name = name + PROBE_SUFFIX
+                renamed = re.sub(
+                    r"(^|\n)((?:@\[[^\]]*\]\s*\n)?(?:private\s+|protected\s+|nonrec\s+)?"
+                    r"(?:theorem|lemma)\s+)" + re.escape(name) + r"(?![A-Za-z0-9_'.])",
+                    lambda m: m.group(1) + m.group(2) + probe_name, body, count=1)
+                head = [f"import {module}", ""] + context
+                tail = [f"end {ns_}" for ns_ in reversed(stack)]
+                code = "\n".join(head + ["", renamed, ""] + tail) + "\n"
+                out.append(Entry(arm="mathfin-lib", entry_id=f"{module}.{probe_name}",
+                                 domain=module, thm=probe_name, status=status,
+                                 provenance="mathfin-library", code=code))
+    out.sort(key=lambda e: e.entry_id)
+    return out
 
 def _statement_only(code: str, thm: str) -> str | None:
     """`code` with the theorem's proof replaced by `sorry` and NO binder dropped —
@@ -503,11 +608,20 @@ def main(argv=None) -> int:
     from strengthen import tactic_sweep_prover
 
     ap = argparse.ArgumentParser(description="necessity sweep over a Lean corpus")
-    ap.add_argument("--arm", choices=("mathfin", "mathlib"), default="mathfin")
+    ap.add_argument("--arm", choices=("mathfin", "mathfin-lib", "mathlib"),
+                    default="mathfin-lib",
+                    help="'mathfin-lib' sweeps the library's own declarations, where the "
+                         "proofs and the hypotheses actually are; 'mathfin' sweeps the "
+                         "catalogue, which is 99.4%% term-mode re-exports and on which the "
+                         "instrument is blind by construction")
     ap.add_argument("--bench", default="../../formal-mathfin/benchmarks/*.json")
     ap.add_argument("--out", required=True)
-    ap.add_argument("--status", default="full",
-                    help="only sweep entries with this formalization_status; 'all' for every one")
+    ap.add_argument("--status", default="tactic_short",
+                    help="only sweep entries with this status; 'all' for every one. The "
+                         "library arm's statuses are the proof shape: term, tactic_short, "
+                         "tactic_long. The catalogue arm's are formalization_status")
+    ap.add_argument("--max-proof-lines", type=int, default=10,
+                    help="library arm: the tactic_short/tactic_long boundary")
     ap.add_argument("--limit", type=int, default=0,
                     help="stop after N entries (0 = all). NOT a way to pilot: entries "
                          "keep corpus order, so a prefix of a draw is its alphabetically "
@@ -528,7 +642,10 @@ def main(argv=None) -> int:
                          "the sweep's unfold/simp slots")
     args = ap.parse_args(argv)
 
-    entries = load_mathfin_entries(args.bench)
+    if args.arm == "mathfin-lib":
+        entries = load_library_entries(args.mathfin_root, args.max_proof_lines)
+    else:
+        entries = load_mathfin_entries(args.bench)
     if args.status != "all":
         entries = [e for e in entries if e.status == args.status]
     binders_for = None

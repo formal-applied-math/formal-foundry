@@ -546,3 +546,119 @@ def test_a_live_daemon_that_simply_cannot_prove_it_is_blind():
                           regate_fn=lambda c: {"passed": True})
     assert recs[0]["verdict"] == "power_control"
     assert recs[0]["sweep_proves_original"] is False
+
+
+LIB_SRC = '''import Mathlib
+import MathFin.Basic
+
+open MeasureTheory
+open scoped NNReal
+
+namespace MathFin
+
+variable {ι : Type*} (s : Finset ι)
+
+/-- doc -/
+theorem gainToPain_nonneg (r : ι → ℝ) (h : 0 < ∑ i ∈ s, negPart (r i)) :
+    0 ≤ gainToPain s r := by
+  positivity
+
+theorem long_one (r : ι → ℝ) (h : True) : 0 ≤ 1 := by
+  have a := 1
+  have b := 2
+  have c := 3
+  have d := 4
+  have e := 5
+  have f := 6
+  have g := 7
+  have i := 8
+  have j := 9
+  have k := 10
+  norm_num
+
+end MathFin
+'''
+
+
+def _lib(tmp_path):
+    d = tmp_path / "MathFin" / "Performance"
+    d.mkdir(parents=True)
+    (d / "Ratios.lean").write_text(LIB_SRC, encoding="utf-8")
+    return str(tmp_path)
+
+
+def test_library_probe_imports_the_module_and_reopens_its_context(tmp_path):
+    got = {e.thm: e for e in ns.load_library_entries(_lib(tmp_path))}
+    e = got["gainToPain_nonneg" + ns.PROBE_SUFFIX]
+    assert e.code.startswith("import MathFin.Performance.Ratios")
+    assert "open MeasureTheory" in e.code
+    assert "open scoped NNReal" in e.code
+    assert "namespace MathFin" in e.code and e.code.rstrip().endswith("end MathFin")
+    assert "variable {ι : Type*} (s : Finset ι)" in e.code
+    assert e.domain == "MathFin.Performance.Ratios" and e.arm == "mathfin-lib"
+
+
+def test_library_declaration_is_renamed_so_it_cannot_clash_with_the_import(tmp_path):
+    """The probe imports the module that already defines this theorem. Re-declaring the
+    same name inside the same namespace is an error, so the probe carries a fresh one."""
+    e = {x.thm: x for x in ns.load_library_entries(_lib(tmp_path))}[
+        "gainToPain_nonneg" + ns.PROBE_SUFFIX]
+    assert "theorem gainToPain_nonneg " not in e.code
+    assert ns.primary_decl(e.code) == e.thm
+    # the real lemma the paper has to name is recoverable from the probe alias
+    assert e.thm[:-len(ns.PROBE_SUFFIX)] == "gainToPain_nonneg"
+
+
+def test_library_entries_are_stratified_by_proof_shape(tmp_path):
+    got = {x.entry_id: x for x in ns.load_library_entries(_lib(tmp_path))}
+    statuses = {k.rsplit(".", 1)[-1]: v.status for k, v in got.items()}
+    assert statuses["gainToPain_nonneg_necessity_probe"] == "tactic_short"
+    assert statuses["long_one_necessity_probe"] == "tactic_long"
+
+
+def test_library_binders_are_pre_filtered_the_same_way(tmp_path):
+    e = {x.thm: x for x in ns.load_library_entries(_lib(tmp_path))}[
+        "gainToPain_nonneg" + ns.PROBE_SUFFIX]
+    assert ns.probe_worthy_binders(e.code, e.thm) == ["h"]
+
+
+LIB_DOC_SRC = '''import Mathlib
+
+namespace MathFin
+
+variable {ι : Type*}
+
+/-- first -/
+theorem one (h : True) : 0 ≤ 1 := by norm_num
+
+/-- second, and this docstring belongs to `two`, not to `one` -/
+@[simp]
+theorem two (h : True) : 0 ≤ 2 := by norm_num
+
+end MathFin
+'''
+
+
+def test_a_declaration_does_not_swallow_the_next_ones_docstring(tmp_path):
+    """A `/-- ... -/` with no declaration after it is a Lean syntax error, so leaving
+    the next declaration's docstring on the end of this one breaks every probe built
+    from it — and it would look like the theorem failing to elaborate."""
+    d = tmp_path / "MathFin"
+    d.mkdir(parents=True)
+    (d / "A.lean").write_text(LIB_DOC_SRC, encoding="utf-8")
+    got = {e.thm: e for e in ns.load_library_entries(str(tmp_path))}
+    one = got["one" + ns.PROBE_SUFFIX]
+    assert "second" not in one.code
+    assert "@[simp]" not in one.code
+    assert one.code.rstrip().endswith("end MathFin")
+
+
+def test_context_keeps_source_order_around_the_namespace(tmp_path):
+    """`variable` written inside a namespace must stay inside it: hoisted out, a binder
+    whose type is namespace-local stops resolving."""
+    d = tmp_path / "MathFin"
+    d.mkdir(parents=True)
+    (d / "A.lean").write_text(LIB_DOC_SRC, encoding="utf-8")
+    code = {e.thm: e for e in ns.load_library_entries(str(tmp_path))}[
+        "one" + ns.PROBE_SUFFIX].code
+    assert code.index("namespace MathFin") < code.index("variable {ι : Type*}")
