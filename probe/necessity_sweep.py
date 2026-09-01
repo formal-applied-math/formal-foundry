@@ -508,7 +508,11 @@ def main(argv=None) -> int:
     ap.add_argument("--out", required=True)
     ap.add_argument("--status", default="full",
                     help="only sweep entries with this formalization_status; 'all' for every one")
-    ap.add_argument("--limit", type=int, default=0, help="stop after N entries (0 = all)")
+    ap.add_argument("--limit", type=int, default=0,
+                    help="stop after N entries (0 = all). NOT a way to pilot: entries "
+                         "keep corpus order, so a prefix of a draw is its alphabetically "
+                         "first domains, not a sample of it. Pilot with a smaller "
+                         "--sample, which inherits the stratification")
     ap.add_argument("--batched", action="store_true",
                     help="run the whole tactic sweep in one daemon call via Lean's "
                          "`first`, re-running per tactic only on a hit (~6x cheaper; "

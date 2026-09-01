@@ -839,13 +839,23 @@ print(daemon_check('import MathFin\nexample : (2:Nat) + 2 = 4 := by rfl\n'))
 ```
 Expected: a dict with no `error` key and `errors == []`. If it says `Connection refused`, the daemon is not up — do not proceed.
 
-- [ ] **Step 2: Time a 10-entry pilot**
+- [x] **Step 2: Time a 10-entry pilot**
 
-Run:
+**Amended 2026-09-01 — `--limit` does not pilot a draw.** Entries keep corpus order, which
+is alphabetical by benchmark file, so the first 10 entries of the 135-entry draw are 7
+`girsanov_finance`, 2 `continuous_martingales` and 1 `distributions` — and *none* of the
+104 `mathematical_finance` entries that are 77% of it. That is the corpus's hardest
+analysis standing in for its most algebraic domain, which is also where the motivating
+cases (#161, #162 — both closed by `positivity` after an unfold) live. A prefix pilot
+would have overstated the blind fraction and mis-sized the arm.
+
+Pilot with a smaller `--sample` instead: the draw is stratified, so a 15-binder draw is a
+scale model of the 200-binder one.
+
 ```bash
 mkdir -p runs/necessity-sweep
 cd probe && time python3 necessity_sweep.py --arm mathfin \
-  --out ../runs/necessity-sweep/pilot.jsonl --limit 10
+  --out ../runs/necessity-sweep/pilot.jsonl --status full --sample 15 --seed 20260901 --batched
 ```
 
 - [ ] **Step 3: Compute the projections and write them down**
