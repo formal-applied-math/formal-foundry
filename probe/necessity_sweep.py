@@ -180,7 +180,8 @@ def _context_at(src: str, pos: int) -> tuple[list[str], list[str]]:
 
 
 def load_library_entries(root: str, max_proof_lines: int = 10,
-                         package: str = "MathFin") -> list[Entry]:
+                         package: str = "MathFin",
+                         import_root: str | None = "MathFin") -> list[Entry]:
     """Theorem declarations from a Lean library's own sources, each wrapped as a probe.
 
     **Why the library and not the catalogue.** Measured 2026-09-01: 330 of 332 catalogued
@@ -202,6 +203,14 @@ def load_library_entries(root: str, max_proof_lines: int = 10,
 
 `root` is the directory *containing* `package` — the checkout root, not `.../MathFin` —
     since the module name is the path relative to it. Only `package` is walked.
+
+    `import_root` is the single module every probe imports — the library's root, which
+    re-exports the submodules. One shared header is worth a great deal here: the swept
+    declarations span 149 modules, and a distinct header per probe makes the REPL
+    re-elaborate it on nearly every call, so nothing stays warm and a cold import plus a
+    tactic overruns the daemon's 180 s elaboration cap — which kills the REPL and leaves
+    the next call to start cold again. Pass None to import each declaration's own module,
+    which is the more faithful environment but not an affordable one.
 
     `status` carries the proof shape — `term`, `tactic_short` (<= `max_proof_lines`),
     `tactic_long` — because the sweep's power varies sharply with it and the report
@@ -247,7 +256,7 @@ def load_library_entries(root: str, max_proof_lines: int = 10,
                     r"(^|\n)((?:@\[[^\]]*\]\s*\n)?(?:private\s+|protected\s+|nonrec\s+)?"
                     r"(?:theorem|lemma)\s+)" + re.escape(name) + r"(?![A-Za-z0-9_'.])",
                     lambda m: m.group(1) + m.group(2) + probe_name, body, count=1)
-                head = [f"import {module}", ""] + context
+                head = [f"import {import_root or module}", ""] + context
                 tail = [f"end {ns_}" for ns_ in reversed(stack)]
                 code = "\n".join(head + ["", renamed, ""] + tail) + "\n"
                 out.append(Entry(arm="mathfin-lib", entry_id=f"{module}.{probe_name}",

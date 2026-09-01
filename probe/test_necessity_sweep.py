@@ -590,7 +590,7 @@ def _lib(tmp_path):
 def test_library_probe_imports_the_module_and_reopens_its_context(tmp_path):
     got = {e.thm: e for e in ns.load_library_entries(_lib(tmp_path))}
     e = got["gainToPain_nonneg" + ns.PROBE_SUFFIX]
-    assert e.code.startswith("import MathFin.Performance.Ratios")
+    assert e.code.startswith("import MathFin")   # the shared root header
     assert "open MeasureTheory" in e.code
     assert "open scoped NNReal" in e.code
     assert "namespace MathFin" in e.code and e.code.rstrip().endswith("end MathFin")
@@ -698,3 +698,27 @@ def test_a_batched_timeout_falls_back_instead_of_becoming_a_negative():
     assert len(seen) > 1, "a timed-out batch must fall back, not conclude"
     assert "sorry" not in got["lean_text"]
     assert got["lean_text"].rstrip().endswith("positivity")
+
+
+def _lib_file(tmp_path):
+    d = tmp_path / "MathFin" / "Performance"
+    d.mkdir(parents=True)
+    (d / "Ratios.lean").write_text(LIB_SRC, encoding="utf-8")
+    return str(tmp_path)
+
+
+def test_library_probes_share_one_import_header_by_default(tmp_path):
+    """149 distinct headers across the swept declarations means the REPL re-elaborates
+    the header on nearly every probe, nothing stays warm, and a cold import plus a tactic
+    overruns the daemon's 180 s elaboration cap — which kills the REPL and leaves the next
+    call to start cold. The root module re-exports the library precisely so that probes
+    can share one header and reuse a warm environment."""
+    got = ns.load_library_entries(_lib_file(tmp_path))
+    assert {e.code.splitlines()[0] for e in got} == {"import MathFin"}
+    # the precise module is still recorded; it is just not what gets imported
+    assert {e.domain for e in got} == {"MathFin.Performance.Ratios"}
+
+
+def test_the_per_module_import_is_still_reachable(tmp_path):
+    got = ns.load_library_entries(_lib_file(tmp_path), import_root=None)
+    assert {e.code.splitlines()[0] for e in got} == {"import MathFin.Performance.Ratios"}
