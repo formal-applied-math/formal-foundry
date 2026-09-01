@@ -87,3 +87,17 @@ def test_a_sampled_rate_reports_how_many_entries_the_draw_touched():
     ]
     r = sr.rates(recs)[("mathfin", "d", "full")]
     assert r["probed_entries"] == 2
+
+
+def test_short_circuited_binders_are_in_no_denominator():
+    """`power_control_failed` is what a blind entry's binders get when the sweep does
+    not spend calls on them. They are population, not evidence, and must not be probed
+    counts."""
+    recs = [
+        _rec(entry_id="a", verdict="power_control", binder=None,
+             sweep_proves_original=False),
+        _rec(entry_id="a", verdict="power_control_failed",
+             sweep_proves_original=False, elapsed_s=0.0),
+    ]
+    r = sr.rates(recs)[("mathfin", "d", "full")]
+    assert r["probed"] == 0 and r["rate"] is None and r["blind_entries"] == 1

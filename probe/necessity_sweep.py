@@ -183,14 +183,24 @@ def _closing_tactic(probe: str, proved: str) -> str | None:
 
 
 def sweep_entry(entry: "Entry", *, check_fn, prove_fn, regate_fn,
-                binders=None) -> list[dict]:
+                binders=None, skip_blind=True) -> list[dict]:
     """Probe an entry's binders. Returns one record per binder plus exactly one
     `power_control` record. Never raises: infrastructure trouble becomes a
     `daemon_error` record, which is excluded from every rate.
 
     `binders` defaults to every probe-worthy binder — the census. Pass a subset to sweep
     only the binders a sample drew; the power control still runs, since without it the
-    sampled binders' verdicts cannot be read."""
+    sampled binders' verdicts cannot be read.
+
+    `skip_blind` stops the sweep on an entry whose power control failed. Those binders'
+    outcomes are uninterpretable by this study's own design — `sweep_report.rates`
+    discards every record with `sweep_proves_original` false — so probing them buys
+    nothing, and measured on the first pilot entry it costs 7.3 minutes each: a full
+    eight-tactic sweep, every tactic failing, against a theorem the sweep has just
+    demonstrated it cannot prove even with all its hypotheses. The binder still gets a
+    `power_control_failed` record at zero elapsed time, so the population stays fully
+    accounted for and the blind fraction is still countable. Pass False to spend the
+    calls anyway."""
     import time
     from strengthen import necessity_probe
 
@@ -206,6 +216,9 @@ def sweep_entry(entry: "Entry", *, check_fn, prove_fn, regate_fn,
 
     for nm in (probe_worthy_binders(entry.code, entry.thm) if binders is None
                else binders):
+        if skip_blind and not proves_original:
+            out.append(rec(nm, "power_control_failed", proves_original, None, 0.0))
+            continue
         t1 = time.monotonic()
         probe = necessity_probe(entry.code, entry.thm, {nm})
         if probe is None:
@@ -309,7 +322,7 @@ def done_keys(path: str) -> set[tuple[str, str]]:
 
 
 def run_sweep(entries, out_path: str, *, check_fn, regate_fn, prove_fn=None,
-              prove_for=None, binders_for=None, log=print) -> dict:
+              prove_for=None, binders_for=None, skip_blind=True, log=print) -> dict:
     """Sweep `entries`, appending records to `out_path` and skipping entries already
     there. Flushes after every entry so a kill costs one entry, not the run.
 
@@ -335,7 +348,8 @@ def run_sweep(entries, out_path: str, *, check_fn, regate_fn, prove_fn=None,
             recs = sweep_entry(e, check_fn=check_fn, prove_fn=make_prover(e),
                               regate_fn=regate_fn,
                               binders=None if binders_for is None
-                              else binders_for.get(e.entry_id, []))
+                              else binders_for.get(e.entry_id, []),
+                              skip_blind=skip_blind)
             for r in recs:
                 f.write(json.dumps(r, ensure_ascii=False) + "\n")
             f.flush()

@@ -142,11 +142,16 @@ def test_a_red_regate_is_not_a_positive():
 
 
 def test_daemon_trouble_records_an_error_and_never_a_verdict():
+    """The entry has to be REACHABLE for a binder probe to run at all now that a blind
+    entry short-circuits, so the prover closes the untouched original and the daemon
+    fails only on the reduced probe — which is the path this test is about."""
     def check_fn(code):
+        if "(h :" in code:            # nothing dropped: the power control's own probe
+            return {"errors": [], "sorry_count": 1}
         return {"error": "connection refused", "errors": ["connection refused"]}
 
     def prove_fn(probe):
-        return {"lean_text": probe, "tokens": 0}
+        return {"lean_text": probe.replace("sorry", "positivity"), "tokens": 0}
 
     e = ns.Entry("mathfin", "e1", "d", "gainToPain_nonneg_of_denom_pos", "full",
                  "human", GUARDED)
@@ -361,3 +366,52 @@ def test_drawing_then_limiting_is_not_the_same_as_limiting_then_drawing():
     # limiting first cannot reach past the first four entries, whatever the draw says
     assert limit_then_draw == ["a-0", "a-1", "a-2", "a-3"]
     assert draw_then_limit != limit_then_draw
+
+
+def _blind_fakes():
+    """A prover that closes nothing — so the power control fails and the entry is blind."""
+    def check_fn(code):
+        return {"errors": [], "sorry_count": 1 if "sorry" in code else 0}
+
+    def prove_fn(probe):
+        return {"lean_text": probe, "tokens": 0}
+    return check_fn, prove_fn
+
+
+def test_a_blind_entrys_binders_are_recorded_but_never_probed():
+    check_fn, prove_fn = _blind_fakes()
+    probed = []
+
+    def counting_check(code):
+        probed.append(code)
+        return check_fn(code)
+
+    e = ns.Entry("mathfin", "e1", "d", "gainToPain_nonneg_of_denom_pos", "full",
+                 "human", GUARDED)
+    recs = ns.sweep_entry(e, check_fn=counting_check, prove_fn=prove_fn,
+                          regate_fn=lambda c: {"passed": True})
+    binder = [r for r in recs if r["binder"] == "h"][0]
+    # the record exists, so the population is still fully accounted for ...
+    assert binder["verdict"] == "power_control_failed"
+    assert binder["sweep_proves_original"] is False
+    # ... but nothing was spent on it: the free filter never ran
+    assert probed == []
+    assert binder["elapsed_s"] == 0.0
+
+
+def test_the_short_circuit_can_be_turned_off_for_a_census_of_attempts():
+    check_fn, prove_fn = _blind_fakes()
+    e = ns.Entry("mathfin", "e1", "d", "gainToPain_nonneg_of_denom_pos", "full",
+                 "human", GUARDED)
+    recs = ns.sweep_entry(e, check_fn=check_fn, prove_fn=prove_fn,
+                          regate_fn=lambda c: {"passed": True}, skip_blind=False)
+    assert [r["verdict"] for r in recs if r["binder"]] == ["not_shown_unnecessary"]
+
+
+def test_a_reachable_entry_still_probes_every_binder():
+    check_fn, prove_fn = _fakes({"h"})
+    e = ns.Entry("mathfin", "e1", "d", "gainToPain_nonneg_of_denom_pos", "full",
+                 "human", GUARDED)
+    recs = ns.sweep_entry(e, check_fn=check_fn, prove_fn=prove_fn,
+                          regate_fn=lambda c: {"passed": True})
+    assert [r["verdict"] for r in recs if r["binder"]] == ["certified_unnecessary"]
