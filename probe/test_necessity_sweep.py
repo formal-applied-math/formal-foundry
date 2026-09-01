@@ -394,8 +394,11 @@ def test_a_blind_entrys_binders_are_recorded_but_never_probed():
     # the record exists, so the population is still fully accounted for ...
     assert binder["verdict"] == "power_control_failed"
     assert binder["sweep_proves_original"] is False
-    # ... but nothing was spent on it: the free filter never ran
-    assert probed == []
+    # ... but nothing expensive was spent on it: no probe carrying the theorem's
+    # imports was sent. The one call made is the import-free liveness probe, which is
+    # what keeps a dead daemon from being recorded as blindness.
+    assert not [c for c in probed if "import" in c]
+    assert probed == [ns._LIVENESS_PROBE]
     assert binder["elapsed_s"] == 0.0
 
 
@@ -474,3 +477,72 @@ def test_batched_prover_fails_open_on_daemon_trouble():
 
     got = ns.batched_sweep_prover(check_fn, ("gainToPain",))(PROBE)
     assert got["lean_text"] == PROBE
+
+
+def _dead_daemon():
+    def check_fn(code):
+        return {"error": "connection refused", "errors": ["connection refused"]}
+
+    def prove_fn(probe):
+        return {"lean_text": probe, "tokens": 0}
+    return check_fn, prove_fn
+
+
+def test_an_entry_that_only_hit_daemon_errors_is_not_done(tmp_path):
+    """Otherwise an outage is permanent: the entry is recorded, marked done, and never
+    probed again however many times the run is resumed."""
+    import json as _j
+    p = tmp_path / "out.jsonl"
+    p.write_text("\n".join(_j.dumps(r) for r in [
+        {"arm": "mathfin", "entry_id": "good", "verdict": "power_control"},
+        {"arm": "mathfin", "entry_id": "good", "verdict": "not_shown_unnecessary"},
+        {"arm": "mathfin", "entry_id": "lost", "verdict": "power_control"},
+        {"arm": "mathfin", "entry_id": "lost", "verdict": "daemon_error"},
+    ]) + "\n", encoding="utf-8")
+    assert ns.done_keys(str(p)) == {("mathfin", "good")}
+
+
+def test_run_sweep_stops_instead_of_burning_the_queue_on_an_outage(tmp_path):
+    """A dead daemon answers instantly, so without this the run races through every
+    remaining entry writing daemon_error and calls itself finished."""
+    check_fn, prove_fn = _dead_daemon()
+    entries = [ns.Entry("mathfin", f"e{i}", "d", "gainToPain_nonneg_of_denom_pos",
+                        "full", "human", GUARDED) for i in range(50)]
+    stats = ns.run_sweep(entries, str(tmp_path / "out.jsonl"), check_fn=check_fn,
+                         prove_fn=prove_fn, regate_fn=lambda c: {"passed": True},
+                         log=lambda m: None)
+    assert stats["entries"] <= 5           # stopped early, did not consume all 50
+    assert stats["aborted"] == "daemon_unreachable"
+
+
+def test_a_healthy_run_does_not_abort(tmp_path):
+    check_fn, prove_fn = _fakes({"h"})
+    entries = [ns.Entry("mathfin", f"e{i}", "d", "gainToPain_nonneg_of_denom_pos",
+                        "full", "human", GUARDED) for i in range(6)]
+    stats = ns.run_sweep(entries, str(tmp_path / "out.jsonl"), check_fn=check_fn,
+                         prove_fn=prove_fn, regate_fn=lambda c: {"passed": True},
+                         log=lambda m: None)
+    assert stats["entries"] == 6 and stats["aborted"] is None
+
+
+def test_a_dead_daemon_is_not_mistaken_for_a_blind_entry():
+    """The dangerous confusion. A blind entry is data — it is never re-run and it
+    raises the reported blind fraction. A dead daemon must therefore never look like
+    one, or an outage silently becomes the result."""
+    check_fn, prove_fn = _dead_daemon()
+    e = ns.Entry("mathfin", "e1", "d", "gainToPain_nonneg_of_denom_pos", "full",
+                 "human", GUARDED)
+    recs = ns.sweep_entry(e, check_fn=check_fn, prove_fn=prove_fn,
+                          regate_fn=lambda c: {"passed": True})
+    assert {r["verdict"] for r in recs} == {"daemon_error"}
+    assert "power_control" not in {r["verdict"] for r in recs}
+
+
+def test_a_live_daemon_that_simply_cannot_prove_it_is_blind():
+    check_fn, prove_fn = _blind_fakes()      # answers fine, just closes nothing
+    e = ns.Entry("mathfin", "e1", "d", "gainToPain_nonneg_of_denom_pos", "full",
+                 "human", GUARDED)
+    recs = ns.sweep_entry(e, check_fn=check_fn, prove_fn=prove_fn,
+                          regate_fn=lambda c: {"passed": True})
+    assert recs[0]["verdict"] == "power_control"
+    assert recs[0]["sweep_proves_original"] is False

@@ -19,7 +19,7 @@ from dataclasses import dataclass
 __all__ = ["PRIMARY_DECL", "Entry", "primary_decl", "probe_worthy_binders",
            "load_mathfin_entries", "sweep_can_prove", "sweep_entry", "done_keys",
            "module_defs", "MATHFIN_IMPORT", "MODULE_DEF", "write_run_meta",
-           "stratified_binder_sample", "batched_sweep_prover",
+           "stratified_binder_sample", "batched_sweep_prover", "daemon_is_alive",
            "run_sweep", "main"]
 
 PRIMARY_DECL = re.compile(
@@ -86,6 +86,9 @@ def probe_worthy_binders(code: str, thm: str) -> list[str]:
 
 
 _SWEEP_SORRY = re.compile(r"\bsorry\b")
+
+#: consecutive daemon-error entries that mean the daemon is gone rather than flaky
+_DEAD_DAEMON_LIMIT = 3
 
 MATHFIN_IMPORT = re.compile(r"^import\s+(MathFin(?:\.[A-Za-z0-9_']+)*)\s*$", re.M)
 MODULE_DEF = re.compile(
@@ -174,6 +177,26 @@ def sweep_can_prove(code: str, thm: str, *, prove_fn) -> bool:
     return bool(text) and "sorry" not in text
 
 
+#: import-free liveness probe. Measured 1.9 s, against 35.7 s for anything that imports
+#: MathFin — cheap enough to ask after every failed power control.
+_LIVENESS_PROBE = "example : True := by trivial\n"
+
+
+def daemon_is_alive(check_fn) -> bool:
+    """Whether the daemon is answering at all, independent of any theorem.
+
+    Needed because a failed power control is ambiguous: the sweep returns the probe
+    untouched both when it genuinely cannot prove the theorem and when the daemon is
+    gone. Those must not be conflated. A blind entry is *data* — it is never re-run and
+    it raises the reported blind fraction — so an outage read as blindness would quietly
+    become the result, and the arm would finish reporting that the instrument sees
+    nothing."""
+    try:
+        res = check_fn(_LIVENESS_PROBE)
+    except Exception:
+        return False
+    return not (res or {}).get("error")
+
 def _closing_tactic(probe: str, proved: str) -> str | None:
     """The tactic the sweep substituted for `sorry`, recovered by diffing the probe
     against what came back. Recorded so a reader can see which sweep slot did the work."""
@@ -214,6 +237,14 @@ def sweep_entry(entry: "Entry", *, check_fn, prove_fn, regate_fn,
 
     t0 = time.monotonic()
     proves_original = sweep_can_prove(entry.code, entry.thm, prove_fn=prove_fn)
+    if not proves_original and not daemon_is_alive(check_fn):
+        # Not blind — unreachable. Recorded as daemon_error so `done_keys` leaves the
+        # entry unfinished and `run_sweep` can stop rather than consume the queue.
+        out = [rec(None, "daemon_error", False, None, time.monotonic() - t0)]
+        for nm in (probe_worthy_binders(entry.code, entry.thm) if binders is None
+                   else binders):
+            out.append(rec(nm, "daemon_error", False, None, 0.0))
+        return out
     out = [rec(None, "power_control", proves_original, None, time.monotonic() - t0)]
 
     for nm in (probe_worthy_binders(entry.code, entry.thm) if binders is None
@@ -350,10 +381,19 @@ def stratified_binder_sample(entries, n: int, seed: int):
     return out
 
 def done_keys(path: str) -> set[tuple[str, str]]:
-    """`(arm, entry_id)` pairs already present in an output file. A run killed mid-write
-    can leave a truncated final line; that line is dropped rather than raising, so a
-    resume never needs the file repaired by hand."""
-    out: set[tuple[str, str]] = set()
+    """`(arm, entry_id)` pairs already **measured** in an output file.
+
+    A run killed mid-write can leave a truncated final line; that line is dropped rather
+    than raising, so a resume never needs the file repaired by hand.
+
+    An entry that hit a `daemon_error` does NOT count as done. A dead daemon answers
+    instantly, so an outage would otherwise write an error record for every remaining
+    entry in seconds, mark them all finished, and no number of resumes would ever probe
+    them again — the arm would quietly report a rate over whatever it reached before the
+    daemon fell over. Re-running an entry costs one entry; losing it costs the study.
+    """
+    seen: set[tuple[str, str]] = set()
+    spoiled: set[tuple[str, str]] = set()
     try:
         with open(path, encoding="utf-8") as f:
             for line in f:
@@ -361,10 +401,13 @@ def done_keys(path: str) -> set[tuple[str, str]]:
                     d = json.loads(line)
                 except ValueError:
                     continue
-                out.add((d.get("arm", ""), d.get("entry_id", "")))
+                key = (d.get("arm", ""), d.get("entry_id", ""))
+                seen.add(key)
+                if d.get("verdict") == "daemon_error":
+                    spoiled.add(key)
     except FileNotFoundError:
         return set()
-    return out
+    return seen - spoiled
 
 
 def run_sweep(entries, out_path: str, *, check_fn, regate_fn, prove_fn=None,
@@ -385,7 +428,8 @@ def run_sweep(entries, out_path: str, *, check_fn, regate_fn, prove_fn=None,
     make_prover = prove_for if prove_for is not None else (lambda _e: prove_fn)
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     seen = done_keys(out_path)
-    stats = {"entries": 0, "records": 0, "skipped": 0}
+    stats = {"entries": 0, "records": 0, "skipped": 0, "aborted": None}
+    consecutive_dead = 0
     with open(out_path, "a", encoding="utf-8") as f:
         for e in entries:
             if (e.arm, e.entry_id) in seen:
@@ -404,6 +448,20 @@ def run_sweep(entries, out_path: str, *, check_fn, regate_fn, prove_fn=None,
             stats["records"] += len(recs)
             hits = sum(1 for r in recs if r["verdict"] == "certified_unnecessary")
             log(f"[sweep] {e.entry_id}: {len(recs)} records, {hits} certified")
+
+            # A dead daemon refuses instantly, so without this the loop would sprint
+            # through every remaining entry writing errors and call itself finished.
+            # Stop instead and let the operator bring the daemon back: done_keys will
+            # not count these entries, so the resume picks them up.
+            if any(r["verdict"] == "daemon_error" for r in recs):
+                consecutive_dead += 1
+                if consecutive_dead >= _DEAD_DAEMON_LIMIT:
+                    stats["aborted"] = "daemon_unreachable"
+                    log(f"[sweep] aborting: {consecutive_dead} consecutive entries "
+                        f"hit daemon errors — the daemon is gone, not flaky")
+                    break
+            else:
+                consecutive_dead = 0
     return stats
 
 
