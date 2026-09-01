@@ -26,15 +26,43 @@ against a live queue for two months, and the claim of the paper is that **the st
 sound about proofs and silent about statements** — it certifies that *something* was
 proved without certifying that the something was what should have been proved.
 
-We have one crisp instance already: on the four autoformalized theorems merged into
-`formal-mathfin`, **4 of 4 asserted a hypothesis the theorem does not need**
-(`0 < ∑ r⁻` on gain-to-pain nonnegativity; `∑ b ≠ 0` on upside-capture homogeneity).
-Every gate passed them. The elaborator's unused-variable pass does not fire, because both
-proofs genuinely *consume* the guard (`have hden := h.le`, `field_simp [h]`). The
-distinction no gate in the stack draws is **used by this proof** versus **needed by this
-theorem**, and drawing it requires re-proving without the hypothesis.
+We have a crisp instance already: on the four autoformalized theorems merged into
+`formal-mathfin`, **4 of 4 asserted a hypothesis the theorem does not need**, and every
+gate passed them. But the four are not one phenomenon, and collapsing them would put the
+paper's weight on the wrong number. They split cleanly into two defect classes:
 
-Four of four is an anecdote. §2 turns it into a measurement.
+| | theorem | the hypothesis | how the proof treats it | what catches it |
+|---|---|---|---|---|
+| **A** | `payer_swap_value_eq_zero_iff…` (#66) | `hTn : T_n ∈ s` | never referenced | unused-variable warning |
+| **A** | `premium_ge_mean` (#85) | `hσ_eq : σ = √σ2` | never referenced | unused-variable warning |
+| **B** | `gainToPain_nonneg` (#161) | `0 < ∑ r⁻` | consumed, `have hden := h.le` | **nothing — must re-prove** |
+| **B** | `upCapture_smul` (#162) | `∑ b ≠ 0` | consumed, `field_simp [h]` | **nothing — must re-prove** |
+
+Class **A** is caught by a cheap syntactic pass, and the sequence is provable from the
+repository's own history: both were drafted on 2026-07-17 (19:19:00 and 21:49:17, from the
+candidate filenames in `runs/`), and `strengthen_candidate` — the warning-driven pass that
+drops hypotheses the proof never used — landed the same evening at 22:51:44 in `a5fc423`.
+The drafts predate their own remedy by hours. Worth stating plainly *why* they reached
+merge: `probe_lib.lint_violations` implements only `defsWithUnderscore` and `docBlame`, and
+only over definitions — it never inspects theorem binders — so the foundry's own lint gate
+could not have flagged them, and the downstream repository's `lake lint` was the backstop.
+
+Class **B** is the paper's actual claim, and it is n=2. No gate in the standard stack draws
+the distinction it needs — **used by this proof** versus **needed by this theorem** — because
+the proof genuinely consumes the guard, so no warning fires and deleting the binder simply
+breaks the proof. Drawing that distinction requires re-proving without the hypothesis,
+which is the instrument §2 builds.
+
+Two things this framing buys. It survives a reviewer with the artifact in hand: someone who
+opens `runs/pipeline-20260717-191900-cal-bk-66.candidate` sees `hTn` sitting unused in the
+binder list within a minute, and a paper that had folded it into the headline would lose the
+headline to "just run the linter". And it puts the contribution in the right tense — the
+field's standard stack misses class B; we found it in our own output, built the prober, and
+wired it into production (`probe/vibe_prove.py:267` for class A, `:296` for class B). Both
+classes are closed today. The paper reports a gap it has already fixed, which is a stronger
+position than one it merely suffers.
+
+Two of two is an anecdote. §2 turns it into a measurement.
 
 ## 2. The experiment — a certified lower bound on unnecessary hypotheses
 
@@ -129,7 +157,11 @@ the machine's statement — e.g. *"spurious `0 < pain` hypothesis dropped (the d
 guarded a division Lean does not need guarding — x/0 = 0)"* and *"spurious `∑ b ≠ 0`
 hypothesis dropped (mul_div_assoc needs no nonvanishing denominator)"*. This is ground
 truth about what the gate stack passed and a human caught, written at merge time rather
-than reconstructed for the paper. It is n=4, and it is evidence rather than inference.
+than reconstructed for the paper. Five entries carry such a record; four are the merged
+autoform theorems of §1, and those four split two-and-two across its defect classes. The
+`refined` prose is what makes the split checkable — it says "unused hypotheses ... removed"
+for class A and "spurious ... hypothesis dropped" for class B, in the reviewer's own words
+at merge time. It is evidence rather than inference, at n=2 for the claim that needs it.
 
 So the paper measures **two populations, kept separate**: the drafts (pre-review, from
 `runs/*.candidate` and the `refined` records) for what the gates miss, and the shipped
@@ -164,9 +196,12 @@ never attempted, and the difference belongs in the text.
 - **One library, one domain, one curated queue.** Mathematical finance, one author's
   issue backlog. We do not claim the rate generalizes; we claim the *failure mode* does,
   and that the instrument transfers to any Lean development.
-- **n=4 on the machine arm.** Four `refined` records against a 700-binder base rate. We
-  report it as such and refuse a p-value; the honest statement is "four of four, against a
-  residual base rate of X%", and if X is high the finding is *weaker* and we say so.
+- **n=2 on the machine arm, not four.** Four merged autoform theorems each carried an
+  unnecessary hypothesis, but only two are the class no gate catches (§1, class B); the
+  other two are plainly-unused binders a warning-driven pass handles, and the pass that
+  handles them landed hours after those drafts were written. We report two, refuse a
+  p-value, and state it as "two of two, against a residual base rate of X%". If X is high
+  the finding is *weaker* and we say so.
 - **The two populations measure different things** (§2.1) and the paper says so in the
   results section, not only in limitations.
 - **Lower bound, per §2.**
