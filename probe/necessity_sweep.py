@@ -405,9 +405,6 @@ def main(argv=None) -> int:
     entries = load_mathfin_entries(args.bench)
     if args.status != "all":
         entries = [e for e in entries if e.status == args.status]
-    if args.limit:
-        entries = entries[:args.limit]
-
     binders_for = None
     if args.sample:
         drawn = stratified_binder_sample(entries, args.sample, args.seed)
@@ -415,6 +412,13 @@ def main(argv=None) -> int:
         entries = [e for e, _b in drawn]
         print(f"[sweep] sampled {sum(len(b) for _e, b in drawn)} binders across "
               f"{len(entries)} entries, seed {args.seed}")
+
+    # AFTER the draw, not before: --limit is "stop after N entries", so a pilot run
+    # is the real run's first N entries and its per-record cost projects the rest.
+    # Truncating first would instead draw a sample out of a truncated corpus, which
+    # predicts nothing and silently changes the population.
+    if args.limit:
+        entries = entries[:args.limit]
 
     def prove_for(entry):
         # Per entry, not once: the sweep's {defs}/{unfold} slots take THIS entry's

@@ -342,3 +342,22 @@ def test_run_sweep_restricts_to_the_sampled_binders(tmp_path):
                  log=lambda m: None)
     recs = [_j.loads(l) for l in open(out, encoding="utf-8")]
     assert [r["verdict"] for r in recs] == ["power_control"]
+
+
+def test_drawing_then_limiting_is_not_the_same_as_limiting_then_drawing():
+    """A pilot must be the real run's first N entries, or its cost projects nothing.
+
+    `main` applies `--limit` after the draw for this reason: truncating first samples
+    out of a truncated corpus, which is a different population reached by a different
+    allocation, so its per-record cost says nothing about the run it is meant to size.
+    """
+    E = _corpus({"a": 12, "b": 8})
+
+    draw_then_limit = [e.entry_id for e, _b in
+                       ns.stratified_binder_sample(E, 10, seed=20260913)[:4]]
+    limit_then_draw = [e.entry_id for e, _b in
+                       ns.stratified_binder_sample(E[:4], 10, seed=20260913)]
+
+    # limiting first cannot reach past the first four entries, whatever the draw says
+    assert limit_then_draw == ["a-0", "a-1", "a-2", "a-3"]
+    assert draw_then_limit != limit_then_draw
