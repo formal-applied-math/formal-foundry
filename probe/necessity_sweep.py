@@ -181,7 +181,7 @@ def _context_at(src: str, pos: int) -> tuple[list[str], list[str]]:
 
 def load_library_entries(root: str, max_proof_lines: int = 10,
                          package: str = "MathFin",
-                         import_root: str | None = "MathFin") -> list[Entry]:
+                         import_root: str | None = None) -> list[Entry]:
     """Theorem declarations from a Lean library's own sources, each wrapped as a probe.
 
     **Why the library and not the catalogue.** Measured 2026-09-01: 330 of 332 catalogued
@@ -204,13 +204,17 @@ def load_library_entries(root: str, max_proof_lines: int = 10,
 `root` is the directory *containing* `package` — the checkout root, not `.../MathFin` —
     since the module name is the path relative to it. Only `package` is walked.
 
-    `import_root` is the single module every probe imports — the library's root, which
-    re-exports the submodules. One shared header is worth a great deal here: the swept
-    declarations span 149 modules, and a distinct header per probe makes the REPL
-    re-elaborate it on nearly every call, so nothing stays warm and a cold import plus a
-    tactic overruns the daemon's 180 s elaboration cap — which kills the REPL and leaves
-    the next call to start cold again. Pass None to import each declaration's own module,
-    which is the more faithful environment but not an affordable one.
+    `import_root` optionally replaces every probe's import with one shared module — the
+    library's root, which re-exports the submodules. Default None: each declaration
+    imports its own module, which is the faithful environment.
+
+    A shared header was tried and **measured to be worthless** (2026-09-01). The argument
+    for it was that one header lets the REPL keep a warm environment rather than
+    re-elaborating a new one across 149 modules. That premise is false on this box: the
+    REPL respawns on nearly every call, so nothing is ever warm. Measured on a trivial
+    `example : 2+2 = 4 := by rfl` — root 193.8 s cold and 237.0 s on the second call, own
+    module 206.8 s and 186.4 s, three respawns across the four. No shape is cheaper and no
+    second call is warmer. Buying nothing, it loses to the faithful environment.
 
     `status` carries the proof shape — `term`, `tactic_short` (<= `max_proof_lines`),
     `tactic_long` — because the sweep's power varies sharply with it and the report

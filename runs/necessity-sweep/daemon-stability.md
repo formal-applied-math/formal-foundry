@@ -112,3 +112,50 @@ between two builds. A 200-binder sample at this latency is still hours, so it *w
 interrupted; `scripts/necessity-sweep.sh` refuses to start into a held slot, and the
 resume path (append-only JSONL, fsync per entry, `done_keys`) is what makes the
 interruption cost one entry. Plan the arm around losing the daemon, not around keeping it.
+
+
+## Attempt 3, 2026-09-01 23:45 UTC — the ceiling is now the binding constraint
+
+The library arm would not run: one entry in 11 minutes, the container log filling with
+`uncaught exception in the Lean REPL — respawning`. Two import shapes were tried and the
+difference between them measured directly, on a trivial `example : 2+2 = 4 := by rfl`:
+
+| call | wall-clock |
+|---|---|
+| `import MathFin` (root, re-exports the library) | 193.8 s |
+| `import MathFin.BlackScholes.DividendsGreeks` (own module) | 206.8 s |
+| `import MathFin` again — warm? | 237.0 s |
+| own module again — warm? | 186.4 s |
+
+Respawns across those four calls: **3**.
+
+**Two conclusions, both negative.** The import shape does not matter — every shape lands
+at 190–240 s. And *there is no second call*: a repeat of the identical header is no faster
+than the first, because the REPL dies and respawns between them and re-pays the import
+every time. A shared root header had been introduced on the theory that it would keep one
+environment warm across 149 modules; that theory is refuted here and the change is
+reverted, since it bought nothing and the per-module import is the faithful environment.
+
+**What this costs.** Every daemon call is ~200 s, for a theorem-free trivial example. The
+import is the entire bill and it is paid on every call:
+
+| | at ~200 s/call |
+|---|---|
+| one power control (8 tactics) | 0.4 h |
+| the library arm's 343 power controls | **152 h** |
+| a hypothetical one-call-per-binder instrument, 610 binders | **34 h** |
+
+Against a 12 h threshold, **no instrument runs at this ceiling** — not the sweep, not a
+single-call design, not a smaller sample that still answers anything. This is no longer a
+question of how the sweep is built.
+
+**It is Task 0 Step 1, and it needs R.** `/mnt/c/Users/rapha/.wslconfig` `memory=10GB` →
+`12GB`, `docker/docker-compose.yml` `lean-repl` `mem_limit: 6g` → `8g`, then
+`wsl --shutdown` from Windows. The diagnosis has been the same since 2026-08-17 — Mathlib
+plus MathFin resident at ~4–5 GB inside a 6 GiB cap leaves under 2 GB of elaboration
+headroom, so the REPL is OOM-killed and respawns cold — but it was optional while the
+catalogue arm looked affordable. It is not optional now.
+
+For contrast, attempt 2 on a freshly created container measured a 35.7 s median for the
+same call. The instrument does not need the box to be fast; it needs the REPL to survive
+long enough to answer twice in a row.
