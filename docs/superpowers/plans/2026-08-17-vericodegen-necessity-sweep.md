@@ -971,7 +971,11 @@ git commit -m "measure(sweep): the MathFin arm — residual unnecessary-hypothes
 **Interfaces:**
 - Produces: `load_mathlib_entries(root: str, sample: int, seed: int) -> list[Entry]` — theorem declarations extracted from Mathlib sources, each wrapped as a self-contained probe importing only its own module.
 
-**Skip this task entirely if Task 5's decision rule dropped the arm.**
+**SKIPPED — Task 5's decision rule dropped this arm on 2026-09-01.** Measured per-entry
+cost is 192.8 s, so even n=100 is 5.4 h on top of the MathFin arm's 7.2 h, against a rule
+of ≤ 10 h for the arm. Recorded in `runs/necessity-sweep/latency.md` and spec §2.2. The
+code below was never written; leaving it here as the design that would be used if the
+ceiling is later raised and the budget reopens.
 
 - [ ] **Step 1: Write the failing tests**
 

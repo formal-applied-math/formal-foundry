@@ -145,6 +145,20 @@ removable hypotheses is a result people will care about independently of anythin
 Same instrument, same lower-bound semantics, no new machinery. Sampling size is set by the
 measured daemon latency (step 1 of the plan), not chosen in advance.
 
+**Dropped 2026-09-01, on the measured cost it was made conditional on.** The rule was: take
+the largest of {1000, 500, 250, 100} whose projection is ≤ 10 h, else drop the arm. Measured
+per-entry cost after both optimisations is 192.8 s (`runs/necessity-sweep/latency.md`), so
+even n=100 is 5.4 h — and that sits *on top* of the MathFin arm's 7.2 h, on a box that runs
+one Lean process at a time and is shared with an active development session. The extraction
+is also weaker than the arithmetic suggests: `load_mathlib_entries` wraps each declaration
+with an import of its own module but not the surrounding `namespace`/`open` context, so a
+sizable share would fail to elaborate for reasons that have nothing to do with hypothesis
+necessity, inflating the blind fraction on the very arm meant to be the credible one.
+
+The paper says the arm was dropped and why. It does not quietly become a single-library
+study — a cross-library claim withdrawn on measured cost is a different thing from one
+never attempted, and the difference belongs in the text.
+
 ## 3. Honest limitations, stated up front
 
 - **One library, one domain, one curated queue.** Mathematical finance, one author's
