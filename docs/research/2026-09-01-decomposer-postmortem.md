@@ -65,17 +65,52 @@ Three compounding blind spots, all now closed:
    unprobeable. Not the decomposer's failure, but the same class of fault: **an
    instrument defect that presents as a result.** *Fixed at source.*
 
-## Next
+## The verdict, and the fix
 
-The skeleton gate's verdict on a freshly drafted DAG is the remaining unknown, and it is
-one elaboration away. Two shapes it can take, with different fixes:
+Elaborated against real Lean, the skeleton production has been building for five weeks:
 
-- **`sorry_count != n_leaves`** — the assembled skeleton is structurally wrong (the main
-  proof is not reducing to leaf applications). A bug in `assemble_skeleton` or in the
-  prompt's contract, and fixable here.
-- **Elaboration errors** — the split is real but the leaf statements do not typecheck in
-  the module context. That is a prompt/context problem, and the bounded re-decompose is
-  supposed to absorb it with the errors as feedback.
+```
+passed: false   indeterminate: false   sorry_count: 3
+VERDICT: skeleton does not elaborate: Unknown identifier `P` … `KRD` … `ED`
+```
 
-Either way the loop stays barren until this is closed, because every remaining queue
-target needs the decompose path.
+Two things settle it. `sorry_count: 3` equals the leaf count, so **the split was
+structurally correct all along** — the decomposition was never the problem. And
+`indeterminate: false` means this was a real verdict rather than a wedged daemon, which
+is why the shell recorded `max_rounds` and the whole thing read as *these targets are too
+hard*.
+
+`P`, `KRD` and `ED` are defined **in the target stub itself**, in no importable module.
+`assemble_skeleton` built the skeleton from the DAG's statements alone, so every leaf
+statement referring to them was an unknown identifier. Imports failed the same way: taken
+from the pointers the splitter declared, one of that target's three.
+
+Fixed by `target_preamble` + `assemble_skeleton(..., target_text=...)`. That fix then
+exposed a second layer — a `/--` doc comment starts with `/-`, so the line filter dropped
+each comment's opening line and left its prose as bare text, producing `unexpected
+identifier; expected command`. Comment state is tracked now rather than pattern-matched.
+
+Same target, same DAG, after both fixes:
+
+```
+passed: true    indeterminate: false    sorry_count: 3
+VERDICT: PASSED — the split is provable and the leaves can be routed
+```
+
+The skeleton goes from 1,322 B with one import and no definitions to 3,589 B with all
+three of each. **This is the first time since the decompose path shipped that a real
+target has produced a routable split.**
+
+## The pattern worth keeping
+
+Four defects today wore the same disguise — a killed batch reading as "no tactic closes
+it", a cold-start loop as an unprovable theorem, an unlocatable `private` declaration as
+blindness, and a mangled preamble as a broken definition. **An instrument defect presents
+as a result.** The foundry was never short of failures, only of failures it could
+describe, which is why the reason-plumbing and `probe/health.py` matter more than any
+single fix here.
+
+## Still open
+
+The loop being able to route leaves is not the same as the loop closing them. The next
+scheduled tick is the real test, and it can now say what happened either way.
