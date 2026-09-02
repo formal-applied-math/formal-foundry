@@ -430,3 +430,54 @@ def test_skeleton_without_a_target_text_is_unchanged():
     dag = parse_dag({"main": {"name": "m", "statement": "theorem m : True", "proof": "l1"},
                      "leaves": [{"name": "l1", "statement": "theorem l1 : True"}]})
     assert "noncomputable def P" not in assemble_skeleton(PACK, dag)
+
+
+DOCCOMMENT_STUB = '''/-
+Copyright (c) 2026 Raphael Coelho. All rights reserved.
+-/
+module
+
+public import Mathlib
+
+set_option autoImplicit false
+
+@[expose] public section
+
+namespace MathFin
+
+/-- Multi-tenor bond price: the sum over tenors `i`, discounted at that
+tenor's own spot rate. Under a flat curve this reduces to the usual
+open-form discrete-cashflow bond price. -/
+noncomputable def P (c : ℝ) : ℝ := c
+
+theorem t : True := by sorry
+
+end MathFin
+'''
+
+
+def test_preamble_keeps_a_doc_comment_whole():
+    """The opening `/--` line must survive. Dropping it orphans the comment's prose as
+    bare text and the closing `-/` dangles — Lean then reports `unexpected identifier;
+    expected command`, which looks like a broken definition rather than a broken cut."""
+    from decompose import target_preamble
+    out = target_preamble(DOCCOMMENT_STUB)
+    assert out.count("/--") == 1 and out.count("-/") == 1
+    assert out.index("/--") < out.index("-/")
+    assert "noncomputable def P" in out
+
+
+def test_preamble_does_not_mistake_prose_for_boilerplate():
+    """A doc comment's body may legitimately begin a line with `open`, `import` or
+    `end`. Inside a comment those are prose, not commands."""
+    from decompose import target_preamble
+    out = target_preamble(DOCCOMMENT_STUB)
+    assert "open-form discrete-cashflow bond price." in out
+
+
+def test_preamble_drops_the_licence_block_and_the_boilerplate():
+    from decompose import target_preamble
+    out = target_preamble(DOCCOMMENT_STUB)
+    for gone in ("Copyright", "module", "public import", "set_option", "@[expose]",
+                 "namespace MathFin"):
+        assert gone not in out, gone

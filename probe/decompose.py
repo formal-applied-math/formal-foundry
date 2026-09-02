@@ -280,27 +280,45 @@ def target_preamble(target_text: str) -> str:
     """The target stub's own declarations MINUS its theorem — the `def`s/`abbrev`s the
     stub introduces, which exist in no importable module.
 
-    Cut at the first `theorem`/`lemma` at column zero: everything before it is the
-    definitions the target brings with it, everything after is the statement the DAG is
-    replacing. Boilerplate (license, `module`, imports, `namespace`) is dropped, since
-    `_module_text` re-emits it from the pack."""
+    Cut at the first `theorem`/`lemma` at column zero: everything before it is what the
+    target brings with it, everything after is the statement the DAG replaces. The
+    licence block and the boilerplate `_module_text` re-emits (module header, imports,
+    `set_option`, `@[expose]`, `namespace`) are dropped.
+
+    Comment state is tracked rather than pattern-matched line by line, because both
+    shortcuts are wrong. A `/--` doc comment starts with `/-`, so a regex that skips
+    comment delimiters eats its OPENING line and orphans the prose beneath it as bare
+    text — Lean then says `unexpected identifier; expected command`, which reads as a
+    broken definition rather than a broken cut. And a doc comment's body may begin a
+    line with `open`, `import` or `end`; inside a comment those are prose, not commands.
+    """
     body = re.split(r"^(?:@\[[^\]]*\]\s*\n)?(?:private\s+|protected\s+|nonrec\s+)*"
                     r"(?:theorem|lemma)\s", target_text, maxsplit=1, flags=re.M)[0]
-    keep, skip = [], re.compile(
-        r"^\s*(?:/-|-/|module\b|public\s+import\b|import\b|set_option\b|"
-        r"@\[expose\]|namespace\b|end\b|open\b|Copyright|Released|Authors)")
-    in_block_comment = False
+    boilerplate = re.compile(
+        r"^\s*(?:module\b|public\s+import\b|import\b|set_option\b|@\[expose\]|"
+        r"namespace\b|end\b|open\b)")
+    out: list[str] = []
+    in_doc = in_plain = False
     for line in body.splitlines():
-        if line.lstrip().startswith("/-") and not line.lstrip().startswith("/--"):
-            in_block_comment = not line.rstrip().endswith("-/")
+        st = line.lstrip()
+        if in_doc:                       # keep the whole doc comment, prose included
+            out.append(line)
+            in_doc = not st.rstrip().endswith("-/")
             continue
-        if in_block_comment:
-            in_block_comment = not line.rstrip().endswith("-/")
+        if in_plain:                     # the licence and friends: drop entirely
+            in_plain = not st.rstrip().endswith("-/")
             continue
-        if skip.match(line):
+        if st.startswith("/--"):
+            out.append(line)
+            in_doc = not (st.rstrip().endswith("-/") and len(st) > 4)
             continue
-        keep.append(line)
-    return "\n".join(keep).strip()
+        if st.startswith("/-"):
+            in_plain = not (st.rstrip().endswith("-/") and len(st) > 3)
+            continue
+        if boilerplate.match(line):
+            continue
+        out.append(line)
+    return "\n".join(out).strip()
 
 
 def assemble_skeleton(pack: DomainPack, dag: Dag, meta: dict | None = None,
