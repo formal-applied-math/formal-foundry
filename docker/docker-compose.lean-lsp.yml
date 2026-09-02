@@ -2,32 +2,38 @@
 #
 # FOUNDRY COPY: kept in sync with the main repo's docker/docker-compose.lean-lsp.yml.
 # pipeline.yml copies this into the main checkout (main/docker/) before the tick, so
-# the service's RELATIVE bind mounts (../MathFin, …) resolve against the checked-out
-# MathFin project — without pushing CI infra to formal-mathfin main.
+# the service's RELATIVE bind mounts (../<LakeRoot>, …) resolve against the
+# checked-out library project — without pushing CI infra to that repo's main.
+#
+# DOMAIN-PARAMETERIZED (runbook 06). Every `${DOMAIN_*}` below is exported by
+# `probe/domain_pack.py --export-env`, which every script that brings this service
+# up already evals. The defaults are the flagship's, so a bare `docker compose`
+# outside those scripts behaves exactly as it did before.
 #
 # Only ever used merged with docker-compose.yml (`-f docker-compose.yml -f this`):
 # the base file defines the `lake_build_cache` volume + the lean-repl service this
 # is mutually exclusive with (one Lean process — bring the daemon DOWN first).
 services:
   lean-lsp:
-    image: ghcr.io/formal-applied-math/mathfin-verify:latest
-    container_name: mathfin-lean-lsp
+    image: ${DOMAIN_VERIFY_IMAGE:-ghcr.io/formal-applied-math/mathfin-verify:latest}
+    container_name: ${DOMAIN_LEAN_LSP_CONTAINER:-mathfin-lean-lsp}
     cpuset: "${VERIFY_CPUSET:-0-3}"
     mem_limit: 6g
     volumes:
       - ../tools:/app/tools:ro
-      - ../MathFin:/app/MathFin
-      - ../MathFin.lean:/app/MathFin.lean
+      - ../${DOMAIN_LAKE_ROOT:-MathFin}:/app/${DOMAIN_LAKE_ROOT:-MathFin}
+      - ../${DOMAIN_NAMESPACE:-MathFin}.lean:/app/${DOMAIN_NAMESPACE:-MathFin}.lean
       - ../lakefile.lean:/app/lakefile.lean
       - ../lake-manifest.json:/app/lake-manifest.json
       - ../lean-toolchain:/app/lean-toolchain
-      - ../mathfin.toml:/app/mathfin.toml:ro
+      # the repo's own config is named for the pack: <name>.toml
+      - ../${DOMAIN_NAME:-mathfin}.toml:/app/${DOMAIN_NAME:-mathfin}.toml:ro
       - lake_build_cache:/app/.lake
     working_dir: /app
     # lean-lsp-mcp is not in the image; install it once at start, then idle.
     # docker exec spawns the actual stdio MCP per vibe session.
     #
-    # PINNED: this container holds RW mounts on MathFin/ and the lakefile, so an
+    # PINNED: this container holds RW mounts on the library and the lakefile, so an
     # unpinned install would give whatever PyPI serves that day write access to
     # the Lean sources. 0.28.1 is the version the harness was validated against.
     # Bump deliberately, after a vibe session against the new version.

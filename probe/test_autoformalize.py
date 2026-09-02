@@ -13,6 +13,11 @@ import autoformalize as af
 
 # --- AutoformalizeConfig -----------------------------------------------------
 
+import domain_pack
+
+PACK = domain_pack.load("mathfin")
+
+
 def test_autoformalize_config_defaults():
     cfg = pl.AutoformalizeConfig.load(None)
     assert cfg.enabled is True
@@ -78,13 +83,13 @@ def test_refill_uses_intent_fn_for_draft(monkeypatch, tmp_path):
     # the engine switch routes the DRAFT to intent_fn while the judge keeps reason_fn
     captured = {}
 
-    def fake_draft(issue, ctx, *, chat_fn, **kw):
+    def fake_draft(pk, issue, ctx, *, chat_fn, **kw):
         captured["chat_fn"] = chat_fn
         return {"ok": False, "reason": "stop after intent", "tokens": 1}
     monkeypatch.setattr(af, "draft_intent", fake_draft)
     intent_sentinel = lambda m: ("i", 0)
     reason_sentinel = lambda m: ("r", 0)
-    af.refill([_issue(9)], reason_fn=reason_sentinel, intent_fn=intent_sentinel,
+    af.refill(PACK, [_issue(9)], reason_fn=reason_sentinel, intent_fn=intent_sentinel,
               prove_fn=_NOOP, check_fn=_ELAB_OK, context_fn=lambda i: "",
               queue_dir=str(tmp_path), budget=100000)
     assert captured["chat_fn"] is intent_sentinel
@@ -93,19 +98,19 @@ def test_refill_uses_intent_fn_for_draft(monkeypatch, tmp_path):
 def test_refill_intent_fn_defaults_to_reason_fn(monkeypatch, tmp_path):
     captured = {}
 
-    def fake_draft(issue, ctx, *, chat_fn, **kw):
+    def fake_draft(pk, issue, ctx, *, chat_fn, **kw):
         captured["chat_fn"] = chat_fn
         return {"ok": False, "reason": "stop", "tokens": 1}
     monkeypatch.setattr(af, "draft_intent", fake_draft)
     reason_sentinel = lambda m: ("r", 0)
-    af.refill([_issue(9)], reason_fn=reason_sentinel, prove_fn=_NOOP, check_fn=_ELAB_OK,
+    af.refill(PACK, [_issue(9)], reason_fn=reason_sentinel, prove_fn=_NOOP, check_fn=_ELAB_OK,
               context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
     assert captured["chat_fn"] is reason_sentinel   # back-compat: no intent_fn → reason_fn
 
 
 def test_lean_lsp_mcp_config_targets_the_container():
     # phase 2: the agentic drafter gets the SAME lean-lsp MCP the vibe harness gives Leanstral
-    c = af._lean_lsp_mcp_config()
+    c = af._lean_lsp_mcp_config(PACK.lean_lsp_container)
     s = c["mcpServers"]["lean-lsp"]
     assert s["command"] == "docker"
     assert "mathfin-lean-lsp" in s["args"] and "lean-lsp-mcp" in s["args"]
@@ -129,7 +134,7 @@ _AGENTIC_INTENT = {"statement": "upCapture is scale-invariant in portfolio retur
 
 
 def test_agentic_formalize_prompt_carries_intent_scaffold_and_selfcheck():
-    p = af._agentic_formalize_prompt(_AGENTIC_INTENT, "SCAFFOLD", "MathFin/X.lean")
+    p = af._agentic_formalize_prompt(PACK, _AGENTIC_INTENT, "SCAFFOLD", "MathFin/X.lean")
     assert "upCapture" in p and "MathFin/X.lean" in p and "SCAFFOLD" in p
     assert "lean_diagnostic" in p and "sorry" in p                # self-validate; keep the sorry
 
@@ -137,13 +142,13 @@ def test_agentic_formalize_prompt_carries_intent_scaffold_and_selfcheck():
 def test_extract_core_stub_pulls_body_between_scaffold():
     module = ("junk\nopen scoped NNReal ENNReal\n\n"
               "noncomputable def foo : ℝ := 1\n\ntheorem t : foo = 1 := by sorry\n\nend MathFin\n")
-    core = af._extract_core_stub(module)
+    core = af._extract_core_stub(PACK, module)
     assert "def foo" in core and "theorem t" in core
     assert "end MathFin" not in core and "junk" not in core
 
 
 def _agentic_scaffolded(core):
-    lt, _e, _p = af.emit_target_files(
+    lt, _e, _p = af.emit_target_files(PACK,
         _ISSUE, core, {"module_name": "UpCapAgentic", "benchmark_id": "mf-agentic",
                        "docstring": "d", "definitions": ["upCapture"]})
     return lt
@@ -155,11 +160,11 @@ def test_agentic_formalize_ok_on_elaborating_module(tmp_path):
     def fake_run(argv, stdin, cwd):
         lt = _agentic_scaffolded("noncomputable def upCapture : ℝ := 1\n\n"
                                  "theorem t : upCapture = 1 := by sorry")
-        with open(os.path.join(cwd, af._AGENTIC_SCRATCH_REL), "w") as f:
+        with open(os.path.join(cwd, PACK.scratch_module), "w") as f:
             f.write(lt)
         return _FakeRun(stdout='{"is_error":false,"subtype":"success","result":"DONE",'
                                '"usage":{"input_tokens":2,"output_tokens":3}}')
-    r = af.agentic_formalize(_AGENTIC_INTENT, issue=_ISSUE, main_repo=main,
+    r = af.agentic_formalize(PACK, _AGENTIC_INTENT, issue=_ISSUE, main_repo=main,
                              check_fn=lambda code: {"errors": [], "sorry_count": 1},
                              run_fn=fake_run, mcp_config_path="/tmp/x.json")
     assert r["ok"] is True and "upCapture" in r["lean_text"]
@@ -170,10 +175,10 @@ def test_agentic_formalize_fails_when_not_elaborating(tmp_path):
     main = str(tmp_path); os.makedirs(os.path.join(main, "MathFin"))
 
     def fake_run(argv, stdin, cwd):
-        with open(os.path.join(cwd, af._AGENTIC_SCRATCH_REL), "w") as f:
+        with open(os.path.join(cwd, PACK.scratch_module), "w") as f:
             f.write("broken lean")
         return _FakeRun(stdout='{"is_error":false,"subtype":"success","result":"DONE"}')
-    r = af.agentic_formalize(_AGENTIC_INTENT, issue=_ISSUE, main_repo=main,
+    r = af.agentic_formalize(PACK, _AGENTIC_INTENT, issue=_ISSUE, main_repo=main,
                              check_fn=lambda code: {"errors": ["boom"], "sorry_count": 0},
                              run_fn=fake_run, mcp_config_path="/tmp/x.json")
     assert r["ok"] is False and r["reason"]
@@ -181,7 +186,7 @@ def test_agentic_formalize_fails_when_not_elaborating(tmp_path):
 
 def test_agentic_formalize_fails_when_no_file_written(tmp_path):
     main = str(tmp_path); os.makedirs(os.path.join(main, "MathFin"))
-    r = af.agentic_formalize(_AGENTIC_INTENT, issue=_ISSUE, main_repo=main,
+    r = af.agentic_formalize(PACK, _AGENTIC_INTENT, issue=_ISSUE, main_repo=main,
                              check_fn=lambda code: {"errors": [], "sorry_count": 1},
                              run_fn=lambda a, s, c: _FakeRun(stdout='{}'),
                              mcp_config_path="/tmp/x.json")
@@ -195,10 +200,10 @@ def test_agentic_formalize_skips_verify_when_check_fn_none(tmp_path):
     def fake_run(argv, stdin, cwd):
         lt = _agentic_scaffolded("noncomputable def upCapture : ℝ := 1\n\n"
                                  "theorem t : upCapture = 1 := by sorry")
-        with open(os.path.join(cwd, af._AGENTIC_SCRATCH_REL), "w") as f:
+        with open(os.path.join(cwd, PACK.scratch_module), "w") as f:
             f.write(lt)
         return _FakeRun(stdout='{"result":"DONE"}')
-    r = af.agentic_formalize(_AGENTIC_INTENT, issue=_ISSUE, main_repo=main,
+    r = af.agentic_formalize(PACK, _AGENTIC_INTENT, issue=_ISSUE, main_repo=main,
                              run_fn=fake_run, mcp_config_path="/tmp/x.json")   # check_fn defaults None
     assert r["ok"] is True and r["entry"] is not None
 
@@ -206,7 +211,7 @@ def test_agentic_formalize_skips_verify_when_check_fn_none(tmp_path):
 def test_refill_flips_slot_around_agentic_formalize(monkeypatch, tmp_path):
     # autonomous tick: lean-lsp for the agentic formalize, then flip to the daemon for the gates
     events = []
-    monkeypatch.setattr(af, "draft_intent", lambda issue, ctx, *, chat_fn, **k:
+    monkeypatch.setattr(af, "draft_intent", lambda pk, issue, ctx, *, chat_fn, **k:
                         {"ok": True, "tokens": 1, "unknowns": [],
                          "intent": {"statement": "s", "module_name": "M", "benchmark_id": "mf-x",
                                     "docstring": "d"}})
@@ -214,7 +219,7 @@ def test_refill_flips_slot_around_agentic_formalize(monkeypatch, tmp_path):
     def agentic_fn(intent, ctx, issue, premises=""):
         events.append("formalize")
         return {"ok": False, "tokens": 0}          # stop after formalize (records a gate fail)
-    af.refill([_issue(9)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
+    af.refill(PACK, [_issue(9)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
               context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000, semantic_rounds=1,
               agentic_formalize_fn=agentic_fn, slot_switch_fn=lambda s: events.append("slot:" + s))
     assert events[:3] == ["slot:lean-lsp", "formalize", "slot:daemon"]
@@ -227,7 +232,7 @@ def test_refill_agentic_cap_is_not_swallowed_by_fallback(monkeypatch, tmp_path):
     def capping_agentic(intent, ctx, issue, premises=""):
         raise af.ClaudeCapError("usage limit reached")
 
-    res = af.refill([_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
+    res = af.refill(PACK, [_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
                     context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000,
                     agentic_formalize_fn=capping_agentic, slot_switch_fn=lambda s: None)
     assert res["seeded"] == []
@@ -265,10 +270,10 @@ def test_claude_cap_markers_cover_a_dead_token(monkeypatch):
 
 
 def test_refill_records_deferred_on_claude_cap(monkeypatch, tmp_path):
-    def capping_draft(issue, ctx, *, chat_fn, **kw):
+    def capping_draft(pk, issue, ctx, *, chat_fn, **kw):
         raise af.ClaudeCapError("5-hour usage limit reached")
     monkeypatch.setattr(af, "draft_intent", capping_draft)
-    res = af.refill([_issue(9)], reason_fn=_NOOP, intent_fn=_NOOP, prove_fn=_NOOP,
+    res = af.refill(PACK, [_issue(9)], reason_fn=_NOOP, intent_fn=_NOOP, prove_fn=_NOOP,
                     check_fn=_ELAB_OK, context_fn=lambda i: "", queue_dir=str(tmp_path),
                     budget=100000)
     assert res["seeded"] == []
@@ -293,14 +298,14 @@ def test_autoformalize_config_reads_toml(tmp_path):
 
 def test_emit_prelint_reorders_omit_before_docstring():
     stub = "/-- d -/\nomit hB in\ntheorem foo (hB : True) : 1 = 1 := by sorry"
-    lean_text, _e, _p = af.emit_target_files(_ISSUE, stub, _META)
+    lean_text, _e, _p = af.emit_target_files(PACK, _ISSUE, stub, _META)
     assert lean_text.index("omit hB in") < lean_text.index("/-- d -/")
 
 
 def test_emit_prelint_rejects_sigma_identifier():
     stub = "theorem fooΣ : 1 = 1 := by sorry"
     try:
-        af.emit_target_files(_ISSUE, stub, _META)
+        af.emit_target_files(PACK, _ISSUE, stub, _META)
         assert False, "expected emit to reject the Σ identifier"
     except Exception as e:  # noqa: BLE001
         assert "Σ" in str(e) or "sigma" in str(e).lower()
@@ -318,7 +323,7 @@ def test_prelint_strips_model_imports():
 
 def test_emit_strips_stub_imports_so_module_stays_valid():
     stub = "import Mathlib\n\ntheorem foo : 1 = 1 := by sorry"
-    lean_text, _e, _p = af.emit_target_files(_ISSUE, stub, _META)
+    lean_text, _e, _p = af.emit_target_files(PACK, _ISSUE, stub, _META)
     # the model's import must NOT survive into the body (after the namespace) — that is the
     # mid-file position the elaborator rejects; the only imports are the header's.
     body = lean_text.split("namespace MathFin", 1)[1]
@@ -357,12 +362,12 @@ def test_prelint_marks_defs_noncomputable():
 def test_structural_gates_indeterminate_on_daemon_error():
     err = lambda *_a, **_kw: {"error": "daemon check did not complete: TimeoutError"}
     stub = "theorem foo (hB : True) : 1 = 1 := by sorry"
-    lean = af.emit_target_files(_ISSUE, stub, _META)[0]
-    d = af.depth_rejection(lean, "foo", _ISSUE["pointers"], check_fn=err)
+    lean = af.emit_target_files(PACK, _ISSUE, stub, _META)[0]
+    d = af.depth_rejection(PACK, lean, "foo", _ISSUE["pointers"], check_fn=err)
     assert d.get("indeterminate") is True and not d.get("shallow")
     t = af.triviality_rejection(lean, check_fn=err)
     assert t.get("indeterminate") is True and not t.get("trivial")
-    fr = af.defs_rejection(lean, "foo", ["fooDef"], check_fn=err)
+    fr = af.defs_rejection(PACK, lean, "foo", ["fooDef"], check_fn=err)
     assert fr.get("indeterminate") is True and not fr.get("failed")
 
 
@@ -379,7 +384,7 @@ def test_strengthen_keeps_sole_implicit_pin():
     # hBmeas is the ONLY use of the implicit {B}; dropping it orphans B → protect it,
     # even though the (faked) re-gate would pass.
     candidate = "theorem foo {B : ℝ → ℝ} (hBmeas : Measurable B) (x : ℝ) : x = x := by rfl"
-    res = af.strengthen_candidate(candidate, None, "foo", ["unused variable `hBmeas`"],
+    res = af.strengthen_candidate(PACK, candidate, None, "foo", ["unused variable `hBmeas`"],
                                   regate_fn=lambda c: {"passed": True, "warnings": []})
     assert "hBmeas" not in res["stripped"]
     assert "hBmeas" in res["candidate"]
@@ -389,7 +394,7 @@ def test_strengthen_whitelists_nonzero_binder_under_grind():
     # hA is flagged unused, but the proof is `by grind`, which pulls hypotheses from
     # context — the "unused variable" warning is unreliable, so keep the binder.
     candidate = "theorem foo (A : ℝ) (hA : A ≠ 0) : A = A := by grind"
-    res = af.strengthen_candidate(candidate, None, "foo", ["unused variable `hA`"],
+    res = af.strengthen_candidate(PACK, candidate, None, "foo", ["unused variable `hA`"],
                                   regate_fn=lambda c: {"passed": True, "warnings": []})
     assert "hA" not in res["stripped"]
     assert "hA" in res["candidate"]
@@ -401,7 +406,7 @@ def test_route_feasibility_blocks_on_missing_primitives():
     # names MathFin.omegaRatio (absent) + MathFin.zcb (present) + Real.exp (Mathlib,
     # not our concern) → blocked_on_infra with the missing list, no draft attempted.
     intent = {"objects": ["MathFin.zcb", "MathFin.omegaRatio", "Real.exp"], "statement": "x"}
-    feas = af.route_feasibility(intent, ["MathFin/FixedIncome/ZCB.lean"],
+    feas = af.route_feasibility(PACK, intent, ["MathFin/FixedIncome/ZCB.lean"],
                                 lookup_fn=lambda name: name == "MathFin.zcb")
     assert feas["feasible"] is False
     assert feas["missing"] == ["MathFin.omegaRatio"]
@@ -410,7 +415,7 @@ def test_route_feasibility_blocks_on_missing_primitives():
 
 def test_route_feasibility_ok_when_present_or_mathlib():
     intent = {"objects": ["MathFin.zcb", "Real.exp", "integral_add_compl"]}
-    feas = af.route_feasibility(intent, [], lookup_fn=lambda n: n == "MathFin.zcb")
+    feas = af.route_feasibility(PACK, intent, [], lookup_fn=lambda n: n == "MathFin.zcb")
     assert feas["feasible"] is True and feas["missing"] == []
 
 
@@ -537,14 +542,14 @@ def test_explicit_arg_names_none():
 # --- section mapping ---------------------------------------------------------
 
 def test_section_for_area_known():
-    assert af.section_for_area("fixed-income") == "FixedIncome"
-    assert af.section_for_area("actuarial") == "Actuarial"
-    assert af.section_for_area("credit") == "FixedIncome"   # credit lives in FixedIncome
+    assert PACK.section_for_area("fixed-income") == "FixedIncome"
+    assert PACK.section_for_area("actuarial") == "Actuarial"
+    assert PACK.section_for_area("credit") == "FixedIncome"   # credit lives in FixedIncome
 
 
 def test_section_for_area_new_and_unknown():
-    assert af.section_for_area("fx") == "FX"                # new dir, umbrella absorbs
-    assert af.section_for_area("stoch-vol") == "StochVol"   # unknown → CamelCase fallback
+    assert PACK.section_for_area("fx") == "FX"                # new dir, umbrella absorbs
+    assert PACK.section_for_area("stoch-vol") == "StochVol"   # unknown → CamelCase fallback
 
 
 # --- emit_target_files -------------------------------------------------------
@@ -563,7 +568,7 @@ _META = {"module_name": "FRA", "benchmark_id": "mf-fi-fra",
 
 
 def test_emit_stub_headers_and_scaffold():
-    lean_text, _entry, _placement = af.emit_target_files(_ISSUE, _STUB, _META)
+    lean_text, _entry, _placement = af.emit_target_files(PACK, _ISSUE, _STUB, _META)
     assert "-- source-issue: 67" in lean_text
     assert "-- main-module: MathFin/FixedIncome/FRA.lean" in lean_text
     assert "-- benchmark: benchmarks/mathematical_finance.json" in lean_text
@@ -583,7 +588,7 @@ def test_emit_stub_pins_autoImplicit_false_for_lake_parity():
     # (lakefile: autoImplicit false) then failed with `unknown universe level`.
     # The emitted stub pins the option so DRAFT-time elaboration enforces what
     # the build enforces and the compile-repair loop fixes such drafts early.
-    lean_text, _e, _p = af.emit_target_files(_ISSUE, _STUB, _META)
+    lean_text, _e, _p = af.emit_target_files(PACK, _ISSUE, _STUB, _META)
     assert "set_option autoImplicit false" in lean_text
     assert lean_text.index("set_option autoImplicit false") \
         < lean_text.index("namespace MathFin")
@@ -600,7 +605,7 @@ def test_emit_stub_opens_measuretheory_so_bare_names_resolve():
     stub = ("theorem prob_int {Ω : Type*} {m : MeasurableSpace Ω} (Q : Measure Ω)\n"
             "    [IsProbabilityMeasure Q] (f : Ω → ℝ) (hf : IntegrableOn f Set.univ Q) :\n"
             "    True := by sorry")
-    lean_text, _e, _p = af.emit_target_files(_ISSUE, stub, _META)
+    lean_text, _e, _p = af.emit_target_files(PACK, _ISSUE, stub, _META)
     assert "open MeasureTheory ProbabilityTheory" in lean_text
     assert "open scoped NNReal ENNReal" in lean_text
     # in scope for the stub: opens sit between `namespace MathFin` and the theorem
@@ -612,14 +617,14 @@ def test_emit_stub_opens_measuretheory_so_bare_names_resolve():
 def test_emit_stub_imports_pointer_modules():
     # coherence-first: the stub imports its pointer modules so a drafted statement
     # can consume existing MathFin defs, not just Mathlib.
-    lean_text, _entry, _placement = af.emit_target_files(_ISSUE, _STUB, _META)
+    lean_text, _entry, _placement = af.emit_target_files(PACK, _ISSUE, _STUB, _META)
     assert "public import Mathlib" in lean_text
     assert "public import MathFin.FixedIncome.ForwardRate" in lean_text
     assert "public import MathFin.FixedIncome.ZCB" in lean_text
 
 
 def test_emit_stub_roundtrips_through_build_manifest():
-    lean_text, _entry, placement = af.emit_target_files(_ISSUE, _STUB, _META)
+    lean_text, _entry, placement = af.emit_target_files(PACK, _ISSUE, _STUB, _META)
     # the real consumer parses the placement headers + the decl the same way
     meta = bm.parse_meta(lean_text)
     assert meta["main_module"] == "MathFin/FixedIncome/FRA.lean"
@@ -651,7 +656,7 @@ def test_emit_new_object_module_named_for_def_not_drafter_bucket():
     # introduces: def `upCapture` -> module `UpCapture` (like #161 gainToPain -> GainToPain).
     meta = {"module_name": "RatiosExtended", "benchmark_id": "mf-performance-upside_capture",
             "docstring": "Upside-capture ratio.", "definitions": ["upCapture"]}
-    lean_text, entry, placement = af.emit_target_files(_ISSUE_162, _STUB_162, meta)
+    lean_text, entry, placement = af.emit_target_files(PACK, _ISSUE_162, _STUB_162, meta)
     assert placement["main_module"] == "MathFin/Performance/UpCapture.lean"
     assert "-- main-module: MathFin/Performance/UpCapture.lean" in lean_text
     # the re-export imports the SAME fresh module, not the (would-be clobbered) pointer
@@ -670,7 +675,7 @@ def test_emit_new_object_module_idempotent_when_drafter_already_canonical():
             "    True := by sorry")
     meta = {"module_name": "GainToPain", "benchmark_id": "mf-performance-gain_to_pain",
             "docstring": "Gain-to-pain ratio.", "definitions": ["gainToPain"]}
-    _lt, _e, placement = af.emit_target_files(issue, stub, meta)
+    _lt, _e, placement = af.emit_target_files(PACK, issue, stub, meta)
     assert placement["main_module"] == "MathFin/Performance/GainToPain.lean"
 
 
@@ -682,7 +687,7 @@ def test_emit_rejects_self_import_when_no_new_def_to_derive_from():
              "pointers": ["MathFin/Performance/RatiosExtended.lean"]}
     meta = {"module_name": "RatiosExtended", "benchmark_id": "mf-x", "docstring": "d"}
     try:
-        af.emit_target_files(issue, "theorem foo : True := by sorry", meta)
+        af.emit_target_files(PACK, issue, "theorem foo : True := by sorry", meta)
         raised = False
     except ValueError:
         raised = True
@@ -706,7 +711,7 @@ def test_normalize_deferred_cleans_and_coerces():
 def test_judge_system_does_not_fault_provable_hypotheses():
     # #67 was wrongly rejected for "missing positivity hypotheses" though its zcb (Real.exp) is
     # provably positive — the judge must not fault a hypothesis provable from the consumed defs.
-    msgs = af.judge_messages({"number": 1, "title": "t", "body": "b"}, "theorem foo : True := by sorry")
+    msgs = af.judge_messages(PACK, {"number": 1, "title": "t", "body": "b"}, "theorem foo : True := by sorry")
     sys = " ".join(m["content"] for m in msgs)
     assert "PROVABLE" in sys and "automatically positive" in sys
 
@@ -714,13 +719,13 @@ def test_judge_system_does_not_fault_provable_hypotheses():
 def test_refill_logs_rejected_statement_on_unfaithful(monkeypatch, tmp_path):
     # instrument the reject path: log the ACTUAL statement so we stop inferring why it was rejected.
     _two_stage_ok(monkeypatch)
-    monkeypatch.setattr(af, "depth_rejection", lambda lt, nm, ptr, **k: {"shallow": False, "tokens": 0})
+    monkeypatch.setattr(af, "depth_rejection", lambda pk, lt, nm, ptr, **k: {"shallow": False, "tokens": 0})
     monkeypatch.setattr(af, "hypothesis_rejection", lambda *a, **k: {"vacuous": False, "tokens": 1})
     monkeypatch.setattr(af, "disproof", lambda *a, **k: {"false": False, "tokens": 1})
     monkeypatch.setattr(af, "judge_faithfulness",
-                        lambda i, s, chat_fn, deferred=None: {"faithful": False, "verdict": "missing X", "tokens": 1})
+                        lambda pk, i, s, chat_fn, deferred=None: {"faithful": False, "verdict": "missing X", "tokens": 1})
     logs = []
-    af.refill([_issue(7)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
+    af.refill(PACK, [_issue(7)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
               context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000, log=lambda m: logs.append(m),
               agentic_formalize_fn=_good_agentic, slot_switch_fn=lambda s: None)
     blob = "\n".join(logs)
@@ -728,7 +733,7 @@ def test_refill_logs_rejected_statement_on_unfaithful(monkeypatch, tmp_path):
 
 
 def test_judge_messages_includes_declared_deferred():
-    msgs = af.judge_messages({"number": 88, "title": "t", "body": "b"},
+    msgs = af.judge_messages(PACK, {"number": 88, "title": "t", "body": "b"},
                              "theorem foo : True := by sorry",
                              ["monotonicity in T", "basis → 0"])
     joined = " ".join(m["content"] for m in msgs)
@@ -737,7 +742,7 @@ def test_judge_messages_includes_declared_deferred():
 
 
 def test_judge_messages_no_deferred_section_when_full_issue():
-    msgs = af.judge_messages({"number": 1, "title": "t", "body": "b"},
+    msgs = af.judge_messages(PACK, {"number": 1, "title": "t", "body": "b"},
                              "theorem foo : True := by sorry")
     assert "DECLARED DEFERRED" not in " ".join(m["content"] for m in msgs)
 
@@ -747,7 +752,7 @@ def test_judge_faithfulness_threads_deferred_to_the_judge():
     def chat(msgs):
         seen["msgs"] = msgs
         return ('{"faithful": true, "verdict": "subset ok", "issues": []}', 5)
-    r = af.judge_faithfulness({"number": 88, "title": "t", "body": "b"},
+    r = af.judge_faithfulness(PACK, {"number": 88, "title": "t", "body": "b"},
                               "theorem foo : True := by sorry",
                               chat_fn=chat, deferred=[_DEFERRED_FACT])
     assert r["faithful"] is True and r["tokens"] == 5
@@ -755,7 +760,7 @@ def test_judge_faithfulness_threads_deferred_to_the_judge():
 
 
 def test_emit_carries_declared_deferred():
-    lean_text, entry, placement = af.emit_target_files(_ISSUE, _STUB, _META_SUBSET)
+    lean_text, entry, placement = af.emit_target_files(PACK, _ISSUE, _STUB, _META_SUBSET)
     assert f"-- deferred: {_DEFERRED_FACT}" in lean_text        # header build_manifest reads
     assert placement["deferred"] == [_DEFERRED_FACT]
     scope = entry["metadata"]["formalization_scope"]
@@ -767,7 +772,7 @@ def test_emit_carries_declared_deferred():
 
 
 def test_emit_full_issue_has_no_deferred_noise():
-    lean_text, entry, placement = af.emit_target_files(_ISSUE, _STUB, _META)
+    lean_text, entry, placement = af.emit_target_files(PACK, _ISSUE, _STUB, _META)
     assert "-- deferred:" not in lean_text
     assert placement["deferred"] == []
     assert "SUBSET" not in entry["metadata"]["formalization_scope"]
@@ -777,7 +782,7 @@ def test_emit_full_issue_has_no_deferred_noise():
 
 
 def test_emit_entry_reexport_and_provenance():
-    _lean, entry, _placement = af.emit_target_files(_ISSUE, _STUB, _META)
+    _lean, entry, _placement = af.emit_target_files(PACK, _ISSUE, _STUB, _META)
     assert entry["id"] == "mf-fi-fra"
     assert entry["domain"] == "mathematical_finance"
     assert entry["metadata"]["formalization_status"] == "full"
@@ -796,7 +801,7 @@ def test_emit_entry_reexport_and_provenance():
 
 
 def test_emit_placement_dict():
-    _lean, _entry, placement = af.emit_target_files(_ISSUE, _STUB, _META)
+    _lean, _entry, placement = af.emit_target_files(PACK, _ISSUE, _STUB, _META)
     assert placement == {
         "main_module": "MathFin/FixedIncome/FRA.lean",
         "benchmark": "benchmarks/mathematical_finance.json",
@@ -810,7 +815,7 @@ def test_emit_placement_dict():
 # --- kernel-gate goal builders -----------------------------------------------
 
 def test_vacuity_goal_swaps_conclusion_to_false():
-    lean_text, _e, _p = af.emit_target_files(_ISSUE, _STUB, _META)
+    lean_text, _e, _p = af.emit_target_files(PACK, _ISSUE, _STUB, _META)
     goal = af.vacuity_goal(lean_text)
     assert "public import Mathlib" in goal           # imports preserved
     assert "(hP₂ : 0 < P₂)" in goal                  # hypotheses preserved
@@ -820,7 +825,7 @@ def test_vacuity_goal_swaps_conclusion_to_false():
 
 
 def test_disproof_goal_negates_conclusion():
-    lean_text, _e, _p = af.emit_target_files(_ISSUE, _STUB, _META)
+    lean_text, _e, _p = af.emit_target_files(PACK, _ISSUE, _STUB, _META)
     goal = af.disproof_goal(lean_text)
     assert "(hP₂ : 0 < P₂)" in goal                  # hypotheses preserved
     assert "¬ (" in goal
@@ -855,7 +860,7 @@ def _script_chat(replies, tokens=10):
 
 def test_judge_faithfulness_parses_verdict():
     chat = _canned_chat('```json\n{"faithful": true, "verdict": "ok", "issues": []}\n```', 42)
-    r = af.judge_faithfulness({"number": 1, "title": "t", "body": "b"},
+    r = af.judge_faithfulness(PACK, {"number": 1, "title": "t", "body": "b"},
                               "theorem foo : True := by sorry", chat_fn=chat)
     assert r["faithful"] is True
     assert r["tokens"] == 42
@@ -868,7 +873,7 @@ _FAILS = lambda code: {"success": False, "errors": ["unsolved goals"], "sorry_co
 
 
 def test_hypothesis_rejection_flags_provable_false():
-    lean_text, _e, _p = af.emit_target_files(_ISSUE, _STUB, _META)
+    lean_text, _e, _p = af.emit_target_files(PACK, _ISSUE, _STUB, _META)
     # an HONEST vacuity proof keeps the probed `: False` conclusion
     honest = "```lean\n" + af.vacuity_goal(lean_text).replace("sorry", "trivial") + "\n```"
     r = af.hypothesis_rejection(lean_text, "fra_value",
@@ -879,7 +884,7 @@ def test_hypothesis_rejection_flags_provable_false():
 
 
 def test_hypothesis_rejection_passes_when_unprovable():
-    lean_text, _e, _p = af.emit_target_files(_ISSUE, _STUB, _META)
+    lean_text, _e, _p = af.emit_target_files(PACK, _ISSUE, _STUB, _META)
     r = af.hypothesis_rejection(lean_text, "fra_value",
                                 chat_fn=_canned_chat("```lean\nattempt\n```", 50),
                                 check_fn=_FAILS, budget=20000)
@@ -893,7 +898,7 @@ def test_hypothesis_rejection_rejects_reverted_conclusion():
     # deterministically kills easy TRUE targets (caught on cal-bk-161). The
     # statement-fidelity guard must count a pass only when the winning candidate
     # still asserts the probed conclusion.
-    lean_text, _e, _p = af.emit_target_files(_ISSUE, _STUB, _META)
+    lean_text, _e, _p = af.emit_target_files(PACK, _ISSUE, _STUB, _META)
     # sorry-free (the prover reverts AND proves), original conclusion, not False
     reverted = "```lean\n" + lean_text.replace("sorry", "trivial") + "\n```"
     r = af.hypothesis_rejection(lean_text, "fra_value",
@@ -903,7 +908,7 @@ def test_hypothesis_rejection_rejects_reverted_conclusion():
 
 
 def test_disproof_flags_provable_negation():
-    lean_text, _e, _p = af.emit_target_files(_ISSUE, _STUB, _META)
+    lean_text, _e, _p = af.emit_target_files(PACK, _ISSUE, _STUB, _META)
     # an HONEST disproof keeps the probed `¬ (C)` conclusion
     honest = "```lean\n" + af.disproof_goal(lean_text).replace("sorry", "trivial") + "\n```"
     r = af.disproof(lean_text, "fra_value",
@@ -913,7 +918,7 @@ def test_disproof_flags_provable_negation():
 
 
 def test_disproof_passes_when_negation_unprovable():
-    lean_text, _e, _p = af.emit_target_files(_ISSUE, _STUB, _META)
+    lean_text, _e, _p = af.emit_target_files(PACK, _ISSUE, _STUB, _META)
     r = af.disproof(lean_text, "fra_value",
                     chat_fn=_canned_chat("```lean\nattempt\n```", 50),
                     check_fn=_FAILS, budget=20000)
@@ -925,7 +930,7 @@ def test_gate_is_lightened_to_a_single_daemon_check_by_default():
     # SAFETY NET, not a proof to maximize. Default it to pass@1 / single round so
     # the two gates cost 2 checks per issue, not ~8 (fanout 2 x 2 rounds each) —
     # the load that let one spinning candidate wedge the daemon.
-    lean_text, _e, _p = af.emit_target_files(_ISSUE, _STUB, _META)
+    lean_text, _e, _p = af.emit_target_files(PACK, _ISSUE, _STUB, _META)
     calls = []
 
     def counting_check(code):
@@ -942,8 +947,8 @@ def test_gate_is_lightened_to_a_single_daemon_check_by_default():
 # --- pointers-scoped depth gate (option B) -----------------------------------
 
 def test_depth_probe_pointers_scoped_targets_pointer_module_defs():
-    lean_text, _e, _p = af.emit_target_files(_ISSUE, _STUB, _META)
-    probe = af.depth_probe(lean_text, "fra_value", _ISSUE["pointers"])
+    lean_text, _e, _p = af.emit_target_files(PACK, _ISSUE, _STUB, _META)
+    probe = af.depth_probe(PACK, lean_text, "fra_value", _ISSUE["pointers"])
     assert lean_text.rstrip() in probe                         # elaborates the stub first
     assert "`MathFin.fra_value" in probe                       # looks the decl up by full name
     assert "`MathFin.FixedIncome.ForwardRate" in probe         # pointer modules, Lean-name form
@@ -955,13 +960,13 @@ def test_depth_probe_pointers_scoped_targets_pointer_module_defs():
 def test_depth_rejection_skips_when_no_pointers():
     # the gate is pointers-scoped; with no pointers it is INAPPLICABLE — skip (never
     # reject for a missing Pointers section, and never touch the daemon).
-    lean_text, _e, _p = af.emit_target_files({**_ISSUE, "pointers": []}, _STUB, _META)
+    lean_text, _e, _p = af.emit_target_files(PACK, {**_ISSUE, "pointers": []}, _STUB, _META)
     called = {"n": 0}
 
     def check(code):
         called["n"] += 1
         return {"success": False, "errors": [_DEPTH_ERR], "sorry_count": 1}
-    r = af.depth_rejection(lean_text, "fra_value", [], check_fn=check)
+    r = af.depth_rejection(PACK, lean_text, "fra_value", [], check_fn=check)
     assert r["shallow"] is False
     assert called["n"] == 0                                    # daemon not consulted
 
@@ -971,38 +976,38 @@ _DEPTH_ERR = ("line 21:0: depth-gate: statement type consumes no def from "
 
 
 def test_depth_rejection_rejects_on_depth_error():
-    lean_text, _e, _p = af.emit_target_files(_ISSUE, _STUB, _META)
+    lean_text, _e, _p = af.emit_target_files(PACK, _ISSUE, _STUB, _META)
     check = lambda code: {"success": False, "errors": [_DEPTH_ERR],
                           "warnings": ["declaration uses `sorry`"], "sorry_count": 1}
-    r = af.depth_rejection(lean_text, "fra_value", _ISSUE["pointers"], check_fn=check)
+    r = af.depth_rejection(PACK, lean_text, "fra_value", _ISSUE["pointers"], check_fn=check)
     assert r["shallow"] is True
     assert "depth-gate" in r["verdict"]
     assert r["tokens"] == 0                                    # daemon elaboration, no prover
 
 
 def test_depth_rejection_passes_when_only_sorry_warning():
-    lean_text, _e, _p = af.emit_target_files(_ISSUE, _STUB, _META)
+    lean_text, _e, _p = af.emit_target_files(PACK, _ISSUE, _STUB, _META)
     check = lambda code: {"success": False, "errors": [],
                           "warnings": ["declaration uses `sorry`"], "sorry_count": 1}
-    r = af.depth_rejection(lean_text, "fra_value", _ISSUE["pointers"], check_fn=check)
+    r = af.depth_rejection(PACK, lean_text, "fra_value", _ISSUE["pointers"], check_fn=check)
     assert r["shallow"] is False
 
 
 def test_depth_rejection_fails_open_on_daemon_error():
     # a daemon-communication failure (Fix 1b's error dict) is NOT a depth verdict —
     # do not reject a good target on an infra hiccup (fail-open, like the prover gates).
-    lean_text, _e, _p = af.emit_target_files(_ISSUE, _STUB, _META)
+    lean_text, _e, _p = af.emit_target_files(PACK, _ISSUE, _STUB, _META)
     check = lambda code: {"success": False,
                           "errors": ["daemon check did not complete: TimeoutError: timed out"],
                           "sorry_count": 0}
-    r = af.depth_rejection(lean_text, "fra_value", _ISSUE["pointers"], check_fn=check)
+    r = af.depth_rejection(PACK, lean_text, "fra_value", _ISSUE["pointers"], check_fn=check)
     assert r["shallow"] is False
 
 
 # --- triviality gate (the #67 class: rfl/simp-closable statements) ------------
 
 def test_triviality_goal_splices_tactic_over_sorry():
-    lean_text, _e, _p = af.emit_target_files(_ISSUE, _STUB, _META)
+    lean_text, _e, _p = af.emit_target_files(PACK, _ISSUE, _STUB, _META)
     goal = af.triviality_goal(lean_text)
     assert goal is not None
     assert "sorry" not in goal
@@ -1020,7 +1025,7 @@ def test_triviality_goal_none_without_sorry():
 
 
 def test_triviality_rejection_flags_rfl_closable():
-    lean_text, _e, _p = af.emit_target_files(_ISSUE, _STUB, _META)
+    lean_text, _e, _p = af.emit_target_files(PACK, _ISSUE, _STUB, _META)
     check = lambda code: {"success": True, "errors": [], "sorry_count": 0}
     r = af.triviality_rejection(lean_text, check_fn=check)
     assert r["trivial"] is True
@@ -1031,7 +1036,7 @@ def test_triviality_rejection_flags_rfl_closable():
 def test_triviality_rejection_passes_substantive_statement():
     # rfl and simp both fail on real content → elaboration errors → NOT trivial
     # (the healthy case; also covers daemon-error fail-open, same dict shape).
-    lean_text, _e, _p = af.emit_target_files(_ISSUE, _STUB, _META)
+    lean_text, _e, _p = af.emit_target_files(PACK, _ISSUE, _STUB, _META)
     check = lambda code: {"success": False,
                           "errors": ["The rfl tactic failed", "simp made no progress"],
                           "sorry_count": 0}
@@ -1053,7 +1058,7 @@ def test_triviality_rejection_fails_open_without_sorry():
 # --- gate feedback rendering (the repair cascade's re-draft signal) -----------
 
 def test_render_gate_feedback_depth_carries_stub_and_instruction():
-    fb = af.render_gate_feedback(
+    fb = af.render_gate_feedback(PACK,
         "depth", "type consumes no def from [MathFin.FixedIncome.ZCB]", _STUB)
     assert "`depth` gate" in fb
     assert "consumes no def" in fb                     # the gate's own verdict
@@ -1066,7 +1071,7 @@ def test_render_gate_feedback_false_drops_genuinely_false_conjunct():
     # a "false" verdict still guards a genuinely-true claim from being weakened, but
     # a conjunct that is FALSE as the issue states it must be DROPPED, corrected in
     # `deferred`, and the true remainder proved (subset-drop — the #73 maxDD case).
-    fb = af.render_gate_feedback("false", "", None)
+    fb = af.render_gate_feedback(PACK, "false", "", None)
     assert "NEGATION" in fb
     assert "weaken" in fb                              # a true claim is still protected
     assert "CORRECTION" in fb and "deferred" in fb     # false conjunct → drop + correct + defer
@@ -1074,12 +1079,12 @@ def test_render_gate_feedback_false_drops_genuinely_false_conjunct():
 
 
 def test_render_gate_feedback_unknown_gate_generic():
-    fb = af.render_gate_feedback("mystery", "d", None)
+    fb = af.render_gate_feedback(PACK, "mystery", "d", None)
     assert "mystery" in fb and "without weakening" in fb
 
 
 def test_intent_messages_carry_feedback():
-    msgs = af.intent_messages(_ISSUE, "SIGS", feedback="PREV-FB")
+    msgs = af.intent_messages(PACK, _ISSUE, "SIGS", feedback="PREV-FB")
     user = msgs[1]["content"]
     assert "PREV-FB" in user
     assert "REVISED intent" in user
@@ -1087,7 +1092,7 @@ def test_intent_messages_carry_feedback():
 
 
 def test_intent_messages_no_feedback_block_by_default():
-    user = af.intent_messages(_ISSUE, "SIGS")[1]["content"]
+    user = af.intent_messages(PACK, _ISSUE, "SIGS")[1]["content"]
     assert "REVISED intent" not in user
 
 
@@ -1097,7 +1102,7 @@ def test_draft_intent_threads_feedback_to_chat():
     def chat(msgs):
         seen["user"] = msgs[1]["content"]
         return ('{"statement": "s", "module_name": "M", "benchmark_id": "b"}', 7)
-    r = af.draft_intent(_ISSUE, "", chat_fn=chat, feedback="FIX-THIS")
+    r = af.draft_intent(PACK, _ISSUE, "", chat_fn=chat, feedback="FIX-THIS")
     assert r["ok"] is True
     assert "FIX-THIS" in seen["user"]
 
@@ -1119,7 +1124,7 @@ def test_intent_reject_reason_pinpoints_the_missing_piece():
 
 
 def test_draft_intent_surfaces_reject_reason():
-    di = af.draft_intent(_ISSUE, "", chat_fn=lambda m: ("prose, no json", 4))
+    di = af.draft_intent(PACK, _ISSUE, "", chat_fn=lambda m: ("prose, no json", 4))
     assert di["ok"] is False
     assert di["reason"] == "no JSON object in reply"
 
@@ -1244,7 +1249,7 @@ def test_evidence_is_architecture_scoped(tmp_path):
 def test_refill_records_carry_arch_stamp(monkeypatch, tmp_path):
     _two_stage_ok(monkeypatch)
     _pass_gates(monkeypatch)
-    res = af.refill([_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
+    res = af.refill(PACK, [_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
                     context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000,
                     agentic_formalize_fn=_good_agentic, slot_switch_fn=lambda s: None)
     assert res["seeded"] and res["attempted"][0]["arch"] == af.ROUTING_ARCH
@@ -1265,18 +1270,18 @@ def test_load_prior_unknowns_unions_across_records(tmp_path):
 # --- prose-slop screen wiring (item SP4) -------------------------------------
 
 def test_intent_system_carries_the_terse_docstring_register():
-    assert "no marketing" in af.INTENT_SYSTEM
-    assert "do not sell it" in af.INTENT_SYSTEM.lower()
+    assert "no marketing" in PACK.prompt("intent-system")
+    assert "do not sell it" in PACK.prompt("intent-system").lower()
 
 
 def test_refill_records_docstring_prose_slop_in_telemetry(monkeypatch, tmp_path):
-    def slop_intent(i, ctx, *, chat_fn, feedback=None, **kw):
+    def slop_intent(pk, i, ctx, *, chat_fn, feedback=None, **kw):
         return {"ok": True, "tokens": 1, "intent": {
             "statement": "s", "objects": [], "module_name": "M", "benchmark_id": "b",
             "docstring": "A powerful, cutting-edge tool.", "deferred": []}}
     monkeypatch.setattr(af, "draft_intent", slop_intent)
     _pass_gates(monkeypatch)
-    res = af.refill([_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
+    res = af.refill(PACK, [_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
                     context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000,
                     agentic_formalize_fn=_good_agentic, slot_switch_fn=lambda s: None)
     assert res["attempted"][0]["telemetry"]["prose_slop"] >= 2   # powerful + cutting-edge
@@ -1285,7 +1290,7 @@ def test_refill_records_docstring_prose_slop_in_telemetry(monkeypatch, tmp_path)
 def test_refill_clean_docstring_has_zero_prose_slop(monkeypatch, tmp_path):
     _two_stage_ok(monkeypatch)          # _good_intent → docstring "d" (clean)
     _pass_gates(monkeypatch)
-    res = af.refill([_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
+    res = af.refill(PACK, [_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
                     context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000,
                     agentic_formalize_fn=_good_agentic, slot_switch_fn=lambda s: None)
     assert res["attempted"][0]["telemetry"]["prose_slop"] == 0
@@ -1413,12 +1418,12 @@ def test_render_prior_lessons_cites_failures_and_rotates_diversity():
 
 
 def test_intent_messages_carry_prior_lessons():
-    user = af.intent_messages(_ISSUE, "SIGS", prior_lessons="PRIOR-NOTE")[1]["content"]
+    user = af.intent_messages(PACK, _ISSUE, "SIGS", prior_lessons="PRIOR-NOTE")[1]["content"]
     assert "PRIOR-NOTE" in user
 
 
 def test_intent_messages_no_prior_lessons_by_default():
-    assert "PRIOR-NOTE" not in af.intent_messages(_ISSUE, "SIGS")[1]["content"]
+    assert "PRIOR-NOTE" not in af.intent_messages(PACK, _ISSUE, "SIGS")[1]["content"]
 
 
 def test_draft_intent_threads_prior_lessons_to_chat():
@@ -1427,7 +1432,7 @@ def test_draft_intent_threads_prior_lessons_to_chat():
     def chat(msgs):
         seen["user"] = msgs[1]["content"]
         return ('{"statement": "s", "module_name": "M", "benchmark_id": "b"}', 7)
-    af.draft_intent(_ISSUE, "", chat_fn=chat, prior_lessons="LESSON-Z")
+    af.draft_intent(PACK, _ISSUE, "", chat_fn=chat, prior_lessons="LESSON-Z")
     assert "LESSON-Z" in seen["user"]
 
 
@@ -1445,7 +1450,7 @@ def test_refill_injects_prior_lessons_into_the_intent_prompt(monkeypatch, tmp_pa
         "family": "fidelity", "last_gate": "unfaithful",
         "last_detail": "inequality direction wrong",
         "gates_tried": ["formalize", "unfaithful"], "prior_ticks": 1})
-    res = af.refill([issue], reason_fn=intent_fn, intent_fn=intent_fn, prove_fn=_NOOP,
+    res = af.refill(PACK, [issue], reason_fn=intent_fn, intent_fn=intent_fn, prove_fn=_NOOP,
                     check_fn=_ELAB_OK, context_fn=lambda i: "", queue_dir=str(tmp_path),
                     budget=100000, agentic_formalize_fn=_good_agentic, slot_switch_fn=lambda s: None)
     assert [s["issue"] for s in res["seeded"]] == [7]
@@ -1464,7 +1469,7 @@ _DEFS_STUB = ("noncomputable def knockInPayoff (hit f : ℝ) : ℝ := hit * f\n\
 
 
 def test_intent_messages_defs_route_addendum_and_prior_unknowns():
-    msgs = af.intent_messages(_ISSUE, "SIGS", route="defs",
+    msgs = af.intent_messages(PACK, _ISSUE, "SIGS", route="defs",
                               prior_unknowns=["MathFin.vanillaPayoff"])
     user = msgs[1]["content"]
     assert "definitions" in user                       # the JSON array contract
@@ -1473,7 +1478,7 @@ def test_intent_messages_defs_route_addendum_and_prior_unknowns():
 
 
 def test_intent_messages_theorem_route_has_no_defs_addendum():
-    user = af.intent_messages(_ISSUE, "SIGS")[1]["content"]
+    user = af.intent_messages(PACK, _ISSUE, "SIGS")[1]["content"]
     assert "NEW definitions" not in user
 
 
@@ -1483,7 +1488,7 @@ def test_drafted_def_names_extracts_defs_not_theorem():
 
 
 def test_defs_probe_checks_consumption_and_grounding():
-    probe = af.defs_probe(_DEFS_STUB, "in_out_parity",
+    probe = af.defs_probe(PACK, _DEFS_STUB, "in_out_parity",
                           ["knockInPayoff", "knockOutPayoff"])
     assert _DEFS_STUB.rstrip() in probe                # elaborates the stub first
     assert "`MathFin.in_out_parity" in probe           # theorem looked up by name
@@ -1501,7 +1506,7 @@ def test_defs_rejection_requires_defs_without_daemon():
     def check(code):
         called["n"] += 1
         return {"errors": [], "sorry_count": 1}
-    r = af.defs_rejection("theorem t : True := by sorry", "t", [], check_fn=check)
+    r = af.defs_rejection(PACK, "theorem t : True := by sorry", "t", [], check_fn=check)
     assert r["failed"] is True and r["gate"] == "newdef_depth"
     assert called["n"] == 0                            # no daemon consulted
 
@@ -1509,19 +1514,19 @@ def test_defs_rejection_requires_defs_without_daemon():
 def test_defs_rejection_classifies_marker_errors():
     ungrounded = {"errors": ["defs-gate: ungrounded: MathFin.k is a free-floating wrapper"],
                   "sorry_count": 1}
-    r = af.defs_rejection(_DEFS_STUB, "in_out_parity", ["knockInPayoff"],
+    r = af.defs_rejection(PACK, _DEFS_STUB, "in_out_parity", ["knockInPayoff"],
                           check_fn=lambda c: ungrounded)
     assert r["failed"] is True and r["gate"] == "ungrounded"
     newdef = {"errors": ["defs-gate: newdef_depth: the theorem's type uses none"],
               "sorry_count": 1}
-    r = af.defs_rejection(_DEFS_STUB, "in_out_parity", ["knockInPayoff"],
+    r = af.defs_rejection(PACK, _DEFS_STUB, "in_out_parity", ["knockInPayoff"],
                           check_fn=lambda c: newdef)
     assert r["failed"] is True and r["gate"] == "newdef_depth"
 
 
 def test_defs_rejection_fails_open_on_unmarked_daemon_error():
     infra = {"errors": ["daemon check did not complete: TimeoutError"], "sorry_count": 0}
-    r = af.defs_rejection(_DEFS_STUB, "in_out_parity", ["knockInPayoff"],
+    r = af.defs_rejection(PACK, _DEFS_STUB, "in_out_parity", ["knockInPayoff"],
                           check_fn=lambda c: infra)
     assert r["failed"] is False
 
@@ -1531,9 +1536,9 @@ def test_semantic_verdict_defs_route_swaps_depth_for_defs_gate(monkeypatch):
     monkeypatch.setattr(af, "depth_rejection",
                         lambda *a, **k: order.append("depth") or {"shallow": True, "verdict": "x", "tokens": 0})
     monkeypatch.setattr(af, "defs_rejection",
-                        lambda lt, nm, dn, **k: order.append("defs") or
+                        lambda pk, lt, nm, dn, **k: order.append("defs") or
                         {"failed": True, "gate": "ungrounded", "verdict": "w", "tokens": 0})
-    fail, _tok = af.semantic_verdict(
+    fail, _tok = af.semantic_verdict(PACK,
         lean_text="lt", stub="s", name="t", intent={}, issue={"pointers": []},
         deferred=[], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
         gate_budget=100, route="defs", def_names=["k"])
@@ -1542,8 +1547,8 @@ def test_semantic_verdict_defs_route_swaps_depth_for_defs_gate(monkeypatch):
 
 
 def test_render_gate_feedback_covers_defs_gates():
-    assert "drafted def" in af.render_gate_feedback("newdef_depth", "", None)
-    assert "wrapper" in af.render_gate_feedback("ungrounded", "", None)
+    assert "drafted def" in af.render_gate_feedback(PACK, "newdef_depth", "", None)
+    assert "wrapper" in af.render_gate_feedback(PACK, "ungrounded", "", None)
 
 
 # --- instance-probe gate (item M): concrete-value examples per new def -------
@@ -1603,26 +1608,26 @@ def test_instance_probe_no_defs_passes():
 
 
 def test_render_gate_feedback_covers_instance_probe():
-    fb = af.render_gate_feedback("instance_probe", "no probe for upCapture", None)
+    fb = af.render_gate_feedback(PACK, "instance_probe", "no probe for upCapture", None)
     assert "example" in fb and ("norm_num" in fb or "decide" in fb)
 
 
 def test_intent_defs_addendum_requires_instance_probes():
-    assert "example" in af.INTENT_DEFS_ADDENDUM
-    assert "norm_num" in af.INTENT_DEFS_ADDENDUM or "decide" in af.INTENT_DEFS_ADDENDUM
+    assert "example" in PACK.prompt("intent-defs-addendum")
+    assert "norm_num" in PACK.prompt("intent-defs-addendum") or "decide" in PACK.prompt("intent-defs-addendum")
 
 
 def test_semantic_verdict_defs_route_runs_instance_probe_after_defs(monkeypatch):
     order = []
     monkeypatch.setattr(af, "defs_rejection",
-                        lambda lt, nm, dn, **k: order.append("defs") or
+                        lambda pk, lt, nm, dn, **k: order.append("defs") or
                         {"failed": False, "gate": None, "verdict": "", "tokens": 0})
     monkeypatch.setattr(af, "instance_probe_rejection",
                         lambda lt, dn: order.append("instance_probe") or
                         {"failed": True, "gate": "instance_probe", "verdict": "upCapture", "tokens": 0})
     monkeypatch.setattr(af, "triviality_rejection",
                         lambda *a, **k: order.append("triviality") or {"trivial": False, "verdict": "", "tokens": 0})
-    fail, _tok = af.semantic_verdict(
+    fail, _tok = af.semantic_verdict(PACK,
         lean_text="lt", stub="s", name="t", intent={}, issue={"pointers": []},
         deferred=[], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
         gate_budget=100, route="defs", def_names=["upCapture"])
@@ -1632,7 +1637,7 @@ def test_semantic_verdict_defs_route_runs_instance_probe_after_defs(monkeypatch)
 
 def test_emit_target_files_defs_meta_header_and_provenance():
     meta = {**_META, "definitions": ["knockInPayoff", "knockOutPayoff"]}
-    lean_text, entry, placement = af.emit_target_files(_ISSUE, _DEFS_STUB, meta)
+    lean_text, entry, placement = af.emit_target_files(PACK, _ISSUE, _DEFS_STUB, meta)
     assert "-- new-defs: knockInPayoff, knockOutPayoff" in lean_text
     assert entry["metadata"]["provenance"]["new_defs"] == ["knockInPayoff", "knockOutPayoff"]
     assert lean_text.count("sorry") == 1               # defs are sorry-free
@@ -1650,7 +1655,7 @@ def test_refill_defs_route_requires_intent_definitions(monkeypatch, tmp_path):
         calls["formalize"] += 1
         return _good_agentic(intent, ctx, issue, premises=premises)
     _pass_gates(monkeypatch)
-    res = af.refill([_issue(5, route="defs")], reason_fn=_NOOP, prove_fn=_NOOP,
+    res = af.refill(PACK, [_issue(5, route="defs")], reason_fn=_NOOP, prove_fn=_NOOP,
                     check_fn=_ELAB_OK, context_fn=lambda i: "", queue_dir=str(tmp_path),
                     budget=100000, semantic_rounds=1,
                     agentic_formalize_fn=agentic, slot_switch_fn=lambda s: None)
@@ -1660,13 +1665,13 @@ def test_refill_defs_route_requires_intent_definitions(monkeypatch, tmp_path):
 
 
 def test_refill_defs_route_seeds_with_new_defs_header(monkeypatch, tmp_path):
-    def intent(i, ctx, *, chat_fn, **_kw):
-        base = _good_intent(i, ctx, chat_fn=chat_fn)
+    def intent(pk, i, ctx, *, chat_fn, **_kw):
+        base = _good_intent(PACK, i, ctx, chat_fn=chat_fn)
         base["intent"]["definitions"] = [{"name": "knockInPayoff"}]
         return base
 
     def agentic(intent_, ctx, issue, premises=""):
-        lean_text, entry, _ = af.emit_target_files(issue, _DEFS_STUB,
+        lean_text, entry, _ = af.emit_target_files(PACK, issue, _DEFS_STUB,
                                       {"module_name": intent_["module_name"],
                                        "benchmark_id": intent_["benchmark_id"],
                                        "docstring": "d",
@@ -1676,9 +1681,9 @@ def test_refill_defs_route_seeds_with_new_defs_header(monkeypatch, tmp_path):
     monkeypatch.setattr(af, "draft_intent", intent)
     _pass_gates(monkeypatch)
     monkeypatch.setattr(af, "defs_rejection",
-                        lambda lt, nm, dn, **k: {"failed": False, "gate": None,
+                        lambda pk, lt, nm, dn, **k: {"failed": False, "gate": None,
                                                  "verdict": "", "tokens": 0})
-    res = af.refill([_issue(6, route="defs")], reason_fn=_NOOP, prove_fn=_NOOP,
+    res = af.refill(PACK, [_issue(6, route="defs")], reason_fn=_NOOP, prove_fn=_NOOP,
                     check_fn=_ELAB_OK, context_fn=lambda i: "", queue_dir=str(tmp_path),
                     budget=100000, agentic_formalize_fn=agentic, slot_switch_fn=lambda s: None)
     assert [s["issue"] for s in res["seeded"]] == [6]
@@ -1690,7 +1695,7 @@ def test_refill_defs_route_seeds_with_new_defs_header(monkeypatch, tmp_path):
 def test_refill_history_rows_carry_unknowns_and_family(monkeypatch, tmp_path):
     def agentic(intent, ctx, issue, premises=""):
         stub = "theorem t5 (h : p) : q := by sorry"
-        lean_text, entry, _ = af.emit_target_files({"number": 5, "area": "fixed-income",
+        lean_text, entry, _ = af.emit_target_files(PACK, {"number": 5, "area": "fixed-income",
                                              "pointers": []}, stub,
                                             {"module_name": "T5", "benchmark_id": "b"})
         return {"ok": True, "stub": stub, "meta": {}, "lean_text": lean_text,
@@ -1698,8 +1703,8 @@ def test_refill_history_rows_carry_unknowns_and_family(monkeypatch, tmp_path):
     monkeypatch.setattr(af, "draft_intent", _good_intent)
     _pass_gates(monkeypatch)
     monkeypatch.setattr(af, "depth_rejection",
-                        lambda lt, nm, ptr, **k: {"shallow": True, "verdict": "v", "tokens": 0})
-    res = af.refill([_issue(5, pointers=["MathFin/A.lean"])], reason_fn=_NOOP, prove_fn=_NOOP,
+                        lambda pk, lt, nm, ptr, **k: {"shallow": True, "verdict": "v", "tokens": 0})
+    res = af.refill(PACK, [_issue(5, pointers=["MathFin/A.lean"])], reason_fn=_NOOP, prove_fn=_NOOP,
                     check_fn=_ELAB_OK, context_fn=lambda i: "", queue_dir=str(tmp_path),
                     budget=100000, semantic_rounds=1,
                     agentic_formalize_fn=agentic, slot_switch_fn=lambda s: None)
@@ -1717,7 +1722,7 @@ def _issue(n, **kw):
     return d
 
 
-def _good_intent(i, ctx, *, chat_fn, feedback=None, **_kw):
+def _good_intent(pack, i, ctx, *, chat_fn, feedback=None, **_kw):
     """Stand-in for draft_intent — a parseable intent with naming meta."""
     n = i["number"]
     return {"ok": True, "tokens": 5, "intent": {
@@ -1731,7 +1736,7 @@ def _good_agentic(intent, ctx, issue, premises=""):
     stub = f"theorem t{n} (h : p) : q := by sorry"
     meta = {"module_name": intent["module_name"], "benchmark_id": intent["benchmark_id"],
             "docstring": "d", "deferred": []}
-    lean_text, entry, _ = af.emit_target_files(issue, stub, meta)
+    lean_text, entry, _ = af.emit_target_files(PACK, issue, stub, meta)
     return {"ok": True, "stub": stub, "meta": meta, "lean_text": lean_text,
             "entry": entry, "tokens": 10}
 
@@ -1741,11 +1746,12 @@ def _two_stage_ok(monkeypatch):
 
 
 def _pass_gates(monkeypatch):
-    monkeypatch.setattr(af, "depth_rejection", lambda lt, nm, ptr, **k: {"shallow": False, "tokens": 0})
+    monkeypatch.setattr(af, "depth_rejection", lambda pk, lt, nm, ptr, **k: {"shallow": False, "tokens": 0})
     monkeypatch.setattr(af, "hypothesis_rejection", lambda *a, **k: {"vacuous": False, "tokens": 1})
     monkeypatch.setattr(af, "disproof", lambda *a, **k: {"false": False, "tokens": 1})
     monkeypatch.setattr(af, "judge_faithfulness",
-                        lambda i, s, chat_fn, deferred=None: {"faithful": True, "tokens": 1})
+                        lambda pk, i, s, chat_fn, deferred=None: {"faithful": True,
+                                                                  "tokens": 1})
 
 
 _NOOP = lambda m: ("", 0)
@@ -1755,7 +1761,7 @@ _ELAB_OK = lambda c: {"success": True, "sorry_count": 1, "errors": []}
 def test_refill_stages_a_good_issue(monkeypatch, tmp_path):
     _two_stage_ok(monkeypatch)
     _pass_gates(monkeypatch)
-    res = af.refill([_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
+    res = af.refill(PACK, [_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
                     context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000,
                     agentic_formalize_fn=_good_agentic, slot_switch_fn=lambda s: None)
     assert [s["issue"] for s in res["seeded"]] == [5]
@@ -1766,9 +1772,11 @@ def test_refill_stages_a_good_issue(monkeypatch, tmp_path):
 def test_refill_skips_when_intent_unparseable(monkeypatch, tmp_path):
     # stage 1 (the intent draft) fails to produce a parseable intent → skip before formalizing.
     monkeypatch.setattr(af, "draft_intent",
-                        lambda i, ctx, *, chat_fn, feedback=None, **_kw: {"ok": False, "intent": None, "tokens": 3})
+                        lambda pk, i, ctx, *, chat_fn, feedback=None, **_kw: {"ok": False,
+                                                     "intent": None,
+                                                     "tokens": 3})
     _pass_gates(monkeypatch)
-    res = af.refill([_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
+    res = af.refill(PACK, [_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
                     context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
     assert res["seeded"] == []
 
@@ -1777,7 +1785,7 @@ def test_refill_skips_when_formalization_fails(monkeypatch, tmp_path):
     # the agentic formalize cannot produce an elaborating statement → skip.
     monkeypatch.setattr(af, "draft_intent", _good_intent)
     _pass_gates(monkeypatch)
-    res = af.refill([_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
+    res = af.refill(PACK, [_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
                     context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000,
                     agentic_formalize_fn=lambda intent, ctx, issue, premises="":
                         {"ok": False, "stub": None, "meta": None,
@@ -1793,8 +1801,8 @@ def test_refill_skips_shallow_statement(monkeypatch, tmp_path):
     _two_stage_ok(monkeypatch)
     _pass_gates(monkeypatch)
     monkeypatch.setattr(af, "depth_rejection",
-                        lambda lt, nm, ptr, **k: {"shallow": True, "verdict": "no domain def", "tokens": 0})
-    res = af.refill([_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
+                        lambda pk, lt, nm, ptr, **k: {"shallow": True, "verdict": "no domain def", "tokens": 0})
+    res = af.refill(PACK, [_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
                     context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000,
                     agentic_formalize_fn=_good_agentic, slot_switch_fn=lambda s: None)
     assert res["seeded"] == []
@@ -1811,7 +1819,7 @@ def test_refill_depth_gate_can_be_disabled(monkeypatch, tmp_path):
         calls["n"] += 1
         return {"shallow": True, "verdict": "would reject", "tokens": 0}
     monkeypatch.setattr(af, "depth_rejection", dep)
-    res = af.refill([_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
+    res = af.refill(PACK, [_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
                     context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000, depth_gate=False,
                     agentic_formalize_fn=_good_agentic, slot_switch_fn=lambda s: None)
     assert [s["issue"] for s in res["seeded"]] == [5]
@@ -1820,14 +1828,15 @@ def test_refill_depth_gate_can_be_disabled(monkeypatch, tmp_path):
 
 def test_refill_skips_vacuous_then_stages_next(monkeypatch, tmp_path):
     _two_stage_ok(monkeypatch)
-    monkeypatch.setattr(af, "depth_rejection", lambda lt, nm, ptr, **k: {"shallow": False, "tokens": 0})
+    monkeypatch.setattr(af, "depth_rejection", lambda pk, lt, nm, ptr, **k: {"shallow": False, "tokens": 0})
     monkeypatch.setattr(af, "disproof", lambda *a, **k: {"false": False, "tokens": 1})
     monkeypatch.setattr(af, "judge_faithfulness",
-                        lambda i, s, chat_fn, deferred=None: {"faithful": True, "tokens": 1})
+                        lambda pk, i, s, chat_fn, deferred=None: {"faithful": True,
+                                                                  "tokens": 1})
     # issue 1's stub is vacuous, issue 2's is not
     monkeypatch.setattr(af, "hypothesis_rejection",
                         lambda lt, nm, **k: {"vacuous": "theorem t1 " in lt, "tokens": 1})
-    res = af.refill([_issue(1), _issue(2)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
+    res = af.refill(PACK, [_issue(1), _issue(2)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
                     context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000,
                     agentic_formalize_fn=_good_agentic, slot_switch_fn=lambda s: None)
     assert [s["issue"] for s in res["seeded"]] == [2]
@@ -1837,12 +1846,12 @@ def test_refill_skips_vacuous_then_stages_next(monkeypatch, tmp_path):
 
 def test_refill_skips_unfaithful_judge(monkeypatch, tmp_path):
     _two_stage_ok(monkeypatch)
-    monkeypatch.setattr(af, "depth_rejection", lambda lt, nm, ptr, **k: {"shallow": False, "tokens": 0})
+    monkeypatch.setattr(af, "depth_rejection", lambda pk, lt, nm, ptr, **k: {"shallow": False, "tokens": 0})
     monkeypatch.setattr(af, "hypothesis_rejection", lambda *a, **k: {"vacuous": False, "tokens": 1})
     monkeypatch.setattr(af, "disproof", lambda *a, **k: {"false": False, "tokens": 1})
     monkeypatch.setattr(af, "judge_faithfulness",
-                        lambda i, s, chat_fn, deferred=None: {"faithful": False, "verdict": "weaker", "tokens": 1})
-    res = af.refill([_issue(7)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
+                        lambda pk, i, s, chat_fn, deferred=None: {"faithful": False, "verdict": "weaker", "tokens": 1})
+    res = af.refill(PACK, [_issue(7)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
                     context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000,
                     agentic_formalize_fn=_good_agentic, slot_switch_fn=lambda s: None)
     assert res["seeded"] == []
@@ -1852,13 +1861,13 @@ def test_refill_skips_unfaithful_judge(monkeypatch, tmp_path):
 def test_refill_skips_issue_on_step_exception(monkeypatch, tmp_path):
     # a transient error (e.g. HTTP 429 exhaustion) on one issue must not crash the
     # whole refill — log it and skip to the next issue.
-    def boom(i, ctx, *, chat_fn, feedback=None, **_kw):
+    def boom(pk, i, ctx, *, chat_fn, feedback=None, **_kw):
         if i["number"] == 1:
             raise RuntimeError("HTTP 429 from Mistral API")
-        return _good_intent(i, ctx, chat_fn=chat_fn)
+        return _good_intent(pk, i, ctx, chat_fn=chat_fn)
     monkeypatch.setattr(af, "draft_intent", boom)
     _pass_gates(monkeypatch)
-    res = af.refill([_issue(1), _issue(2)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
+    res = af.refill(PACK, [_issue(1), _issue(2)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
                     context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000,
                     agentic_formalize_fn=_good_agentic, slot_switch_fn=lambda s: None)
     assert [s["issue"] for s in res["seeded"]] == [2]
@@ -1879,7 +1888,7 @@ def test_semantic_verdict_cheapest_first_short_circuits(monkeypatch):
     called = {"vac": False}
     monkeypatch.setattr(af, "hypothesis_rejection",
                         lambda *a, **k: called.update(vac=True) or {"vacuous": False, "tokens": 1})
-    fail, tokens = af.semantic_verdict(
+    fail, tokens = af.semantic_verdict(PACK,
         lean_text="lt", stub="s", name="n", intent={}, issue={"pointers": ["MathFin/A.lean"]},
         deferred=[], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK, gate_budget=1000)
     assert fail == {"gate": "trivial", "detail": "rfl"}
@@ -1893,19 +1902,19 @@ def test_refill_repairs_shallow_draft_with_feedback(monkeypatch, tmp_path):
     # feedback into the intent stage, then seed. This is the observed #53/#66 failure.
     seen = {"intent_feedback": []}
 
-    def intent(i, ctx, *, chat_fn, feedback=None, **_kw):
+    def intent(pk, i, ctx, *, chat_fn, feedback=None, **_kw):
         seen["intent_feedback"].append(feedback)
-        return _good_intent(i, ctx, chat_fn=chat_fn)
+        return _good_intent(pk, i, ctx, chat_fn=chat_fn)
 
     monkeypatch.setattr(af, "draft_intent", intent)
     _pass_gates(monkeypatch)
     calls = {"n": 0}
 
-    def dep(lt, nm, ptr, **k):
+    def dep(pk, lt, nm, ptr, **k):
         calls["n"] += 1
         return {"shallow": calls["n"] == 1, "verdict": "no pointer def", "tokens": 0}
     monkeypatch.setattr(af, "depth_rejection", dep)
-    res = af.refill([_issue(5, pointers=["MathFin/FixedIncome/ZCB.lean"])],
+    res = af.refill(PACK, [_issue(5, pointers=["MathFin/FixedIncome/ZCB.lean"])],
                     reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
                     context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000,
                     agentic_formalize_fn=_good_agentic, slot_switch_fn=lambda s: None)
@@ -1925,7 +1934,7 @@ def test_refill_repairs_trivial_draft_with_feedback(monkeypatch, tmp_path):
         calls["n"] += 1
         return {"trivial": calls["n"] == 1, "verdict": "closed by rfl", "tokens": 0}
     monkeypatch.setattr(af, "triviality_rejection", triv)
-    res = af.refill([_issue(6)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
+    res = af.refill(PACK, [_issue(6)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
                     context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000,
                     agentic_formalize_fn=_good_agentic, slot_switch_fn=lambda s: None)
     assert [s["issue"] for s in res["seeded"]] == [6]
@@ -1936,8 +1945,8 @@ def test_refill_exhausts_semantic_rounds_and_records_obstruction(monkeypatch, tm
     _two_stage_ok(monkeypatch)
     _pass_gates(monkeypatch)
     monkeypatch.setattr(af, "depth_rejection",
-                        lambda lt, nm, ptr, **k: {"shallow": True, "verdict": "v", "tokens": 0})
-    res = af.refill([_issue(5, pointers=["MathFin/A.lean"])], reason_fn=_NOOP, prove_fn=_NOOP,
+                        lambda pk, lt, nm, ptr, **k: {"shallow": True, "verdict": "v", "tokens": 0})
+    res = af.refill(PACK, [_issue(5, pointers=["MathFin/A.lean"])], reason_fn=_NOOP, prove_fn=_NOOP,
                     check_fn=_ELAB_OK, context_fn=lambda i: "", queue_dir=str(tmp_path),
                     budget=100000, semantic_rounds=2,
                     agentic_formalize_fn=_good_agentic, slot_switch_fn=lambda s: None)
@@ -1950,14 +1959,14 @@ def test_refill_exhausts_semantic_rounds_and_records_obstruction(monkeypatch, tm
 def test_refill_semantic_rounds_one_is_single_shot(monkeypatch, tmp_path):
     calls = {"n": 0}
 
-    def intent(i, ctx, *, chat_fn, feedback=None, **_kw):
+    def intent(pk, i, ctx, *, chat_fn, feedback=None, **_kw):
         calls["n"] += 1
-        return _good_intent(i, ctx, chat_fn=chat_fn)
+        return _good_intent(pk, i, ctx, chat_fn=chat_fn)
     monkeypatch.setattr(af, "draft_intent", intent)
     _pass_gates(monkeypatch)
     monkeypatch.setattr(af, "depth_rejection",
-                        lambda lt, nm, ptr, **k: {"shallow": True, "verdict": "v", "tokens": 0})
-    res = af.refill([_issue(5, pointers=["MathFin/A.lean"])], reason_fn=_NOOP, prove_fn=_NOOP,
+                        lambda pk, lt, nm, ptr, **k: {"shallow": True, "verdict": "v", "tokens": 0})
+    res = af.refill(PACK, [_issue(5, pointers=["MathFin/A.lean"])], reason_fn=_NOOP, prove_fn=_NOOP,
                     check_fn=_ELAB_OK, context_fn=lambda i: "", queue_dir=str(tmp_path),
                     budget=100000, semantic_rounds=1,
                     agentic_formalize_fn=_good_agentic, slot_switch_fn=lambda s: None)
@@ -1968,7 +1977,7 @@ def test_refill_semantic_rounds_one_is_single_shot(monkeypatch, tmp_path):
 def test_refill_attempted_records_success(monkeypatch, tmp_path):
     _two_stage_ok(monkeypatch)
     _pass_gates(monkeypatch)
-    res = af.refill([_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
+    res = af.refill(PACK, [_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
                     context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000,
                     agentic_formalize_fn=_good_agentic, slot_switch_fn=lambda s: None)
     rec = res["attempted"][0]
@@ -1981,14 +1990,14 @@ def test_refill_budget_stops_semantic_loop(monkeypatch, tmp_path):
     # loop must stop instead of re-drafting, and say so in the history.
     calls = {"n": 0}
 
-    def intent(i, ctx, *, chat_fn, feedback=None, **_kw):
+    def intent(pk, i, ctx, *, chat_fn, feedback=None, **_kw):
         calls["n"] += 1
-        return _good_intent(i, ctx, chat_fn=chat_fn)
+        return _good_intent(pk, i, ctx, chat_fn=chat_fn)
     monkeypatch.setattr(af, "draft_intent", intent)
     _pass_gates(monkeypatch)
     monkeypatch.setattr(af, "depth_rejection",
-                        lambda lt, nm, ptr, **k: {"shallow": True, "verdict": "v", "tokens": 0})
-    res = af.refill([_issue(5, pointers=["MathFin/A.lean"])], reason_fn=_NOOP, prove_fn=_NOOP,
+                        lambda pk, lt, nm, ptr, **k: {"shallow": True, "verdict": "v", "tokens": 0})
+    res = af.refill(PACK, [_issue(5, pointers=["MathFin/A.lean"])], reason_fn=_NOOP, prove_fn=_NOOP,
                     check_fn=_ELAB_OK, context_fn=lambda i: "", queue_dir=str(tmp_path),
                     budget=8, semantic_rounds=3,
                     agentic_formalize_fn=_good_agentic, slot_switch_fn=lambda s: None)
@@ -1997,10 +2006,10 @@ def test_refill_budget_stops_semantic_loop(monkeypatch, tmp_path):
 
 
 def test_refill_records_error_outcome(monkeypatch, tmp_path):
-    def boom(i, ctx, *, chat_fn, feedback=None, **_kw):
+    def boom(pk, i, ctx, *, chat_fn, feedback=None, **_kw):
         raise RuntimeError("HTTP 429 from Mistral API")
     monkeypatch.setattr(af, "draft_intent", boom)
-    res = af.refill([_issue(1)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
+    res = af.refill(PACK, [_issue(1)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
                     context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
     assert res["seeded"] == []
     assert res["attempted"][0]["outcome"] == "error"
@@ -2023,7 +2032,7 @@ def test_parse_intent_none_when_missing_required():
 
 
 def test_intent_messages_carry_issue_and_context():
-    msgs = af.intent_messages({"number": 1, "title": "FRA", "body": "F = ...", "pointers": []}, "SIGPACK")
+    msgs = af.intent_messages(PACK, {"number": 1, "title": "FRA", "body": "F = ...", "pointers": []}, "SIGPACK")
     joined = " ".join(m["content"] for m in msgs)
     assert "FRA" in joined and "SIGPACK" in joined
     assert any(m["role"] == "system" for m in msgs)
@@ -2031,12 +2040,12 @@ def test_intent_messages_carry_issue_and_context():
 
 def test_draft_intent_ok_and_tokens():
     reply = '```json\n{"statement":"S","objects":[],"module_name":"M","benchmark_id":"mf-x","docstring":"d"}\n```'
-    r = af.draft_intent(_issue(3), "", chat_fn=_script_chat([reply]))
+    r = af.draft_intent(PACK, _issue(3), "", chat_fn=_script_chat([reply]))
     assert r["ok"] is True and r["intent"]["module_name"] == "M" and r["tokens"] == 10
 
 
 def test_draft_intent_not_ok_when_unparseable():
-    r = af.draft_intent(_issue(3), "", chat_fn=_script_chat(["sorry, no json"]))
+    r = af.draft_intent(PACK, _issue(3), "", chat_fn=_script_chat(["sorry, no json"]))
     assert r["ok"] is False and r["intent"] is None
 
 
@@ -2099,7 +2108,7 @@ def test_strengthen_candidate_strips_regates_and_rebuilds_snippet():
     def regate(cand):
         regates.append(cand)
         return {"passed": True, "reason": "ok", "warnings": []}
-    s = af.strengthen_candidate(_STRONG_MOD, _STRONG_SNIP, "premium_ge_mean",
+    s = af.strengthen_candidate(PACK, _STRONG_MOD, _STRONG_SNIP, "premium_ge_mean",
                                 _UNUSED_WARN, regate_fn=regate)
     assert s["stripped"] == ["hσ_eq"]
     assert "hσ_eq" not in s["candidate"] and "(hσ : 0 ≤ σ)" in s["candidate"]
@@ -2109,7 +2118,7 @@ def test_strengthen_candidate_strips_regates_and_rebuilds_snippet():
 
 
 def test_strengthen_candidate_fails_open_when_regate_rejects():
-    s = af.strengthen_candidate(_STRONG_MOD, _STRONG_SNIP, "premium_ge_mean",
+    s = af.strengthen_candidate(PACK, _STRONG_MOD, _STRONG_SNIP, "premium_ge_mean",
                                 _UNUSED_WARN,
                                 regate_fn=lambda c: {"passed": False, "reason": "axiom_dirty"})
     assert s["stripped"] == [] and s["candidate"] == _STRONG_MOD and s["entry_code"] is None
@@ -2118,7 +2127,7 @@ def test_strengthen_candidate_fails_open_when_regate_rejects():
 def test_strengthen_candidate_reverts_when_snippet_cannot_rebuild():
     # module and snippet must stay coherent — an unrebuildable snippet reverts
     # the whole strip (else open-pr regen would block on a mismatched re-export)
-    s = af.strengthen_candidate(_STRONG_MOD, "not a lean snippet", "premium_ge_mean",
+    s = af.strengthen_candidate(PACK, _STRONG_MOD, "not a lean snippet", "premium_ge_mean",
                                 _UNUSED_WARN,
                                 regate_fn=lambda c: {"passed": True, "warnings": []})
     assert s["stripped"] == [] and s["candidate"] == _STRONG_MOD
@@ -2126,7 +2135,7 @@ def test_strengthen_candidate_reverts_when_snippet_cannot_rebuild():
 
 def test_strengthen_candidate_noop_without_relevant_warnings():
     regates = []
-    s = af.strengthen_candidate(_STRONG_MOD, _STRONG_SNIP, "premium_ge_mean",
+    s = af.strengthen_candidate(PACK, _STRONG_MOD, _STRONG_SNIP, "premium_ge_mean",
                                 ["unused variable `hproof_local`"],
                                 regate_fn=lambda c: regates.append(c))
     assert s["stripped"] == [] and s["candidate"] == _STRONG_MOD and regates == []
@@ -2142,7 +2151,7 @@ def test_trim_unused_imports_drops_only_unneeded_mathfin_imports():
             return {"success": False, "errors": ["unknown constant 'MathFin.zcb'"],
                     "sorry_count": 0}
         return {"success": True, "errors": [], "sorry_count": 0}
-    r = af.trim_unused_imports(cand, check_fn=check)
+    r = af.trim_unused_imports(PACK, cand, check_fn=check)
     assert r["removed"] == ["MathFin.Futures.Black76"]
     assert "Black76" not in r["candidate"]
     assert "public import MathFin.FixedIncome.ZCB" in r["candidate"]
@@ -2152,12 +2161,12 @@ def test_trim_unused_imports_drops_only_unneeded_mathfin_imports():
 def test_trim_unused_imports_noop_without_mathfin_imports():
     cand = "public import Mathlib\n\ntheorem t : True := trivial\n"
     calls = []
-    r = af.trim_unused_imports(cand, check_fn=lambda c: calls.append(c))
+    r = af.trim_unused_imports(PACK, cand, check_fn=lambda c: calls.append(c))
     assert r["candidate"] == cand and r["removed"] == [] and calls == []
 
 
 def test_formalize_contract_demands_natural_generality():
-    s = af.FORMALIZE_SYSTEM
+    s = PACK.prompt("formalize-system")
     assert "generality" in s and "Nonempty" in s and "↦" in s
 
 
@@ -2166,7 +2175,7 @@ def test_strengthen_candidate_cascades_on_fresh_warnings():
     # warnings drive the next pass, bounded by max_passes
     seq = iter([{"passed": True, "warnings": ["unused variable `hσ`"]},
                 {"passed": True, "warnings": []}])
-    s = af.strengthen_candidate(_STRONG_MOD, _STRONG_SNIP, "premium_ge_mean",
+    s = af.strengthen_candidate(PACK, _STRONG_MOD, _STRONG_SNIP, "premium_ge_mean",
                                 _UNUSED_WARN, regate_fn=lambda c: next(seq))
     assert s["stripped"] == ["hσ_eq", "hσ"]
     assert "hσ" not in s["candidate"].split(":= by")[0].split("theorem")[1]
@@ -2177,7 +2186,7 @@ def test_rebuild_snippet_refuses_foreign_application():
     # corollary shape) — rebuilding it against the core would corrupt it
     snip = ("import M\n\ntheorem mf_x (a : ℝ) (h : 0 ≤ a) : a ≥ 0 :=\n"
             "  MathFin.otherThm a h\n")
-    assert af._rebuild_snippet(snip, _STRONG_MOD, "premium_ge_mean") is None
+    assert af._rebuild_snippet(PACK, snip, _STRONG_MOD, "premium_ge_mean") is None
 
 
 # --- post-gate proof golf -------------------------------------------------------
@@ -2196,7 +2205,7 @@ def test_decl_signatures_extract_up_to_proof_separator():
 
 
 def test_golf_candidate_accepts_signature_preserving_green_golf():
-    r = af.golf_candidate(_GOLFABLE, chat_fn=lambda m: (f"```lean\n{_GOLFED}\n```", 10),
+    r = af.golf_candidate(PACK, _GOLFABLE, chat_fn=lambda m: (f"```lean\n{_GOLFED}\n```", 10),
                           regate_fn=lambda c: {"passed": True})
     assert r["golfed"] is True and r["candidate"].strip() == _GOLFED.strip()
 
@@ -2206,19 +2215,19 @@ def test_golf_candidate_rejects_statement_drift_before_regating():
 
     def no_regate(c):
         raise AssertionError("statement drift must be rejected before the daemon is hit")
-    r = af.golf_candidate(_GOLFABLE, chat_fn=lambda m: (f"```lean\n{drifted}\n```", 10),
+    r = af.golf_candidate(PACK, _GOLFABLE, chat_fn=lambda m: (f"```lean\n{drifted}\n```", 10),
                           regate_fn=no_regate)
     assert r["golfed"] is False and r["candidate"] == _GOLFABLE
 
 
 def test_golf_candidate_fails_open_on_regate_failure_or_no_lean():
-    r = af.golf_candidate(_GOLFABLE, chat_fn=lambda m: (f"```lean\n{_GOLFED}\n```", 10),
+    r = af.golf_candidate(PACK, _GOLFABLE, chat_fn=lambda m: (f"```lean\n{_GOLFED}\n```", 10),
                           regate_fn=lambda c: {"passed": False, "reason": "axiom_dirty"})
     assert r["golfed"] is False and r["candidate"] == _GOLFABLE
-    r2 = af.golf_candidate(_GOLFABLE, chat_fn=lambda m: ("no lean block", 10),
+    r2 = af.golf_candidate(PACK, _GOLFABLE, chat_fn=lambda m: ("no lean block", 10),
                            regate_fn=lambda c: {"passed": True})
     assert r2["golfed"] is False
-    r3 = af.golf_candidate(_GOLFABLE,
+    r3 = af.golf_candidate(PACK, _GOLFABLE,
                            chat_fn=lambda m: (f"```lean\n{_GOLFED.replace('hx', 'sorry')}\n```", 10),
                            regate_fn=lambda c: {"passed": True})
     assert r3["golfed"] is False   # a golf that reintroduces sorry is never accepted
@@ -2234,7 +2243,7 @@ def test_extract_pointers_finds_dedups_orders_mathfin_paths():
     body = ("## Pointers\n- `MathFin/FixedIncome/ZCB.lean` (zcb)\n"
             "- MathFin/FixedIncome/ForwardRate.lean\n"
             "again MathFin/FixedIncome/ZCB.lean and MathFin/Foo/Bar.lean")
-    assert af.extract_pointers(body) == [
+    assert af.extract_pointers(PACK, body) == [
         "MathFin/FixedIncome/ZCB.lean",
         "MathFin/FixedIncome/ForwardRate.lean",
         "MathFin/Foo/Bar.lean",
@@ -2242,7 +2251,7 @@ def test_extract_pointers_finds_dedups_orders_mathfin_paths():
 
 
 def test_extract_pointers_empty():
-    assert af.extract_pointers("no lean paths here") == []
+    assert af.extract_pointers(PACK, "no lean paths here") == []
 
 
 def test_prepare_issues_filters_and_enriches():
@@ -2255,7 +2264,7 @@ def test_prepare_issues_filters_and_enriches():
          "body": "x", "labels": [{"name": "status:blocked-research"},
                                   {"name": "type:research"}]},
     ]
-    out = af.prepare_issues(raw)
+    out = af.prepare_issues(PACK, raw)
     assert [i["number"] for i in out] == [67]        # 99 (not ready+proof) filtered
     assert out[0]["area"] == "fixed-income"
     assert out[0]["pointers"] == ["MathFin/FixedIncome/ZCB.lean"]

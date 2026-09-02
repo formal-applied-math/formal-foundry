@@ -14,7 +14,13 @@
 # budget (max_turns); the daemon serves refill + the gate.
 set -euo pipefail
 FOUNDRY="$(cd "$(dirname "$0")/.." && pwd)"
-MAIN="${MAIN_REPO:-/home/rapha/code/automated_proofs_quantfin}"
+
+# --- domain pack (runbook 06): the ONE place that knows which library we target ---
+# `DOMAIN` picks the pack; with none set the shim reads `[domain] name` from
+# pipeline.toml. Exports DOMAIN_NAMESPACE, DOMAIN_LAKE_ROOT, MAIN_REPO_SLUG,
+# DOMAIN_VERIFY_IMAGE, DOMAIN_LEAN_LSP_CONTAINER, DOMAIN_BENCHMARK, ...
+eval "$(python3 "$FOUNDRY/probe/domain_pack.py" --export-env ${DOMAIN:+"$DOMAIN"})"
+MAIN="${MAIN_REPO:-$(dirname "$FOUNDRY")/$DOMAIN_REPO_NAME}"
 CFG="$FOUNDRY/pipeline.toml"
 STATE="$FOUNDRY/pipeline_state.json"
 QUEUE="$FOUNDRY/targets/queue/manifest.json"
@@ -40,6 +46,20 @@ if ! ( cd "$MAIN" && python3 -m pytest tests/ -q ) >"$FOUNDRY/runs/preflight-pyt
   tail -3 "$FOUNDRY/runs/preflight-pytest.log" >&2
   exit 0
 fi
+
+# 0b. The ISSUE is the state machine — reconcile it BEFORE planning, so the refill
+# reads a truthful backlog. Without this the pipeline only ever writes state forward
+# (seed → in-progress, PR → review) and nothing walks it back: a PR closed unmerged,
+# a retired stub, or a fail-open label write that did not stick each strand a target
+# outside `status:ready` permanently. It also repairs the reverse drift, which is the
+# one that actually bit — six stubs staged while every issue still said `ready`, so
+# the refill kept re-drafting work already in the queue.
+#
+# Never fails a tick: this is bookkeeping, and it refuses to act on a lookup it could
+# not complete. Human statuses (blocked-design, needs-triage, ...) are never touched.
+GH_TOKEN="${MAIN_PR_TOKEN:-${GH_TOKEN:-}}" python3 issue_state.py \
+  --repo "$MAIN_REPO_SLUG" --reconcile --queue "$(dirname "$QUEUE")" --apply \
+  >/dev/null 2>>/dev/stderr || echo "[tick] issue reconcile failed — continuing" >&2
 
 # 1. Plan (a helper, so we can re-plan after a refill).
 plan() { python3 pipeline.py plan --config "$CFG" --state "$STATE" --queue "$QUEUE" ${FORCE:+--force}; }
@@ -176,7 +196,7 @@ PR_OPENED=0
 ASSEMBLY_BLOCKED=0
 if [ "$OUTCOME" = "pass" ] && [ -f "$CAND" ]; then
   if [ -n "${MAIN_PR_TOKEN:-}" ]; then
-    echo "[tick] $OUTCOME → opening PR on formal-mathfin…" >&2
+    echo "[tick] $OUTCOME → opening PR on $MAIN_REPO_SLUG…" >&2
     if GH_TOKEN="$MAIN_PR_TOKEN" "$FOUNDRY/scripts/open-pr.sh" --id "$ID" --tag "$TAG"; then
       PR_OPENED=1
     else

@@ -6,6 +6,35 @@ The queue is seeded from the **`status:ready` + `type:proof`** issue backlog
 (`gh issue list --repo formal-applied-math/formal-mathfin`) — each issue's *Task* is
 the statement and its *Pointers* are the context-pack modules.
 
+## The issue is the state machine; this queue is a cache of it
+
+The pipeline used to only READ issues. Five stores then answered "what work exists
+and what is done" — the issues, these stubs, `manifest.json`, `pipeline_state.json`,
+and open PRs — and a disagreement between any two of them was silent. Three outages
+in one night came from that, the worst being six stubs staged here while every source
+issue still said `status:ready`, so the refill kept re-drafting work already queued.
+
+The pipeline now writes the state back, so the source carries it:
+
+| transition | written by | meaning |
+|---|---|---|
+| `status:ready` → `status:in-progress` | `autoformalize.py` on a passing seed | a gated stub is staged here |
+| `status:in-progress` → `status:review` | `open-pr.sh` after the PR is created | a PR is open against it |
+| → closed | GitHub, on merge | terminal |
+
+`select_issues` already filters `status:ready`, so this de-duplicates at the source
+instead of in a local file that can drift. Every write is **fail-open** — a label is
+bookkeeping and the proof is the work — so a missed transition costs one redundant
+draft, which the local caches still catch. They stop being load-bearing; they do not
+stop existing.
+
+`probe/issue_state.py --repo <slug> --reconcile --queue targets/queue` rebuilds the
+labels from the two witnesses (open PRs, stubs on disk) and is what makes "cache"
+true rather than aspirational; the tick runs it with `--apply` before planning. It
+never touches an issue holding a human status (`blocked-design`, `needs-triage`, …)
+and never promotes an unlabelled issue into the backlog: it repairs the pipeline's
+own writes, it does not create work.
+
 ## A target = a stub + a re-export sidecar
 
 Per issue `#N` (worked example: `cal-bk-88.*` for #88):
@@ -58,6 +87,25 @@ Retired on this bar:
   The stub also carried two theorems where the shape above allows exactly one.
   The non-vacuous version of #128 needs jumps as actual random variables rather than
   `mertonSpot`'s abstract `k`, which is a corpus development, not a stub.
+
+Removed as COMPLETED (a different thing from retired on the bar above):
+
+- **#161 / #162** (`gain-to-pain`, `upside-capture`, removed 2026-08-18). Both were
+  proved, merged as `formal-mathfin` PR #169, and their defs now live in
+  `MathFin/Performance/RatiosExtended.lean`. A merged target's stub stops elaborating
+  the moment the real declaration exists — `` `MathFin.gainToPain` has already been
+  declared `` — and `build_manifest` validates the queue as a BATCH, so two finished
+  targets were failing activation for every live one. That is how a freshly seeded
+  `cal-bk-71` sat unactivatable behind work that had already shipped
+  (run 32094892342).
+
+  The queue holds work to do, not history: provenance for a merged target lives in
+  the corpus, in `pipeline_state.json`'s history, and on the PR. Delete the pair
+  (`.lean` + `.entry.json`) once its PR merges.
+
+  Worth noting and NOT fixed here: batch-failing is brittle. One dead stub blocking
+  every other target is a gate design question, not a stale-file question, and it
+  should be decided on its own rather than in passing.
 
 ## Validate + activate (needs the daemon; does NOT spend Leanstral tokens)
 

@@ -7,12 +7,19 @@
 # entire effect is `save_updates({"installed_agents": [..., "lean"]})` — no download,
 # no network. So the whole non-interactive install is: install the CLI + write
 # ~/.vibe/config.toml. vibe is a host-side CLI that `docker exec`s into the
-# mathfin-lean-lsp container, so it runs on the RUNNER (or the local box), never
+# lean-lsp container, so it runs on the RUNNER (or the local box), never
 # inside the Lean image — no image rebuild needed.
 #
 # Idempotent. Run once locally, or per tick on the CI runner. The Leanstral key is
 # read from MISTRAL_API_KEY at runtime (never written here).
 set -euo pipefail
+FOUNDRY="$(cd "$(dirname "$0")/.." && pwd)"
+
+# --- domain pack (runbook 06): the ONE place that knows which library we target ---
+# `DOMAIN` picks the pack; with none set the shim reads `[domain] name` from
+# pipeline.toml. Only DOMAIN_LEAN_LSP_CONTAINER is used here.
+eval "$(python3 "$FOUNDRY/probe/domain_pack.py" --export-env ${DOMAIN:+"$DOMAIN"})"
+
 VIBE_HOME="${VIBE_HOME_DIR:-$HOME/.vibe}"
 
 # 1. install the CLI (bundles the lean agent) if absent — uv tool if available, else pip.
@@ -25,9 +32,11 @@ if ! command -v vibe >/dev/null 2>&1; then
 fi
 
 # 2. write the config: install the bundled lean agent + wire the lean-lsp MCP
-#    (docker exec into the mathfin-lean-lsp container the workflow brings up).
+#    (docker exec into the lean-lsp container the workflow brings up).
 mkdir -p "$VIBE_HOME"
-cat > "$VIBE_HOME/config.toml" <<'TOML'
+# UNQUOTED heredoc: `$DOMAIN_LEAN_LSP_CONTAINER` must expand. Nothing else in this
+# block contains a `$`, so there is nothing to escape.
+cat > "$VIBE_HOME/config.toml" <<TOML
 installed_agents = [
     "lean",
 ]
@@ -39,7 +48,7 @@ command = "docker"
 args = [
     "exec",
     "-i",
-    "mathfin-lean-lsp",
+    "$DOMAIN_LEAN_LSP_CONTAINER",
     "lean-lsp-mcp",
     "--lean-project-path",
     "/app",

@@ -1,0 +1,82 @@
+# A verify image for ANY domain in the program (runbook 06 step 4).
+#
+# Same shape as the flagship's `formal-mathfin/docker/Dockerfile.verify`, with the
+# three library-specific COPY targets lifted to build args so one file serves every
+# target repo. The build CONTEXT is the target library's checkout; this Dockerfile
+# is passed in with `-f` from the foundry, so a second library needs no CI infra of
+# its own.
+#
+#   docker build -f <foundry>/docker/Dockerfile.verify.domain \
+#     --build-arg LAKE_ROOT=Econometrics \
+#     --build-arg UMBRELLA=Econometrics.lean \
+#     --build-arg PACK_NAME=econometrics \
+#     -t ghcr.io/formal-applied-math/econometrics-verify:latest <library-checkout>
+#
+# ── BUILT FROM CI ONLY ──
+# Never build this on the development box. It runs `lake build` over a full Mathlib
+# olean tree, which is precisely the ~4-5 GB Lean process the memory doctrine allows
+# exactly one of — and this one runs for tens of minutes with docker's own layer
+# cache on top. The rule does not relax because a library is small: the Mathlib
+# prebuild is the expensive part and every domain pays it identically.
+# `.github/workflows/publish-verify-image.yml` is the sanctioned path.
+
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PATH="/root/.elan/bin:${PATH}"
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    git \
+    libgomp1 \
+    libgmp-dev \
+    python3 \
+    python3-pip \
+    python3-venv \
+    tar \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Lean via elan. The repo's lean-toolchain controls the version Lake uses.
+RUN curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+    | sh -s -- -y --default-toolchain none
+
+WORKDIR /app
+
+# The three names that differ per library. Defaults are the flagship's, so a bare
+# build of this file against formal-mathfin reproduces its own image.
+ARG LAKE_ROOT=MathFin
+ARG UMBRELLA=MathFin.lean
+ARG PACK_NAME=mathfin
+
+# Lean toolchain + Lake project prebuild. `lake exe cache get` downloads precompiled
+# Mathlib oleans from the leanprover-community reservoir (~3 min download vs ~30 min
+# building Mathlib from source). `lake build` then elaborates the library + its
+# direct deps. This bakes the olean tree into the image at /app/.lake/, so the first
+# verify call no longer pays for a cold Lake build.
+COPY lakefile.lean lean-toolchain lake-manifest.json ./
+COPY ${UMBRELLA} ./
+COPY ${LAKE_ROOT}/ ${LAKE_ROOT}/
+RUN elan toolchain install "$(cat lean-toolchain)" \
+    && lean --version \
+    && lake --version \
+    && lake exe cache get \
+    && lake build
+
+# Runtime defaults. Kept AFTER the Lean prebuild layer so changing a runtime cap
+# does not invalidate the expensive build above.
+RUN elan default "$(cat lean-toolchain)"
+
+# Python deps last so editing pyproject.toml / tools/ does NOT invalidate the Lean
+# prebuild. `requirements.tx[t]` is a wildcard on purpose: the flagship ships one and
+# formal-econometrics does not, and a wildcard matching nothing is skipped where a
+# literal missing path is a hard build error.
+COPY pyproject.toml requirements.tx[t] ./
+COPY tools/ tools/
+RUN python3 -m pip install --break-system-packages -e ".[all,dev]"
+
+COPY benchmarks/ benchmarks/
+COPY ${PACK_NAME}.toml ./
+
+ENTRYPOINT ["python3", "-m", "tools.verify"]

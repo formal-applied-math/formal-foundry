@@ -6,6 +6,11 @@ import tempfile
 import pipeline_lib as P
 from pipeline_lib import PipelineConfig
 
+import domain_pack
+
+PACK = domain_pack.load("mathfin")
+
+
 DAY = P.SECONDS_PER_DAY
 
 
@@ -176,10 +181,29 @@ def test_a_broken_ground_truth_lookup_never_stalls_the_tick():
     assert got["id"] == "cal-bk-161"
 
 
-def test_queue_claimed_sees_a_drafted_entry(tmp_path):
-    (tmp_path / "cal-bk-161.entry.json").write_text("{}")
-    assert P.queue_claimed({"id": "cal-bk-161"}, str(tmp_path)) is True
-    assert P.queue_claimed({"id": "cal-bk-999"}, str(tmp_path)) is False
+def test_a_seeded_target_is_selectable_for_proving(tmp_path):
+    """The bug this replaced: a queue-entry check sat in the PROVE selector, and
+    `_write_target` writes `<id>.entry.json` at SEED time — so every target was born
+    claimed and none could ever be proved. Six unattempted, zero selectable, live."""
+    (tmp_path / "cal-bk-71.entry.json").write_text("{}")
+    (tmp_path / "cal-bk-71.lean").write_text("theorem t : True := by sorry")
+    got = P.next_target([{"id": "cal-bk-71"}], {"attempted_issues": []},
+                        claimed_fn=lambda c: False)   # no open PR
+    assert got is not None and got["id"] == "cal-bk-71"
+
+
+def test_an_open_pr_still_claims_a_target():
+    """What must NOT regress: the guard that stopped duplicate PRs on #161/#162."""
+    got = P.next_target([{"id": "cal-bk-161"}, {"id": "cal-bk-162"}],
+                        {"attempted_issues": []},
+                        claimed_fn=lambda c: c["id"] == "cal-bk-161")
+    assert got["id"] == "cal-bk-162", "an open-PR claim must still skip the target"
+
+
+def test_attempted_still_short_circuits():
+    got = P.next_target([{"id": "a"}, {"id": "b"}], {"attempted_issues": ["a"]},
+                        claimed_fn=lambda c: False)
+    assert got["id"] == "b"
 
 
 class _Res:
@@ -189,20 +213,20 @@ class _Res:
 
 def test_pr_claimed_matches_only_a_closing_reference():
     rows = '[{"number": 163, "title": "autoform: GainToPain", "body": "closes #161"}]'
-    assert P.pr_claimed({"id": "cal-bk-161"}, run_fn=lambda *a, **k: _Res(rows)) is True
-    assert P.pr_claimed({"id": "cal-bk-162"}, run_fn=lambda *a, **k: _Res(rows)) is False
+    assert P.pr_claimed({"id": "cal-bk-161"}, repo=PACK.slug, run_fn=lambda *a, **k: _Res(rows)) is True
+    assert P.pr_claimed({"id": "cal-bk-162"}, repo=PACK.slug, run_fn=lambda *a, **k: _Res(rows)) is False
 
 
 def test_pr_claimed_ignores_a_bare_mention():
     rows = '[{"number": 9, "title": "x", "body": "related to #161 but not closing it"}]'
-    assert P.pr_claimed({"id": "cal-bk-161"}, run_fn=lambda *a, **k: _Res(rows)) is False
+    assert P.pr_claimed({"id": "cal-bk-161"}, repo=PACK.slug, run_fn=lambda *a, **k: _Res(rows)) is False
 
 
 def test_pr_claimed_is_false_when_gh_is_unavailable():
     def boom(*a, **k):
         raise FileNotFoundError("gh")
-    assert P.pr_claimed({"id": "cal-bk-161"}, run_fn=boom) is False
-    assert P.pr_claimed({"id": "cal-bk-161"},
+    assert P.pr_claimed({"id": "cal-bk-161"}, repo=PACK.slug, run_fn=boom) is False
+    assert P.pr_claimed({"id": "cal-bk-161"}, repo=PACK.slug,
                         run_fn=lambda *a, **k: _Res("not json")) is False
 
 
@@ -213,5 +237,5 @@ def test_pr_claimed_reads_the_issue_number_off_the_target_id():
         seen["cmd"] = cmd
         return _Res('[{"number": 1, "title": "t", "body": "Closes #162"}]')
 
-    assert P.pr_claimed({"id": "cal-bk-162"}, run_fn=fake) is True
+    assert P.pr_claimed({"id": "cal-bk-162"}, repo=PACK.slug, run_fn=fake) is True
     assert "--state" in seen["cmd"] and "open" in seen["cmd"]

@@ -1,0 +1,23 @@
+{
+  "id": "mf-fixedincome-key-rate-duration",
+  "name": "Formalize key-rate (partial) duration and the sum = effective-duration identity",
+  "description": "Key-rate duration of a multi-tenor bond via HasDerivAt on a single tenor's spot rate, and the identity that key-rate durations sum to the parallel-shift effective duration.",
+  "domain": "mathematical_finance",
+  "code": {
+    "lean": "import MathFin.FixedIncome.KeyRateDuration\n\nopen MathFin\n\n/-- Key-rate duration of a multi-tenor bond via HasDerivAt on a single tenor's spot rate, and the identity that key-rate durations sum to the parallel-shift effective duration. -/\ntheorem mf_fixedincome_key_rate_duration {ι : Type*} [DecidableEq ι] (s : Finset ι) (T c r : ι → ℝ) (k : ι) (hk : k ∈ s) :\n    HasDerivAt (fun x => P s T c (Function.update r k x))\n        (-(c k * T k * zcb (r k) 0 (T k))) (r k) ∧\n    HasDerivAt (fun h => P s T c (fun i => r i + h))\n        (-(∑ j ∈ s, c j * T j * zcb (r j) 0 (T j))) 0 ∧\n    ∑ j ∈ s, KRD s T c r j = ED s T c r :=\n  MathFin.hasDerivAt_P_singleTenor_and_parallelShift_and_krd_sum_eq_ed s T c r k hk\n"
+  },
+  "metadata": {
+    "chapter": 0,
+    "reference": "Formalize key-rate (partial) duration and the sum = effective-duration identity",
+    "difficulty": "medium",
+    "formalization_status": "full",
+    "formalization_scope": "Full formal proof in MathFin/FixedIncome/KeyRateDuration.lean (autoformalized statement, leanstral proof). Re-export from MathFin. Axioms-clean.",
+    "provenance": {
+      "statement_source": "autoform",
+      "statement_model": "autoform",
+      "source": "leanstral-autoform",
+      "model": "labs-leanstral-1-5",
+      "issue": 69
+    }
+  }
+}

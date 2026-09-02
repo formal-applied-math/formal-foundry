@@ -12,7 +12,13 @@
 set -euo pipefail
 SLOT="${1:?usage: slot-switch.sh <daemon|lean-lsp>}"
 FOUNDRY="$(cd "$(dirname "$0")/.." && pwd)"
-MAIN="${MAIN_REPO:-/home/rapha/code/automated_proofs_quantfin}"
+
+# --- domain pack (runbook 06): the ONE place that knows which library we target ---
+# `DOMAIN` picks the pack; with none set the shim reads `[domain] name` from
+# pipeline.toml. Exports DOMAIN_NAMESPACE, DOMAIN_LAKE_ROOT, MAIN_REPO_SLUG,
+# DOMAIN_VERIFY_IMAGE, DOMAIN_LEAN_LSP_CONTAINER, DOMAIN_BENCHMARK, ...
+eval "$(python3 "$FOUNDRY/probe/domain_pack.py" --export-env ${DOMAIN:+"$DOMAIN"})"
+MAIN="${MAIN_REPO:-$(dirname "$FOUNDRY")/$DOMAIN_REPO_NAME}"
 BASE="$MAIN/docker/docker-compose.yml"
 LSP="$MAIN/docker/docker-compose.lean-lsp.yml"
 export COMPOSE_PROJECT_NAME=docker
@@ -36,7 +42,7 @@ case "$SLOT" in
     docker compose -f "$BASE" -f "$LSP" up -d --force-recreate lean-lsp >/dev/null
     echo "[slot] waiting for LEAN_LSP_MCP_READY…" >&2
     for _ in $(seq 1 60); do          # ~5 min; a restart / transient ps-miss must not abort the wait
-      if docker logs mathfin-lean-lsp 2>&1 | grep -q LEAN_LSP_MCP_READY; then
+      if docker logs "$DOMAIN_LEAN_LSP_CONTAINER" 2>&1 | grep -q LEAN_LSP_MCP_READY; then
         echo "[slot] lean-lsp ready" >&2; exit 0
       fi
       sleep 5

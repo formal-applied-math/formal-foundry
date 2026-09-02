@@ -82,7 +82,7 @@ class AutoformalizeConfig:
     gate_budget: int = 20_000
     prover_model: str = "labs-leanstral-1-5"   # leanstral: the kernel gate battery
     # pointers-scoped depth gate: reject a true-but-shallow stub whose TYPE consumes
-    # no def from its `-- pointers:` MathFin modules (a Mathlib identity in domain
+    # no def from its `-- pointers:` library modules (a Mathlib identity in domain
     # clothing). `false` disables it (rely on the kernel/judge gates + human merge).
     depth_gate: bool = True
     formalize_rounds: int = 3   # round-count cited in the formalize-miss telemetry (agentic self-iterates)
@@ -231,6 +231,58 @@ def due(state: dict, cfg: PipelineConfig, now_epoch: int) -> bool:
     return (now_epoch - last) >= cfg.interval_days * SECONDS_PER_DAY - DUE_GRACE_SECONDS
 
 
+def attempted_ids(state: dict) -> set[str]:
+    """Every target this pipeline has attempted, per BOTH records that hold the fact.
+
+    `record_attempt` appends the id to `attempted_issues` AND a row carrying it to
+    `history`, so the two cannot legitimately disagree — they are one fact stored
+    twice. Reading their UNION means losing either one no longer loses the answer,
+    which is the failure that actually happened: `attempted_issues` dropped the
+    2026-07-20 attempts, `history` still had them, nobody asked, and #161/#162 were
+    re-drafted into duplicate PRs (formal-mathfin#163/#165, #164/#167).
+
+    Cannot regress: where the two agree the union is either one of them."""
+    ids = set(state.get("attempted_issues", []) or [])
+    ids |= {h.get("id") for h in (state.get("history") or []) if h.get("id")}
+    return ids
+
+
+def selection_census(candidates: list[dict], state: dict, *, claimed_fn=None,
+                     queue_dir: str | None = None) -> dict:
+    """Why did selection return what it returned? Counts per exclusion reason, plus
+    whether the candidate list actually covers the stubs on disk.
+
+    A null selection has to explain itself. `no_unattempted_targets` was emitted over
+    six unattempted targets because the manifest feeding `candidates` was stale — the
+    message was true about its inputs and useless about reality, and it cost several
+    ticks to notice."""
+    attempted = attempted_ids(state)
+    n_attempted = n_claimed = 0
+    for c in candidates:
+        if c.get("id") in attempted:
+            n_attempted += 1
+            continue
+        if claimed_fn is not None:
+            try:
+                if claimed_fn(c):
+                    n_claimed += 1
+            except Exception:      # a backstop that raises is not a verdict
+                pass
+    out = {
+        "candidates": len(candidates),
+        "excluded_attempted": n_attempted,
+        "excluded_claimed": n_claimed,
+        "selectable": len(candidates) - n_attempted - n_claimed,
+    }
+    if queue_dir and os.path.isdir(queue_dir):
+        on_disk = {f[:-5] for f in os.listdir(queue_dir) if f.endswith(".lean")}
+        listed = {c.get("id") for c in candidates}
+        out["stubs_on_disk"] = len(on_disk)
+        # the stale-manifest signature: stubs exist that the candidate list omits
+        out["missing_from_candidates"] = sorted(on_disk - listed)
+    return out
+
+
 def next_target(candidates: list[dict], state: dict, *, claimed_fn=None) -> dict | None:
     """First candidate that is neither already attempted nor already claimed.
 
@@ -251,7 +303,7 @@ def next_target(candidates: list[dict], state: dict, *, claimed_fn=None) -> dict
     stall the tick, since the fast path is still doing its job. Note the standing
     exposure it covers: a passing tick leaves the issue `status:ready` until a human
     merges, so every target awaiting review is re-selectable for the whole window."""
-    attempted = set(state.get("attempted_issues", []))
+    attempted = attempted_ids(state)
     for c in candidates:
         if c.get("id") in attempted:
             continue
@@ -265,21 +317,27 @@ def next_target(candidates: list[dict], state: dict, *, claimed_fn=None) -> dict
     return None
 
 
-def queue_claimed(candidate: dict, queue_dir: str) -> bool:
-    """Is this target already sitting in `targets/queue/`? A drafted-but-unmerged
-    target leaves its `<id>.entry.json` behind, which is durable in the repo in a way
-    `pipeline_state.json` is not."""
-    tid = candidate.get("id") or ""
-    return bool(tid) and os.path.exists(os.path.join(queue_dir, f"{tid}.entry.json"))
+# `queue_claimed` lived here and is gone. It answered "is this issue already staged
+# in the queue?" — a re-DRAFT guard — but was wired into the PROVE selector, where the
+# answer is yes for every candidate, because `_write_target` writes `<id>.entry.json`
+# at seed time. A target was therefore born claimed and could never be proved.
+#
+# The question it asked is still asked, on the side that needs it and with the same
+# durability property (reads the queue off disk, not `pipeline_state.json`):
+# `autoformalize._already_seeded`. The prove side keeps `pr_claimed` below.
 
 
-def pr_claimed(candidate: dict, *, run_fn=None, repo: str = "formal-applied-math/formal-mathfin") -> bool:
+def pr_claimed(candidate: dict, *, repo: str, run_fn=None) -> bool:
     """Is there an OPEN pull request that already closes this candidate's issue?
 
     The ground-truth half of the duplicate guard. Asks `gh` for open PRs mentioning the
     issue number and matches a closing keyword, so a PR that merely references the issue
     in prose does not block the target. Any failure — no `gh`, no network, unparseable
-    output — returns False: this is a backstop, and a broken lookup must not stop work."""
+    output — returns False: this is a backstop, and a broken lookup must not stop work.
+
+    `repo` is required: it is the DOMAIN's target slug (`pack.slug`), and a default
+    here would silently ask the flagship whether a second library's issue is
+    claimed — always answering no, and always looking like it worked."""
     import json
     import re
     import subprocess

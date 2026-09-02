@@ -1,0 +1,12 @@
+{
+  "_comment": "Worked-example constants and phrases the prompt templates substitute, all read off the real library (Econometrics/Identification/PotentialOutcomes.lean). `exemplar` is `condMean`, the def every identification statement in the library is an equation between — the right thing to show a drafter as 'consume this, do not re-derive it'. `exemplar_partial` is the same def under-applied, which in this library is the LIVE pitfall: `condMean` takes three explicit arguments and a two-argument application is a `(Ω → ℝ) → ℝ` where a real was wanted.",
+  "benchmark_id_format": "id-<area>-<slug>",
+  "exemplar": "Econometrics.condMean",
+  "exemplar_applied": "Econometrics.condMean μ s f",
+  "exemplar_applied_alt": "Econometrics.condMean μ m.treated f",
+  "exemplar_partial": "Econometrics.condMean μ",
+  "exemplar_subject": "the conditional mean",
+  "exemplar_grounded_bodies": "a Bochner integral, ProbabilityTheory.cond, Set.indicator, an existing Econometrics estimand",
+  "exemplar_piecewise": "an estimand branching on treatment status or on a period",
+  "exemplar_provable_side_condition": "a conditional mean built from `∫ … ∂(μ[|s])` is already defined when `μ s = 0` (the conditioned measure is zero and the integral is `0`), so an explicit `μ s ≠ 0` hypothesis is unnecessary"
+}

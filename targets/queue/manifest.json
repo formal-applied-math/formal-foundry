@@ -1,7 +1,53 @@
 {
   "toolchain": "leanprover/lean4:v4.32.0",
-  "main_commit": "0445ae8d6fa1d2dbb05c7274ae5f4a9fb2cfb12d",
+  "main_commit": "c419f0f09fd69f7a912b356171e87a111e9cc2d6",
   "targets": [
+    {
+      "id": "cal-bk-129",
+      "stream": "backlog",
+      "kind": "prove",
+      "sorry_name": "mertonCallPrice_hasDerivAt",
+      "file": "cal-bk-129.lean",
+      "pointers": [
+        "MathFin/BlackScholes/MertonJumpDiffusion.lean"
+      ],
+      "input_hash": "04cf5f0d7a9df47d94aa54e5911d91aa3634d19a1f3c7ea18136abb48bccc261",
+      "main_module": "MathFin/BlackScholes/MertonJumpDiffusionDelta.lean",
+      "benchmark": "benchmarks/mathematical_finance.json",
+      "benchmark_id": "mf-merton-jd-delta",
+      "source_issue": 129,
+      "deferred": [
+        "gamma mixture: the analogous second S-derivative (Poisson-weighted BS gammas) of mertonCallPrice",
+        "vega mixture: the analogous \u03c3-derivative of mertonCallPrice, requiring the chain rule through mertonVol \u03c3 \u03b4 T n"
+      ],
+      "benchmark_entry": {
+        "id": "mf-merton-jd-delta",
+        "name": "Merton jump-diffusion delta / greeks: the Poisson-weighted Black\u2013Scholes delta",
+        "description": "Merton call delta as the Poisson-weighted mixture of chain-ruled Black\u2013Scholes deltas, with the mixture bounded in [0,1].",
+        "domain": "mathematical_finance",
+        "code": {
+          "lean": "import MathFin.BlackScholes.MertonJumpDiffusionDelta\n\nopen MathFin\n\n/-- Merton call delta as the Poisson-weighted mixture of chain-ruled Black\u2013Scholes deltas, with the mixture bounded in [0,1]. -/\ntheorem mf_merton_jd_delta {S_0 K r \u03c3 T k : \u211d} (\u03b4 : \u211d) (\u039b : \u211d\u22650)\n    (hS_0 : 0 < S_0) (hK : 0 < K) (h\u03c3 : 0 < \u03c3) (hT : 0 < T) (hk : -1 < k) :\n    HasDerivAt (fun S \u21a6 mertonCallPrice S K r \u03c3 T k \u03b4 \u039b)\n        (\u2211' n : \u2115, Real.exp (-(\u039b : \u211d)) * (\u039b : \u211d) ^ n / (n.factorial : \u211d)\n          * (mertonSpot S_0 k \u039b n / S_0)\n          * deriv (fun S \u21a6 bsV K r (mertonVol \u03c3 \u03b4 T n) S T) (mertonSpot S_0 k \u039b n)) S_0\n      \u2227 (\u2211' n : \u2115, Real.exp (-(\u039b : \u211d)) * (\u039b : \u211d) ^ n / (n.factorial : \u211d)\n          * (mertonSpot S_0 k \u039b n / S_0)\n          * deriv (fun S \u21a6 bsV K r (mertonVol \u03c3 \u03b4 T n) S T) (mertonSpot S_0 k \u039b n))\n        \u2208 Set.Icc (0 : \u211d) 1 :=\n  MathFin.mertonCallPrice_hasDerivAt \u03b4 \u039b hS_0 hK h\u03c3 hT hk\n"
+        },
+        "metadata": {
+          "chapter": 0,
+          "reference": "Merton jump-diffusion delta / greeks: the Poisson-weighted Black\u2013Scholes delta",
+          "difficulty": "medium",
+          "formalization_status": "full",
+          "formalization_scope": "Full formal proof in MathFin/BlackScholes/MertonJumpDiffusionDelta.lean (autoformalized statement, leanstral proof). Re-export from MathFin. Axioms-clean. Faithful SUBSET of issue #129; deferred to follow-up issues: gamma mixture: the analogous second S-derivative (Poisson-weighted BS gammas) of mertonCallPrice; vega mixture: the analogous \u03c3-derivative of mertonCallPrice, requiring the chain rule through mertonVol \u03c3 \u03b4 T n.",
+          "provenance": {
+            "statement_source": "autoform",
+            "statement_model": "autoform",
+            "source": "leanstral-autoform",
+            "model": "labs-leanstral-1-5",
+            "issue": 129,
+            "deferred": [
+              "gamma mixture: the analogous second S-derivative (Poisson-weighted BS gammas) of mertonCallPrice",
+              "vega mixture: the analogous \u03c3-derivative of mertonCallPrice, requiring the chain rule through mertonVol \u03c3 \u03b4 T n"
+            ]
+          }
+        }
+      }
+    },
     {
       "id": "cal-bk-144",
       "stream": "backlog",
@@ -11,14 +57,14 @@
       "pointers": [
         "MathFin/Foundations/WienerIntegralL2.lean"
       ],
-      "input_hash": "15538c6eadfce0805111905fd3dd9731fa07633ff8679ed5ae2baee65f8021b4",
+      "input_hash": "2d1a595bbd5ec24091ef7ef10b2436a2f0cd3fbecc8169cc7555e4801575dd21",
       "main_module": "MathFin/FixedIncome/WienerFubiniDeterministic.lean",
       "benchmark": "benchmarks/mathematical_finance.json",
       "benchmark_id": "mf-foundations-wiener-fubini-deterministic",
       "source_issue": 144,
       "deferred": [
         "Refactoring `FixedIncome/VasicekBondPrice.lean`'s integrated-rate step to consume this Fubini instance in place of its hand-rolled computation",
-        "Instantiating the identity to the specific Vasicek/Ornstein-Uhlenbeck kernel σ(s,u) = e^{-a(s-u)} and re-deriving `vasicekBondPrice_*` from it",
+        "Instantiating the identity to the specific Vasicek/Ornstein-Uhlenbeck kernel \u03c3(s,u) = e^{-a(s-u)} and re-deriving `vasicekBondPrice_*` from it",
         "Coverage row, AxiomAudit entry, ledger update, and `docs/bridges.md` update recording this instance"
       ],
       "benchmark_entry": {
@@ -27,14 +73,14 @@
         "description": "Deterministic-kernel stochastic Fubini: the Bochner integral of `wienerIntegralLp` over a causal kernel family equals `wienerIntegralLp` of the order-swapped kernel.",
         "domain": "mathematical_finance",
         "code": {
-          "lean": "import MathFin.FixedIncome.WienerFubiniDeterministic\n\nopen MathFin\n\n/-- Deterministic-kernel stochastic Fubini: the Bochner integral of `wienerIntegralLp` over a causal kernel family equals `wienerIntegralLp` of the order-swapped kernel. -/\ntheorem mf_foundations_wiener_fubini_deterministic {Ω : Type*} {mΩ : MeasurableSpace Ω} {μ : Measure Ω} [IsProbabilityMeasure μ]\n    {B : ℝ≥0 → Ω → ℝ} (hB : IsPreBrownianReal B μ) (T : ℝ≥0)\n    (σ : ℝ → Lp ℝ 2 (volume.restrict (Set.Ioc (0 : ℝ) (T : ℝ))))\n    (hσ_causal : ∀ s ∈ Set.Ioc (0 : ℝ) (T : ℝ),\n      (σ s : ℝ → ℝ) =ᵐ[volume.restrict (Set.Ioc s (T : ℝ))] 0)\n    (hσ_int : Integrable σ (volume.restrict (Set.Ioc (0 : ℝ) (T : ℝ))))\n    (g : Lp ℝ 2 (volume.restrict (Set.Ioc (0 : ℝ) (T : ℝ))))\n    (hg : (g : ℝ → ℝ) =ᵐ[volume.restrict (Set.Ioc (0 : ℝ) (T : ℝ))]\n      fun u => ∫ s in Set.Ioc u (T : ℝ), (σ s : ℝ → ℝ) u ∂volume) :\n    ∫ s in Set.Ioc (0 : ℝ) (T : ℝ),\n        WienerIntegralL2.wienerIntegralLp B hB T (σ s) ∂volume =\n      WienerIntegralL2.wienerIntegralLp B hB T g :=\n  MathFin.wienerFubini_deterministic hB T σ hσ_causal hσ_int g hg\n"
+          "lean": "import MathFin.FixedIncome.WienerFubiniDeterministic\n\nopen MathFin\n\n/-- Deterministic-kernel stochastic Fubini: the Bochner integral of `wienerIntegralLp` over a causal kernel family equals `wienerIntegralLp` of the order-swapped kernel. -/\ntheorem mf_foundations_wiener_fubini_deterministic {\u03a9 : Type*} {m\u03a9 : MeasurableSpace \u03a9} {\u03bc : Measure \u03a9} [IsProbabilityMeasure \u03bc]\n    {B : \u211d\u22650 \u2192 \u03a9 \u2192 \u211d} (hB : IsPreBrownianReal B \u03bc) (T : \u211d\u22650)\n    (\u03c3 : \u211d \u2192 Lp \u211d 2 (volume.restrict (Set.Ioc (0 : \u211d) (T : \u211d))))\n    (h\u03c3_causal : \u2200 s \u2208 Set.Ioc (0 : \u211d) (T : \u211d),\n      (\u03c3 s : \u211d \u2192 \u211d) =\u1d50[volume.restrict (Set.Ioc s (T : \u211d))] 0)\n    (h\u03c3_int : Integrable \u03c3 (volume.restrict (Set.Ioc (0 : \u211d) (T : \u211d))))\n    (g : Lp \u211d 2 (volume.restrict (Set.Ioc (0 : \u211d) (T : \u211d))))\n    (hg : (g : \u211d \u2192 \u211d) =\u1d50[volume.restrict (Set.Ioc (0 : \u211d) (T : \u211d))]\n      fun u => \u222b s in Set.Ioc u (T : \u211d), (\u03c3 s : \u211d \u2192 \u211d) u \u2202volume) :\n    \u222b s in Set.Ioc (0 : \u211d) (T : \u211d),\n        WienerIntegralL2.wienerIntegralLp B hB T (\u03c3 s) \u2202volume =\n      WienerIntegralL2.wienerIntegralLp B hB T g :=\n  MathFin.wienerFubini_deterministic hB T \u03c3 h\u03c3_causal h\u03c3_int g hg\n"
         },
         "metadata": {
           "chapter": 0,
           "reference": "Stochastic Fubini (Wiener) instance + Vasicek integrated-rate refactor",
           "difficulty": "medium",
           "formalization_status": "full",
-          "formalization_scope": "Full formal proof in MathFin/FixedIncome/WienerFubiniDeterministic.lean (autoformalized statement, leanstral proof). Re-export from MathFin. Axioms-clean. Faithful SUBSET of issue #144; deferred to follow-up issues: Refactoring `FixedIncome/VasicekBondPrice.lean`'s integrated-rate step to consume this Fubini instance in place of its hand-rolled computation; Instantiating the identity to the specific Vasicek/Ornstein-Uhlenbeck kernel σ(s,u) = e^{-a(s-u)} and re-deriving `vasicekBondPrice_*` from it; Coverage row, AxiomAudit entry, ledger update, and `docs/bridges.md` update recording this instance.",
+          "formalization_scope": "Full formal proof in MathFin/FixedIncome/WienerFubiniDeterministic.lean (autoformalized statement, leanstral proof). Re-export from MathFin. Axioms-clean. Faithful SUBSET of issue #144; deferred to follow-up issues: Refactoring `FixedIncome/VasicekBondPrice.lean`'s integrated-rate step to consume this Fubini instance in place of its hand-rolled computation; Instantiating the identity to the specific Vasicek/Ornstein-Uhlenbeck kernel \u03c3(s,u) = e^{-a(s-u)} and re-deriving `vasicekBondPrice_*` from it; Coverage row, AxiomAudit entry, ledger update, and `docs/bridges.md` update recording this instance.",
           "provenance": {
             "statement_source": "autoform",
             "statement_model": "autoform",
@@ -43,7 +89,7 @@
             "issue": 144,
             "deferred": [
               "Refactoring `FixedIncome/VasicekBondPrice.lean`'s integrated-rate step to consume this Fubini instance in place of its hand-rolled computation",
-              "Instantiating the identity to the specific Vasicek/Ornstein-Uhlenbeck kernel σ(s,u) = e^{-a(s-u)} and re-deriving `vasicekBondPrice_*` from it",
+              "Instantiating the identity to the specific Vasicek/Ornstein-Uhlenbeck kernel \u03c3(s,u) = e^{-a(s-u)} and re-deriving `vasicekBondPrice_*` from it",
               "Coverage row, AxiomAudit entry, ledger update, and `docs/bridges.md` update recording this instance"
             ]
           }
@@ -51,83 +97,81 @@
       }
     },
     {
-      "id": "cal-bk-161",
+      "id": "cal-bk-56",
       "stream": "backlog",
       "kind": "prove",
-      "sorry_name": "gainToPain_nonneg_of_denom_pos",
-      "file": "cal-bk-161.lean",
+      "sorry_name": "forward_start_call_price",
+      "file": "cal-bk-56.lean",
       "pointers": [
-        "MathFin/Performance/RatiosExtended.lean"
+        "MathFin/BlackScholes/GBMLogMoments.lean",
+        "MathFin/BlackScholes/Call.lean",
+        "MathFin/BlackScholes/Dividends.lean"
       ],
-      "input_hash": "66a68bc2b4c3c7ffae8966ddac8b573f570ddbdcc4933ec03b6a2f55e54a4efd",
-      "main_module": "MathFin/Performance/PerformanceRatios.lean",
+      "input_hash": "0c2419b2e12e96410ccede09b5a1a22e70b76d8790684fb6683681f475c6749b",
+      "main_module": "MathFin/BlackScholes/ForwardStartCall.lean",
       "benchmark": "benchmarks/mathematical_finance.json",
-      "benchmark_id": "mf-performance-gain_to_pain",
-      "source_issue": 161,
+      "benchmark_id": "mf-blackscholes-forward-start-call",
+      "source_issue": 56,
       "benchmark_entry": {
-        "id": "mf-performance-gain_to_pain",
-        "name": "Add the gain-to-pain ratio and prove it is nonnegative",
-        "description": "The gain-to-pain ratio is nonnegative when defined.",
+        "id": "mf-blackscholes-forward-start-call",
+        "name": "Forward-start call closed form (Rubinstein)",
+        "description": "Closed-form price of a forward-start call via GBM ratio factorization (Rubinstein).",
         "domain": "mathematical_finance",
         "code": {
-          "lean": "import MathFin.Performance.PerformanceRatios\n\nopen MathFin\n\n/-- The gain-to-pain ratio is nonnegative when defined. -/\ntheorem mf_performance_gain_to_pain {S : Type*} (finset_S : Finset S) (r : S → ℝ)\n    (h : 0 < ∑ s ∈ finset_S, max (-r s) 0) : 0 ≤ gainToPain S finset_S r :=\n  MathFin.gainToPain_nonneg_of_denom_pos finset_S r h\n"
+          "lean": "import MathFin.BlackScholes.ForwardStartCall\n\nopen MathFin\n\n/-- Closed-form price of a forward-start call via GBM ratio factorization (Rubinstein). -/\ntheorem mf_blackscholes_forward_start_call {\u03a9 : Type*} {m\u03a9 : MeasurableSpace \u03a9} {Q : Measure \u03a9} [IsProbabilityMeasure Q]\n    {S_0 r q \u03c3 \u03b1 t1 T : \u211d} {Z1 Z2 : \u03a9 \u2192 \u211d}\n    (hS_0 : 0 < S_0) (h\u03c3 : 0 < \u03c3) (h\u03b1 : 0 < \u03b1) (ht1 : 0 < t1) (ht1T : t1 < T)\n    (hZ1 : HasLaw Z1 (gaussianReal 0 1) Q)\n    (hZ2 : BSCallHyp Q 1 \u03b1 (r - q) \u03c3 (T - t1) Z2)\n    (hIndep : IndepFun Z1 Z2 Q) :\n    \u222b \u03c9, Real.exp (-r * T) *\n        max (bsTerminal (bsTerminal S_0 (r - q) \u03c3 t1 (Z1 \u03c9)) (r - q) \u03c3 (T - t1) (Z2 \u03c9)\n              - \u03b1 * bsTerminal S_0 (r - q) \u03c3 t1 (Z1 \u03c9)) 0 \u2202Q\n      = S_0 * Real.exp (-q * t1) *\n          bsVGarman (Real.exp (-q * (T - t1))) \u03b1 (Real.exp (-r * (T - t1))) \u03c3 (T - t1) :=\n  MathFin.forward_start_call_price hS_0 h\u03c3 h\u03b1 ht1 ht1T hZ1 hZ2 hIndep\n"
         },
         "metadata": {
           "chapter": 0,
-          "reference": "Add the gain-to-pain ratio and prove it is nonnegative",
-          "difficulty": "good-first",
+          "reference": "Forward-start call closed form (Rubinstein)",
+          "difficulty": "medium",
           "formalization_status": "full",
-          "formalization_scope": "Full formal proof in MathFin/Performance/PerformanceRatios.lean (autoformalized statement, leanstral proof). Re-export from MathFin. Axioms-clean. Introduces definitions: gainToPain (new-defs review class).",
+          "formalization_scope": "Full formal proof in MathFin/BlackScholes/ForwardStartCall.lean (autoformalized statement, leanstral proof). Re-export from MathFin. Axioms-clean.",
           "provenance": {
             "statement_source": "autoform",
             "statement_model": "autoform",
             "source": "leanstral-autoform",
             "model": "labs-leanstral-1-5",
-            "issue": 161,
-            "new_defs": [
-              "gainToPain"
-            ]
+            "issue": 56
           }
         }
       }
     },
     {
-      "id": "cal-bk-162",
+      "id": "cal-bk-57",
       "stream": "backlog",
       "kind": "prove",
-      "sorry_name": "upCapture_smul",
-      "file": "cal-bk-162.lean",
+      "sorry_name": "betterOfTwo_price",
+      "file": "cal-bk-57.lean",
       "pointers": [
-        "MathFin/Performance/RatiosExtended.lean"
+        "MathFin/BlackScholes/ExchangeOption.lean",
+        "MathFin/BlackScholes/MargrabeGrounding.lean",
+        "MathFin/Foundations/BivariateGaussian.lean"
       ],
-      "input_hash": "bbce93ee1534c9b5fbab49f3ef9f1dbd944f5403013814ff4a70149d3045fc30",
-      "main_module": "MathFin/Performance/PerformanceRatiosExtended.lean",
+      "input_hash": "3767650c58ad5687f1ce04223f9986c510f046c24763020586946815ec9261e3",
+      "main_module": "MathFin/BlackScholes/BetterOfTwoOption.lean",
       "benchmark": "benchmarks/mathematical_finance.json",
-      "benchmark_id": "mf-performance-upside_capture",
-      "source_issue": 162,
+      "benchmark_id": "mf-blackscholes-better-of-two",
+      "source_issue": 57,
       "benchmark_entry": {
-        "id": "mf-performance-upside_capture",
-        "name": "Add the upside-capture ratio and prove positive homogeneity in the portfolio return",
-        "description": "Upside-capture ratio and its homogeneity.",
+        "id": "mf-blackscholes-better-of-two",
+        "name": "Better-of-two (rainbow, K=0) option closed form via Margrabe",
+        "description": "Closed-form discounted price of the better-of-two (K=0 rainbow) option via max(S1,S2) = S2 + (S1-S2)+ and the Margrabe exchange-option price.",
         "domain": "mathematical_finance",
         "code": {
-          "lean": "import MathFin.Performance.PerformanceRatiosExtended\n\nopen MathFin\n\n/-- Upside-capture ratio and its homogeneity. -/\ntheorem mf_performance_upside_capture {S : Type*} (up : Finset S) (p : S → ℝ) (b : S → ℝ) (c : ℝ)\n    (h : ∑ i ∈ up, b i ≠ 0) : upCapture up (c • p) b = c * upCapture up p b :=\n  MathFin.upCapture_smul up p b c h\n"
+          "lean": "import MathFin.BlackScholes.BetterOfTwoOption\n\nopen MathFin\n\n/-- Closed-form discounted price of the better-of-two (K=0 rainbow) option via max(S1,S2) = S2 + (S1-S2)+ and the Margrabe exchange-option price. -/\ntheorem mf_blackscholes_better_of_two {\u03a9 : Type*} {m\u03a9 : MeasurableSpace \u03a9} {Q : Measure \u03a9}\n    [IsProbabilityMeasure Q] {S1T S2T : \u03a9 \u2192 \u211d} (hS1T : Measurable S1T)\n    (hS2T : Measurable S2T) {S1_0 S2_0 r \u03c3 T : \u211d} (h\u03c3 : \u03c3 \u2260 0) (hT : 0 < T)\n    (hintS2 : Integrable S2T Q)\n    (hintEx : Integrable (fun \u03c9 => max (S1T \u03c9 - S2T \u03c9) 0) Q)\n    (hmart : Real.exp (-r * T) * \u222b \u03c9, S2T \u03c9 \u2202Q = S2_0)\n    (hmargrabe : Real.exp (-r * T) * \u222b \u03c9, max (S1T \u03c9 - S2T \u03c9) 0 \u2202Q\n      = margrabePrice S1_0 S2_0 \u03c3 T) :\n    Real.exp (-r * T) * \u222b \u03c9, max (S1T \u03c9) (S2T \u03c9) \u2202Q\n      = S2_0 + margrabePrice S1_0 S2_0 \u03c3 T :=\n  MathFin.betterOfTwo_price hS1T hS2T h\u03c3 hT hintS2 hintEx hmart hmargrabe\n"
         },
         "metadata": {
           "chapter": 0,
-          "reference": "Add the upside-capture ratio and prove positive homogeneity in the portfolio return",
-          "difficulty": "small",
+          "reference": "Better-of-two (rainbow, K=0) option closed form via Margrabe",
+          "difficulty": "medium",
           "formalization_status": "full",
-          "formalization_scope": "Full formal proof in MathFin/Performance/PerformanceRatiosExtended.lean (autoformalized statement, leanstral proof). Re-export from MathFin. Axioms-clean. Introduces definitions: upCapture (new-defs review class).",
+          "formalization_scope": "Full formal proof in MathFin/BlackScholes/BetterOfTwoOption.lean (autoformalized statement, leanstral proof). Re-export from MathFin. Axioms-clean.",
           "provenance": {
             "statement_source": "autoform",
             "statement_model": "autoform",
             "source": "leanstral-autoform",
             "model": "labs-leanstral-1-5",
-            "issue": 162,
-            "new_defs": [
-              "upCapture"
-            ]
+            "issue": 57
           }
         }
       }
@@ -143,22 +187,22 @@
         "MathFin/FixedIncome/YieldCurve.lean",
         "MathFin/Futures/Black76.lean"
       ],
-      "input_hash": "dd86eb6ea0d9b346cbf8b4845cb600adc6fab0881623e8fbf1c30d7db46d5750",
+      "input_hash": "e3572a5fac671c3df93427d7f46af65193ca0d3be1ec72f894c880c976bf4936",
       "main_module": "MathFin/FixedIncome/InterestRateSwap.lean",
       "benchmark": "benchmarks/mathematical_finance.json",
       "benchmark_id": "mf-fixedincome-swap",
       "source_issue": 66,
       "benchmark_entry": {
         "id": "mf-fixedincome-swap",
-        "name": "Formalize the vanilla interest-rate swap value and par swap rate S = (P(0,T₀)−P(0,Tₙ))/(δ·Σ P(0,Tᵢ))",
+        "name": "Formalize the vanilla interest-rate swap value and par swap rate S = (P(0,T\u2080)\u2212P(0,T\u2099))/(\u03b4\u00b7\u03a3 P(0,T\u1d62))",
         "description": "Vanilla interest-rate swap value and par swap rate.",
         "domain": "mathematical_finance",
         "code": {
-          "lean": "import MathFin.FixedIncome.InterestRateSwap\n\nopen MathFin\n\n/-- Vanilla interest-rate swap value and par swap rate. -/\ntheorem mf_fixedincome_swap {ι : Type*} (r δ K : ℝ) (T : ι → ℝ) (s : Finset ι) (T_0 T_n : ι) (hT0 : T_0 ∈ s) (hTn : T_n ∈ s) (hδ : δ > 0) (hP : ∀ i ∈ s, MathFin.zcb r 0 (T i) > 0) : payer_swap_value (MathFin.zcb r 0 (T T_0)) (MathFin.zcb r 0 (T T_n)) K (annuity δ (fun i => MathFin.zcb r 0 (T i)) s) = 0 ↔ K = par_swap_rate (MathFin.zcb r 0 (T T_0)) (MathFin.zcb r 0 (T T_n)) (annuity δ (fun i => MathFin.zcb r 0 (T i)) s) :=\n  MathFin.payer_swap_value_eq_zero_iff_fixed_rate_eq_par_swap_rate r δ K T s T_0 T_n hT0 hTn hδ hP\n"
+          "lean": "import MathFin.FixedIncome.InterestRateSwap\n\nopen MathFin\n\n/-- Vanilla interest-rate swap value and par swap rate. -/\ntheorem mf_fixedincome_swap {\u03b9 : Type*} (r \u03b4 K : \u211d) (T : \u03b9 \u2192 \u211d) (s : Finset \u03b9) (T_0 T_n : \u03b9) (hT0 : T_0 \u2208 s) (hTn : T_n \u2208 s) (h\u03b4 : \u03b4 > 0) (hP : \u2200 i \u2208 s, MathFin.zcb r 0 (T i) > 0) : payer_swap_value (MathFin.zcb r 0 (T T_0)) (MathFin.zcb r 0 (T T_n)) K (annuity \u03b4 (fun i => MathFin.zcb r 0 (T i)) s) = 0 \u2194 K = par_swap_rate (MathFin.zcb r 0 (T T_0)) (MathFin.zcb r 0 (T T_n)) (annuity \u03b4 (fun i => MathFin.zcb r 0 (T i)) s) :=\n  MathFin.payer_swap_value_eq_zero_iff_fixed_rate_eq_par_swap_rate r \u03b4 K T s T_0 T_n hT0 hTn h\u03b4 hP\n"
         },
         "metadata": {
           "chapter": 0,
-          "reference": "Formalize the vanilla interest-rate swap value and par swap rate S = (P(0,T₀)−P(0,Tₙ))/(δ·Σ P(0,Tᵢ))",
+          "reference": "Formalize the vanilla interest-rate swap value and par swap rate S = (P(0,T\u2080)\u2212P(0,T\u2099))/(\u03b4\u00b7\u03a3 P(0,T\u1d62))",
           "difficulty": "small",
           "formalization_status": "full",
           "formalization_scope": "Full formal proof in MathFin/FixedIncome/InterestRateSwap.lean (autoformalized statement, leanstral proof). Re-export from MathFin. Axioms-clean. Introduces definitions: annuity, payer_swap_value, par_swap_rate (new-defs review class).",
@@ -172,6 +216,252 @@
               "annuity",
               "payer_swap_value",
               "par_swap_rate"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "cal-bk-69",
+      "stream": "backlog",
+      "kind": "prove",
+      "sorry_name": "hasDerivAt_P_singleTenor_and_parallelShift_and_krd_sum_eq_ed",
+      "file": "cal-bk-69.lean",
+      "pointers": [
+        "MathFin/FixedIncome/DurationSensitivity.lean",
+        "MathFin/FixedIncome/ZCB.lean",
+        "MathFin/FixedIncome/Immunization.lean"
+      ],
+      "input_hash": "cec3b2414c0e3c1d8e7b21b4584e4085872cd28282816ccf4c1e63c147e3cc78",
+      "main_module": "MathFin/FixedIncome/KeyRateDuration.lean",
+      "benchmark": "benchmarks/mathematical_finance.json",
+      "benchmark_id": "mf-fixedincome-key-rate-duration",
+      "source_issue": 69,
+      "benchmark_entry": {
+        "id": "mf-fixedincome-key-rate-duration",
+        "name": "Formalize key-rate (partial) duration and the sum = effective-duration identity",
+        "description": "Key-rate duration of a multi-tenor bond via HasDerivAt on a single tenor's spot rate, and the identity that key-rate durations sum to the parallel-shift effective duration.",
+        "domain": "mathematical_finance",
+        "code": {
+          "lean": "import MathFin.FixedIncome.KeyRateDuration\n\nopen MathFin\n\n/-- Key-rate duration of a multi-tenor bond via HasDerivAt on a single tenor's spot rate, and the identity that key-rate durations sum to the parallel-shift effective duration. -/\ntheorem mf_fixedincome_key_rate_duration {\u03b9 : Type*} [DecidableEq \u03b9] (s : Finset \u03b9) (T c r : \u03b9 \u2192 \u211d) (k : \u03b9) (hk : k \u2208 s) :\n    HasDerivAt (fun x => P s T c (Function.update r k x))\n        (-(c k * T k * zcb (r k) 0 (T k))) (r k) \u2227\n    HasDerivAt (fun h => P s T c (fun i => r i + h))\n        (-(\u2211 j \u2208 s, c j * T j * zcb (r j) 0 (T j))) 0 \u2227\n    \u2211 j \u2208 s, KRD s T c r j = ED s T c r :=\n  MathFin.hasDerivAt_P_singleTenor_and_parallelShift_and_krd_sum_eq_ed s T c r k hk\n"
+        },
+        "metadata": {
+          "chapter": 0,
+          "reference": "Formalize key-rate (partial) duration and the sum = effective-duration identity",
+          "difficulty": "medium",
+          "formalization_status": "full",
+          "formalization_scope": "Full formal proof in MathFin/FixedIncome/KeyRateDuration.lean (autoformalized statement, leanstral proof). Re-export from MathFin. Axioms-clean.",
+          "provenance": {
+            "statement_source": "autoform",
+            "statement_model": "autoform",
+            "source": "leanstral-autoform",
+            "model": "labs-leanstral-1-5",
+            "issue": 69
+          }
+        }
+      }
+    },
+    {
+      "id": "cal-bk-71",
+      "stream": "backlog",
+      "kind": "prove",
+      "sorry_name": "apt_exact_factor_pricing",
+      "file": "cal-bk-71.lean",
+      "pointers": [
+        "MathFin/Portfolio/CAPMEquilibrium.lean",
+        "MathFin/Portfolio/CAPM.lean"
+      ],
+      "input_hash": "2c3d5b070bfe17a408e02a0c643f28d75128c74a023653aa19e5b2c4d705dba8",
+      "main_module": "MathFin/Portfolio/ArbitragePricingTheory.lean",
+      "benchmark": "benchmarks/mathematical_finance.json",
+      "benchmark_id": "mf-portfolio-apt-exact-factor-pricing",
+      "source_issue": 71,
+      "benchmark_entry": {
+        "id": "mf-portfolio-apt-exact-factor-pricing",
+        "name": "Derive the APT exact-factor pricing relation E[R\u1d62]\u2212r = \u03a3\u2096 \u03b2\u1d62\u2096 \u03bb\u2096 from no-arbitrage",
+        "description": "No-arbitrage in an exact multi-factor model forces asset intercepts to be affine in the factor loadings.",
+        "domain": "mathematical_finance",
+        "code": {
+          "lean": "import MathFin.Portfolio.ArbitragePricingTheory\n\nopen MathFin\n\n/-- No-arbitrage in an exact multi-factor model forces asset intercepts to be affine in the factor loadings. -/\ntheorem mf_portfolio_apt_exact_factor_pricing {\u03b9 \u03ba : Type*} (s : Finset \u03b9) (t : Finset \u03ba)\n    (a : \u03b9 \u2192 \u211d) (\u03b2 : \u03b9 \u2192 \u03ba \u2192 \u211d)\n    (h_no_arb : \u2200 w : \u03b9 \u2192 \u211d,\n      portfolioReturn s w (fun _ \u21a6 (1 : \u211d)) = 0 \u2192\n      (\u2200 k \u2208 t, portfolioReturn s w (fun i \u21a6 \u03b2 i k) = 0) \u2192\n      portfolioReturn s w a = 0) :\n    \u2203 (lam0 : \u211d) (lam : \u03ba \u2192 \u211d), \u2200 i \u2208 s, a i = lam0 + \u2211 k \u2208 t, \u03b2 i k * lam k :=\n  MathFin.apt_exact_factor_pricing s t a \u03b2 h_no_arb\n"
+        },
+        "metadata": {
+          "chapter": 0,
+          "reference": "Derive the APT exact-factor pricing relation E[R\u1d62]\u2212r = \u03a3\u2096 \u03b2\u1d62\u2096 \u03bb\u2096 from no-arbitrage",
+          "difficulty": "medium",
+          "formalization_status": "full",
+          "formalization_scope": "Full formal proof in MathFin/Portfolio/ArbitragePricingTheory.lean (autoformalized statement, leanstral proof). Re-export from MathFin. Axioms-clean.",
+          "provenance": {
+            "statement_source": "autoform",
+            "statement_model": "autoform",
+            "source": "leanstral-autoform",
+            "model": "labs-leanstral-1-5",
+            "issue": 71
+          }
+        }
+      }
+    },
+    {
+      "id": "cal-bk-80",
+      "stream": "backlog",
+      "kind": "prove",
+      "sorry_name": "certaintyEquivalent_caraUtility_gaussianReal",
+      "file": "cal-bk-80.lean",
+      "pointers": [
+        "MathFin/RiskMeasures/UtilityDerivation.lean",
+        "MathFin/RiskMeasures/Gaussian.lean"
+      ],
+      "input_hash": "a036d6fb51a42e5dbd12f792f8ebd97e78703dea33af038568000a1eda82a2cb",
+      "main_module": "MathFin/RiskMeasures/CertaintyEquivalent.lean",
+      "benchmark": "benchmarks/mathematical_finance.json",
+      "benchmark_id": "mf-riskmeasures-certainty-equivalent-cara-gaussian",
+      "source_issue": 80,
+      "deferred": [
+        "bridge certaintyEquivalent (caraUtility a) X = -entropicRisk a X (depends on entropic-risk issue landing first)"
+      ],
+      "benchmark_entry": {
+        "id": "mf-riskmeasures-certainty-equivalent-cara-gaussian",
+        "name": "Certainty equivalent for CARA utility under Gaussian wealth: CE = \u03bc \u2212 (a/2)\u03c3\u00b2 (mean\u2013variance criterion)",
+        "description": "Certainty equivalent under CARA utility for Gaussian wealth equals \u03bc \u2212 (a/2)\u03c3\u00b2, with nonnegative risk premium and an acceptance-set bridge to UtilityDerivation.",
+        "domain": "mathematical_finance",
+        "code": {
+          "lean": "import MathFin.RiskMeasures.CertaintyEquivalent\n\nopen MathFin\n\n/-- Certainty equivalent under CARA utility for Gaussian wealth equals \u03bc \u2212 (a/2)\u03c3\u00b2, with nonnegative risk premium and an acceptance-set bridge to UtilityDerivation. -/\ntheorem mf_riskmeasures_certainty_equivalent_cara_gaussian {\u03a9 : Type*} [MeasurableSpace \u03a9] (P : Measure \u03a9) [IsProbabilityMeasure P]\n    (a : \u211d) (ha : 0 < a) (\u03bc \u03c3 : \u211d) (h\u03c3 : 0 \u2264 \u03c3) (X : \u03a9 \u2192 \u211d)\n    (hX : Measure.map X P = ProbabilityTheory.gaussianReal \u03bc (\u03c3 ^ 2).toNNReal) :\n    certaintyEquivalent (caraUtility a) X P = gaussianVaR \u03bc \u03c3 0 - (a / 2) * \u03c3 ^ 2 \u2227\n    gaussianVaR \u03bc \u03c3 0 - certaintyEquivalent (caraUtility a) X P = (a / 2) * \u03c3 ^ 2 \u2227\n    0 \u2264 gaussianVaR \u03bc \u03c3 0 - certaintyEquivalent (caraUtility a) X P :=\n  MathFin.certaintyEquivalent_caraUtility_gaussianReal P a ha \u03bc \u03c3 h\u03c3 X hX\n"
+        },
+        "metadata": {
+          "chapter": 0,
+          "reference": "Certainty equivalent for CARA utility under Gaussian wealth: CE = \u03bc \u2212 (a/2)\u03c3\u00b2 (mean\u2013variance criterion)",
+          "difficulty": "medium",
+          "formalization_status": "full",
+          "formalization_scope": "Full formal proof in MathFin/RiskMeasures/CertaintyEquivalent.lean (autoformalized statement, leanstral proof). Re-export from MathFin. Axioms-clean. Faithful SUBSET of issue #80; deferred to follow-up issues: bridge certaintyEquivalent (caraUtility a) X = -entropicRisk a X (depends on entropic-risk issue landing first).",
+          "provenance": {
+            "statement_source": "autoform",
+            "statement_model": "autoform",
+            "source": "leanstral-autoform",
+            "model": "labs-leanstral-1-5",
+            "issue": 80,
+            "deferred": [
+              "bridge certaintyEquivalent (caraUtility a) X = -entropicRisk a X (depends on entropic-risk issue landing first)"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "cal-bk-82",
+      "stream": "backlog",
+      "kind": "prove",
+      "sorry_name": "lifeAnnuityDue_basic_properties",
+      "file": "cal-bk-82.lean",
+      "pointers": [
+        "MathFin/Actuarial/Insurance.lean",
+        "MathFin/Actuarial/Mortality.lean"
+      ],
+      "input_hash": "09141255ce79b33b19406bc6580f4e47f1ecc82f0b1aee06faa67a78995eed00",
+      "main_module": "MathFin/Actuarial/LifeAnnuityDue.lean",
+      "benchmark": "benchmarks/mathematical_finance.json",
+      "benchmark_id": "mf-actuarial-life-annuity-due",
+      "source_issue": 82,
+      "benchmark_entry": {
+        "id": "mf-actuarial-life-annuity-due",
+        "name": "Add the life-contingent annuity EPV \u00e4_x:n = \u2211 v\u1d4f\u00b7\u2096p\u2093 (survival-weighted)",
+        "description": "Survival-weighted discrete life annuity-due \u00e4_x:n, with nonnegativity, monotone decrease in i, and reduction to the certain annuity when survival is identically 1.",
+        "domain": "mathematical_finance",
+        "code": {
+          "lean": "import MathFin.Actuarial.LifeAnnuityDue\n\nopen MathFin\n\n/-- Survival-weighted discrete life annuity-due \u00e4_x:n, with nonnegativity, monotone decrease in i, and reduction to the certain annuity when survival is identically 1. -/\ntheorem mf_actuarial_life_annuity_due (\u03bc : \u211d \u2192 \u211d) (x : \u211d) (n : \u2115) :\n    (\u2200 i : \u211d, -1 < i \u2192 0 \u2264 lifeAnnuityDue \u03bc x i n) \u2227\n    (\u2200 i\u2081 i\u2082 : \u211d, -1 < i\u2081 \u2192 -1 < i\u2082 \u2192 i\u2081 \u2264 i\u2082 \u2192\n      lifeAnnuityDue \u03bc x i\u2082 n \u2264 lifeAnnuityDue \u03bc x i\u2081 n) \u2227\n    (\u2200 i : \u211d, i \u2260 0 \u2192\n      (\u2200 k < n, survivalFromForce \u03bc (x + (k : \u211d)) = survivalFromForce \u03bc x) \u2192\n      lifeAnnuityDue \u03bc x i n = (1 - (1 / (1 + i)) ^ n) / (1 - 1 / (1 + i))) :=\n  MathFin.lifeAnnuityDue_basic_properties \u03bc x n\n"
+        },
+        "metadata": {
+          "chapter": 0,
+          "reference": "Add the life-contingent annuity EPV \u00e4_x:n = \u2211 v\u1d4f\u00b7\u2096p\u2093 (survival-weighted)",
+          "difficulty": "medium",
+          "formalization_status": "full",
+          "formalization_scope": "Full formal proof in MathFin/Actuarial/LifeAnnuityDue.lean (autoformalized statement, leanstral proof). Re-export from MathFin. Axioms-clean.",
+          "provenance": {
+            "statement_source": "autoform",
+            "statement_model": "autoform",
+            "source": "leanstral-autoform",
+            "model": "labs-leanstral-1-5",
+            "issue": 82
+          }
+        }
+      }
+    },
+    {
+      "id": "cal-bk-93",
+      "stream": "backlog",
+      "kind": "prove",
+      "sorry_name": "binomialPrice_lt_americanPrice_put_deep_itm",
+      "file": "cal-bk-93.lean",
+      "pointers": [
+        "MathFin/Binomial/American.lean",
+        "MathFin/Binomial/MertonAmericanCallTree.lean",
+        "MathFin/Binomial/Model.lean"
+      ],
+      "input_hash": "6d322cbe5144eae18464b359c2b752f2e846010e72a1099831d0d69bc76824bc",
+      "main_module": "MathFin/Binomial/AmericanPutEarlyExercisePremium.lean",
+      "benchmark": "benchmarks/mathematical_finance.json",
+      "benchmark_id": "mf-binomial-put-early-exercise-premium",
+      "source_issue": 93,
+      "benchmark_entry": {
+        "id": "mf-binomial-put-early-exercise-premium",
+        "name": "Add the American-put early-exercise premium: European put < American put (strict)",
+        "description": "Deep in-the-money American put price strictly exceeds the European binomial put price when r > 0.",
+        "domain": "mathematical_finance",
+        "code": {
+          "lean": "import MathFin.Binomial.AmericanPutEarlyExercisePremium\n\nopen MathFin\n\n/-- Deep in-the-money American put price strictly exceeds the European binomial put price when r > 0. -/\ntheorem mf_binomial_put_early_exercise_premium {u d r K S : \u211d} {n : \u2115} (hn : 1 \u2264 n) (h : BinomialNoArb u d r)\n    (hr : 0 < r) (hK : 0 < K) (hS : 0 < S) (hdeep : S * u ^ n \u2264 K) :\n    binomialPrice u d r (fun S' => max (K - S') 0) n S <\n      americanPrice u d r (fun S' => max (K - S') 0) n S :=\n  MathFin.binomialPrice_lt_americanPrice_put_deep_itm hn h hr hK hS hdeep\n"
+        },
+        "metadata": {
+          "chapter": 0,
+          "reference": "Add the American-put early-exercise premium: European put < American put (strict)",
+          "difficulty": "medium",
+          "formalization_status": "full",
+          "formalization_scope": "Full formal proof in MathFin/Binomial/AmericanPutEarlyExercisePremium.lean (autoformalized statement, leanstral proof). Re-export from MathFin. Axioms-clean.",
+          "provenance": {
+            "statement_source": "autoform",
+            "statement_model": "autoform",
+            "source": "leanstral-autoform",
+            "model": "labs-leanstral-1-5",
+            "issue": 93
+          }
+        }
+      }
+    },
+    {
+      "id": "cal-bk-98",
+      "stream": "backlog",
+      "kind": "prove",
+      "sorry_name": "cva_const_const",
+      "file": "cal-bk-98.lean",
+      "pointers": [
+        "MathFin/FixedIncome/HazardCurve.lean",
+        "MathFin/FixedIncome/Credit.lean",
+        "MathFin/FixedIncome/CDSTimeVarying.lean"
+      ],
+      "input_hash": "d603f3b91c8591f40c1b68e581af51a316e0523599fa3eb1469c877f5795f62e",
+      "main_module": "MathFin/FixedIncome/CVA.lean",
+      "benchmark": "benchmarks/mathematical_finance.json",
+      "benchmark_id": "mf-credit-cva-unilateral",
+      "source_issue": 98,
+      "benchmark_entry": {
+        "id": "mf-credit-cva-unilateral",
+        "name": "Basic unilateral CVA = (1\u2212R)\u00b7\u222b\u2080\u1d40 EE(u)\u00b7e^(\u2212ru)\u00b7h(u)\u00b7S(u) du",
+        "description": "Unilateral CVA as a recovery-adjusted exposure integral against the hazard default density, with closed form for constant exposure and hazard.",
+        "domain": "mathematical_finance",
+        "code": {
+          "lean": "import MathFin.FixedIncome.CVA\n\nopen MathFin\n\n/-- Unilateral CVA as a recovery-adjusted exposure integral against the hazard default density, with closed form for constant exposure and hazard. -/\ntheorem mf_credit_cva_unilateral {E\u2080 R r h\u2080 T : \u211d} (hrh : r + h\u2080 \u2260 0) :\n    cva (fun _ => E\u2080) R r (fun _ => h\u2080) T =\n      (1 - R) * E\u2080 * (h\u2080 / (r + h\u2080)) * (1 - Real.exp (-(r + h\u2080) * T)) :=\n  MathFin.cva_const_const hrh\n"
+        },
+        "metadata": {
+          "chapter": 0,
+          "reference": "Basic unilateral CVA = (1\u2212R)\u00b7\u222b\u2080\u1d40 EE(u)\u00b7e^(\u2212ru)\u00b7h(u)\u00b7S(u) du",
+          "difficulty": "medium",
+          "formalization_status": "full",
+          "formalization_scope": "Full formal proof in MathFin/FixedIncome/CVA.lean (autoformalized statement, leanstral proof). Re-export from MathFin. Axioms-clean. Introduces definitions: {'name': 'cva', 'signature': '(EE : \u211d \u2192 \u211d) \u2192 (R r : \u211d) \u2192 (h : \u211d \u2192 \u211d) \u2192 (T : \u211d) \u2192 \u211d', 'meaning': 'Unilateral CVA: (1-R) times the integral over [0,T] of expected exposure times discount times default density h(u)\u00b7S(u).', 'built_from': ['MathFin.hazardSurvival', 'Real.exp', 'intervalIntegral notation \u222b u in a..b, f u']} (new-defs review class).",
+          "provenance": {
+            "statement_source": "autoform",
+            "statement_model": "autoform",
+            "source": "leanstral-autoform",
+            "model": "labs-leanstral-1-5",
+            "issue": 98,
+            "new_defs": [
+              "{'name': 'cva', 'signature': '(EE : \u211d \u2192 \u211d) \u2192 (R r : \u211d) \u2192 (h : \u211d \u2192 \u211d) \u2192 (T : \u211d) \u2192 \u211d', 'meaning': 'Unilateral CVA: (1-R) times the integral over [0,T] of expected exposure times discount times default density h(u)\u00b7S(u).', 'built_from': ['MathFin.hazardSurvival', 'Real.exp', 'intervalIntegral notation \u222b u in a..b, f u']}"
             ]
           }
         }

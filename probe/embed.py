@@ -1,7 +1,7 @@
 """Embedding premise retrieval over the pin-accurate lean_scout `types.jsonl`.
 
-Since 2026-08-14 that index carries MathFin AND the Mathlib neighbourhoods a
-MathFin proof actually reaches (`index_filter.py`), so this is the drafter's
+Since 2026-08-14 that index carries the library AND the Mathlib neighbourhoods its
+proofs actually reach (`index_filter.py`), so this is the drafter's
 first pin-accurate semantic view of Mathlib — previously its only Mathlib
 channel was an off-pin public loogle. The corpus is ~an order of magnitude
 bigger as a result, which is why the vectors live in a binary sidecar rather
@@ -91,7 +91,7 @@ _PREMISE_EQNUM = re.compile(r"\.eq_\d+$")
 def _is_usable_premise(name: str) -> bool:
     """False for a Lean-internal / auto-generated name (private decl, simp/proof/
     match internal, structure eliminator, numbered equation lemma) — none of which
-    the model can reference. True for a real, citable library lemma or def (MathFin or Mathlib)."""
+    the model can reference. True for a real, citable library lemma or def (ours or Mathlib)."""
     if not name or name.startswith("_private."):
         return False
     if any(m in name for m in _PREMISE_INTERNAL_INFIX):
@@ -103,7 +103,7 @@ def _is_usable_premise(name: str) -> bool:
 
 def load_premises(index_dir: str) -> list[dict]:
     """The SIGNAL types.jsonl records (name/module/type/docString): real, citable
-    MathFin decls only. Two combined filters — Lean's own `allowCompletion` flag
+    own-namespace decls only. Two combined filters — Lean's own `allowCompletion` flag
     (drops `._f` / `.ctorIdx` / auto-gen internals it authoritatively marks) AND the
     `_is_usable_premise` name guard (drops what `allowCompletion` still lets through:
     `_private.` mangled names, `.eq_N`, `.congr_simp`, structure constructors). ~45%
@@ -310,7 +310,7 @@ def cache_path(index_dir: str, model: str) -> str:
 def make_embedding_retrieve_fn(index: "EmbeddingIndex", k: int, embed_fn):
     """A drop-in `retrieve_fn(query: str) -> str` over `index` — same shape as
     loogle_candidates, but ranks the whole premise corpus by cosine similarity:
-    ours plus the Mathlib neighbourhoods MathFin reaches, unlike loogle
+    ours plus the Mathlib neighbourhoods our proofs reach, unlike loogle
     pin-accurate."""
     def retrieve(query: str) -> str:
         return index.retrieve(query, k, embed_fn)
@@ -326,6 +326,8 @@ def build_cli(argv=None) -> int:
     ap.add_argument("--batch", type=int, default=256)
     ap.add_argument("--max-premises", type=int, default=None,
                     help="cap the corpus (own-namespace records are kept first)")
+    ap.add_argument("--domain", default=None,
+                    help="domain pack whose own namespaces sort first under --max-premises")
     ap.add_argument("--dry-run", action="store_true",
                     help="report the corpus composition and exit without calling the API")
     args = ap.parse_args(argv)
@@ -343,8 +345,16 @@ def build_cli(argv=None) -> int:
     print(f"corpus: {len(premises)} premises "
           + ", ".join(f"{ns}={n}" for ns, n in comp.items()), file=sys.stderr)
     if args.max_premises is not None and len(premises) > args.max_premises:
-        own = [p for p in premises if (p.get("module") or "").startswith("MathFin")]
-        rest = [p for p in premises if not (p.get("module") or "").startswith("MathFin")]
+        import domain_pack
+        own_namespaces = domain_pack.load(
+            args.domain or domain_pack.DEFAULT_NAME).own_namespaces
+
+        def _ours(p) -> bool:
+            mod = p.get("module") or ""
+            return any(mod == ns or mod.startswith(ns + ".") for ns in own_namespaces)
+
+        own = [p for p in premises if _ours(p)]
+        rest = [p for p in premises if not _ours(p)]
         premises = (own + rest)[:args.max_premises]
         print(f"capped to {len(premises)} (--max-premises); "
               f"{len(own)} own records kept first", file=sys.stderr)

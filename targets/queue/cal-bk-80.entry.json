@@ -1,0 +1,26 @@
+{
+  "id": "mf-riskmeasures-certainty-equivalent-cara-gaussian",
+  "name": "Certainty equivalent for CARA utility under Gaussian wealth: CE = μ − (a/2)σ² (mean–variance criterion)",
+  "description": "Certainty equivalent under CARA utility for Gaussian wealth equals μ − (a/2)σ², with nonnegative risk premium and an acceptance-set bridge to UtilityDerivation.",
+  "domain": "mathematical_finance",
+  "code": {
+    "lean": "import MathFin.RiskMeasures.CertaintyEquivalent\n\nopen MathFin\n\n/-- Certainty equivalent under CARA utility for Gaussian wealth equals μ − (a/2)σ², with nonnegative risk premium and an acceptance-set bridge to UtilityDerivation. -/\ntheorem mf_riskmeasures_certainty_equivalent_cara_gaussian {Ω : Type*} [MeasurableSpace Ω] (P : Measure Ω) [IsProbabilityMeasure P]\n    (a : ℝ) (ha : 0 < a) (μ σ : ℝ) (hσ : 0 ≤ σ) (X : Ω → ℝ)\n    (hX : Measure.map X P = ProbabilityTheory.gaussianReal μ (σ ^ 2).toNNReal) :\n    certaintyEquivalent (caraUtility a) X P = gaussianVaR μ σ 0 - (a / 2) * σ ^ 2 ∧\n    gaussianVaR μ σ 0 - certaintyEquivalent (caraUtility a) X P = (a / 2) * σ ^ 2 ∧\n    0 ≤ gaussianVaR μ σ 0 - certaintyEquivalent (caraUtility a) X P :=\n  MathFin.certaintyEquivalent_caraUtility_gaussianReal P a ha μ σ hσ X hX\n"
+  },
+  "metadata": {
+    "chapter": 0,
+    "reference": "Certainty equivalent for CARA utility under Gaussian wealth: CE = μ − (a/2)σ² (mean–variance criterion)",
+    "difficulty": "medium",
+    "formalization_status": "full",
+    "formalization_scope": "Full formal proof in MathFin/RiskMeasures/CertaintyEquivalent.lean (autoformalized statement, leanstral proof). Re-export from MathFin. Axioms-clean. Faithful SUBSET of issue #80; deferred to follow-up issues: bridge certaintyEquivalent (caraUtility a) X = -entropicRisk a X (depends on entropic-risk issue landing first).",
+    "provenance": {
+      "statement_source": "autoform",
+      "statement_model": "autoform",
+      "source": "leanstral-autoform",
+      "model": "labs-leanstral-1-5",
+      "issue": 80,
+      "deferred": [
+        "bridge certaintyEquivalent (caraUtility a) X = -entropicRisk a X (depends on entropic-risk issue landing first)"
+      ]
+    }
+  }
+}

@@ -1,8 +1,8 @@
-"""Slice a raw lean_scout extraction down to the neighborhoods MathFin lives in.
+"""Slice a raw lean_scout extraction down to the neighborhoods the library lives in.
 
 `scripts/build-index.sh` extracts the FULL transitive closure — ~771k records /
 ~850 MB, overwhelmingly Mathlib and core internals. Until 2026-08-14 step 2 of
-that script kept only `MathFin.*` (~2.8k records, a 275x shrink) so the adapter
+that script kept only own-namespace decls (~2.8k records, a 275x shrink) so the adapter
 would load in ~0.03s. That was a load-time decision, but it had a consequence
 nobody costed: the embedding retrieval in `embed.py` runs over `types.jsonl`, so
 **the drafter's semantic retrieval had never seen a single Mathlib lemma**. Its
@@ -15,10 +15,10 @@ consume.
 Keeping everything is not the fix either: `embed.top_k` is a pure-Python O(n·d)
 cosine scan, so the corpus size is a latency budget, not just a disk number.
 
-So we keep a principled middle: OWN modules (MathFin, BrownianMotion) in full,
-plus every ALLOWED external module that a MathFin declaration actually reaches
+So we keep a principled middle: the pack's OWN namespaces in full,
+plus every ALLOWED external module that an own declaration actually reaches
 through `const_dep`. That is "the neighborhoods we already live in" — if a
-MathFin proof consumes `MeasureTheory.Integrable.add`, all of that lemma's
+proof consumes `MeasureTheory.Integrable.add`, all of that lemma's
 module becomes visible, so the drafter can find the sibling it should consume
 instead of reproving it. It is also the miniCTX finding applied to retrieval:
 whole-file context beats isolated signatures.
@@ -38,11 +38,12 @@ import json
 import os
 import sys
 
-# MathFin and Degenne's BrownianMotion are the two libraries we author or vendor
-# directly; everything reachable from them is "external".
-DEFAULT_OWN = ("MathFin", "BrownianMotion")
+# Which namespaces count as OURS is the DOMAIN's call — `pack.own_namespaces` — so
+# `own` is a REQUIRED argument here with no default. An empty default would slice the
+# corpus down to nothing and look like a working run; a TypeError at the call site is
+# the better failure. Everything reachable from the own namespaces is "external".
 # The only external namespace worth retrieving from. An ALLOW list, not a deny
-# list, and deliberately so: a MathFin proof reaches `Eq.mpr`, `Nat.succ` and
+# list, and deliberately so: a proof reaches `Eq.mpr`, `Nat.succ` and
 # friends, and admitting the modules that host them (`Init.Prelude`, …) would
 # drag in thousands of records no drafter can usefully cite.
 DEFAULT_ALLOW = ("Mathlib",)
@@ -51,7 +52,7 @@ DEFAULT_ALLOW = ("Mathlib",)
 def module_matches(module: str | None, prefixes: tuple[str, ...]) -> bool:
     """True iff `module` is one of `prefixes` or a submodule of one.
 
-    Prefix-with-dot, never bare `startswith`: `MathFinance.Foo` is not a MathFin
+    Prefix-with-dot, never bare `startswith`: `Foobar.Baz` is not a `Foo`
     module, and `Mathlibrary.X` is not a Mathlib one."""
     if not module:
         return False
@@ -75,7 +76,7 @@ def _stream(path: str):
         return
 
 
-def reached_constants(const_dep_path: str, own: tuple[str, ...] = DEFAULT_OWN) -> set[str]:
+def reached_constants(const_dep_path: str, own: tuple[str, ...]) -> set[str]:
     """Every constant named as a dependency BY an own-module declaration.
 
     This is the frontier where our library touches the rest of the world."""
@@ -87,7 +88,7 @@ def reached_constants(const_dep_path: str, own: tuple[str, ...] = DEFAULT_OWN) -
 
 
 def neighborhood_modules(types_path: str, reached: set[str], *,
-                         own: tuple[str, ...] = DEFAULT_OWN,
+                         own: tuple[str, ...],
                          allow: tuple[str, ...] = DEFAULT_ALLOW) -> set[str]:
     """The allowed external modules that HOST a reached constant.
 
@@ -108,7 +109,7 @@ def _keep(rec: dict, keep_modules: set[str], own: tuple[str, ...]) -> bool:
 
 
 def filter_file(path: str, keep_modules: set[str], *,
-                own: tuple[str, ...] = DEFAULT_OWN) -> tuple[int, int]:
+                own: tuple[str, ...]) -> tuple[int, int]:
     """Rewrite `path` in place keeping own-module + `keep_modules` records.
 
     Returns `(kept, total)`. Writes to a sibling temp file and renames, so an
@@ -128,7 +129,21 @@ def filter_file(path: str, keep_modules: set[str], *,
     return (kept, total)
 
 
-def slice_index(index_dir: str, *, own: tuple[str, ...] = DEFAULT_OWN,
+def namespace_census(types_path: str, limit: int = 12) -> list[tuple[str, int]]:
+    """(top-level namespace, record count) for a raw index, commonest first.
+
+    The `module` field is the thing the slice keys on, so this reports exactly what
+    it saw. A record with no module at all is counted under `<no module field>`,
+    which is a different diagnosis from a namespace that is merely absent."""
+    counts: dict[str, int] = {}
+    for rec in _stream(types_path):
+        mod = rec.get("module")
+        head = mod.split(".", 1)[0] if isinstance(mod, str) and mod else "<no module field>"
+        counts[head] = counts.get(head, 0) + 1
+    return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:limit]
+
+
+def slice_index(index_dir: str, *, own: tuple[str, ...],
                 allow: tuple[str, ...] = DEFAULT_ALLOW) -> dict:
     """Slice types/const_dep to own + reached-neighborhood, tactics to own only.
 
@@ -141,43 +156,70 @@ def slice_index(index_dir: str, *, own: tuple[str, ...] = DEFAULT_OWN,
     reached = reached_constants(const_dep_path, own)
     mods = neighborhood_modules(types_path, reached, own=own, allow=allow)
 
+    # BEFORE filtering: `filter_file` rewrites in place, so the raw records are gone
+    # by the time we would know the slice kept nothing. One extra pass over the input
+    # costs a few seconds on a job that takes half an hour, and only its result is
+    # conditional — the census is attached below solely when there is a 0% to explain.
+    pre_census = namespace_census(types_path)
+
     t_kept, t_total = filter_file(types_path, mods, own=own)
     c_kept, c_total = filter_file(const_dep_path, mods, own=own)
     # Own-only: house-style exemplars, see the module docstring.
     x_kept, x_total = filter_file(tactics_path, set(), own=own)
 
-    return {
+    out = {
         "reached_constants": len(reached),
         "neighborhood_modules": len(mods),
         "types": {"kept": t_kept, "total": t_total},
         "const_dep": {"kept": c_kept, "total": c_total},
         "tactics": {"kept": x_kept, "total": x_total},
     }
+    # A slice that keeps nothing from a non-empty input is a FINDING, not a result.
+    # Report the namespaces the input actually held so the cause is visible in the
+    # same run rather than costing another extraction to discover.
+    if t_total and not t_kept:
+        out["census"] = pre_census
+    return out
 
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
         prog="index_filter",
-        description="Slice a raw lean_scout index to MathFin + its reached Mathlib neighborhoods.")
+        description="Slice a raw lean_scout index to the library + its reached "
+                    "Mathlib neighborhoods.")
     ap.add_argument("index_dir")
+    ap.add_argument("--domain", default=None,
+                    help="domain pack whose `own_namespaces` to keep in full "
+                         "(default: the pack named in pipeline.toml)")
     ap.add_argument("--own", action="append", default=None,
-                    help=f"own module prefix, repeatable (default: {', '.join(DEFAULT_OWN)})")
+                    help="own module prefix, repeatable; overrides the pack")
     ap.add_argument("--allow", action="append", default=None,
                     help=f"external prefix to retrieve from, repeatable (default: {', '.join(DEFAULT_ALLOW)})")
     args = ap.parse_args(argv)
 
+    import domain_pack
+    own = (tuple(args.own) if args.own
+           else domain_pack.load(args.domain or domain_pack.DEFAULT_NAME).own_namespaces)
     stats = slice_index(args.index_dir,
-                        own=tuple(args.own) if args.own else DEFAULT_OWN,
+                        own=own,
                         allow=tuple(args.allow) if args.allow else DEFAULT_ALLOW)
 
     def line(label, d):
         pct = (100.0 * d["kept"] / d["total"]) if d["total"] else 0.0
         print(f"  {label:<10} {d['kept']:>8} / {d['total']:<8} ({pct:5.2f}%)", file=sys.stderr)
 
+    def census(stats):
+        if "census" not in stats:
+            return
+        print(f"  KEPT NOTHING. own={own} — the input's namespaces were:", file=sys.stderr)
+        for ns, n in stats["census"]:
+            print(f"    {n:>8}  {ns}", file=sys.stderr)
+
     print(f"[index_filter] frontier: {stats['reached_constants']} constants reached "
           f"in {stats['neighborhood_modules']} external modules", file=sys.stderr)
     for k in ("types", "const_dep", "tactics"):
         line(k, stats[k])
+    census(stats)
     return 0
 
 

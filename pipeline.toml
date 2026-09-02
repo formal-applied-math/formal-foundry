@@ -15,6 +15,18 @@
 # trips — real token capture is harvest item T2.
 # difficulty:hard issues escalate to escalate_hard_cap.
 
+# Which library the pipeline targets. The pack in `domains/<name>/` carries the
+# namespace, house doctrine, prompts, exemplars and issue vocabulary; `probe/` itself
+# is domain-free (gated by `probe/test_no_domain_leakage.py`). Every CLI takes a
+# `--domain` override; this is the default the cron uses.
+#
+# Adding a library is writing `domains/<name>/`, not editing Python — but note the
+# TARGET PLANE (scripts, workflows, the GHCR image, the issue labels) is still welded
+# to the flagship until runbook 06 lands, so switching this key alone does not yet
+# retarget a live tick.
+[domain]
+name = "mathfin"
+
 [pipeline]
 interval_days = 2
 monthly_token_allowance = 8000000

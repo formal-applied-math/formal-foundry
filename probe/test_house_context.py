@@ -3,13 +3,17 @@ import os
 import tempfile
 
 from house_context import (
-    HOUSE_DOCTRINE,
     build_drafter_prompt,
     build_system_prompt,
     extract_signatures,
     read_patterns,
     read_pins,
 )
+
+import domain_pack
+
+PACK = domain_pack.load("mathfin")
+
 
 MAIN = "/home/rapha/code/automated_proofs_quantfin"
 
@@ -38,10 +42,10 @@ def _fake_main_repo(tmp_path):
 
 
 def test_doctrine_covers_values_and_coherence():
-    # HOUSE_DOCTRINE now carries only the foundry-specific doctrine (values gate +
+    # PACK.house_doctrine now carries only the foundry-specific doctrine (values gate +
     # coherence + output rules); the house idioms/patterns are injected LIVE from
     # docs/patterns.md by build_system_prompt (first-class, always current).
-    d = HOUSE_DOCTRINE
+    d = PACK.house_doctrine
     assert "native_decide" in d and "propext" in d and "COMPLETE file" in d
     assert "CONSUME" in d and "loogle" in d
     assert "docs/patterns.md" in d          # points at the live, authoritative source
@@ -63,7 +67,7 @@ def test_read_patterns_missing_is_empty_not_raise():
 def test_system_prompt_injects_live_patterns():
     if not os.path.exists(MAIN):
         return  # host-only
-    sp = build_system_prompt(MAIN)
+    sp = build_system_prompt(MAIN, PACK)
     assert "docs/patterns.md" in sp
     # LIVE content from the file, not a hardcoded snapshot:
     assert "Structural patterns" in sp
@@ -73,8 +77,8 @@ def test_system_prompt_injects_live_patterns():
 def test_system_prompt_injects_live_pins():
     if not os.path.exists(MAIN):
         return  # host-only; skip where the main repo isn't checked out
-    sp = build_system_prompt(MAIN)
-    pins = read_pins(MAIN)
+    sp = build_system_prompt(MAIN, PACK)
+    pins = read_pins(MAIN, PACK)
     assert "PINS" in sp
     assert pins["toolchain"] in sp
     assert pins["mathlib"] != "?" and pins["mathlib"] in sp
@@ -141,7 +145,7 @@ def test_drafter_prompt_has_statement_design_and_pins_not_proof_tactics(tmp_path
     # section of patterns.md, but NOT the prover's tactic ladder (which would only
     # tempt it to write proofs instead of a faithful statement).
     repo = _fake_main_repo(tmp_path)
-    p = build_drafter_prompt(str(repo))
+    p = build_drafter_prompt(str(repo), PACK)
     assert "Statement design" in p and "leanprover/lean4:v4.31.0" in p
     assert "nlinarith" not in p  # prover-only tactic ladder stays out of the drafter prompt
 
@@ -152,7 +156,7 @@ def test_drafter_prompt_falls_back_when_no_statement_design_section(tmp_path):
     repo = _fake_main_repo(tmp_path)
     (repo / "docs" / "patterns.md").write_text("## Something else\n\nno design here.\n",
                                                encoding="utf-8")
-    p = build_drafter_prompt(str(repo))
+    p = build_drafter_prompt(str(repo), PACK)
     assert "STATEMENT DESIGN" in p.upper()
     assert "leanprover/lean4:v4.31.0" in p
     assert "nlinarith" not in p

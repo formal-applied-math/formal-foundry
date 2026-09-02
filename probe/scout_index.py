@@ -19,7 +19,7 @@ import os
 
 
 def path_to_module(name_or_path: str) -> str:
-    """'MathFin/FixedIncome/VasicekBondPrice.lean' → 'MathFin.FixedIncome.VasicekBondPrice'.
+    """'<LakeRoot>/FixedIncome/VasicekBondPrice.lean' → '<Namespace>.FixedIncome.VasicekBondPrice'.
 
     A value that is already a Lean module name (no '/', no '.lean') is returned
     unchanged, so callers may pass either form."""

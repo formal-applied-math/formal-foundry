@@ -21,6 +21,7 @@ import os
 import sys
 import time
 
+import domain_pack
 import pipeline_lib as P
 from pipeline_lib import PipelineConfig
 
@@ -33,6 +34,9 @@ def _now(args):
 
 def cmd_plan(args) -> int:
     cfg = PipelineConfig.load(args.config)
+    # which library this tick targets — the duplicate guard asks GitHub about ITS repo
+    pack = domain_pack.load(getattr(args, "domain", None)
+                            or domain_pack.name_from_config(args.config or ""))
     state = P.load_state(args.state)
     now_epoch, now_ym = _now(args)
     state = P.roll_month(state, now_ym)
@@ -51,18 +55,36 @@ def cmd_plan(args) -> int:
         candidates = []
     # backlog T: `attempted_issues` is the fast path, but it is a mutable file written
     # after the PR is opened — when it lost the 2026-07-20 attempts the pipeline
-    # re-drafted #161/#162 and opened duplicate PRs for both. Ask ground truth as a
-    # backstop: an open PR that closes the issue, or a queue entry already on disk.
-    # Both fail soft (see `next_target`), so a missing `gh` never stalls a tick.
-    # `queue_claimed` is a stat() and always on; `pr_claimed` shells out to `gh`, so
-    # it is opt-outable (GH_GROUND_TRUTH=0) — unit tests run pure, the tick runs full.
-    queue_dir = os.path.dirname(os.path.abspath(args.queue))
+    # re-drafted #161/#162 and opened duplicate PRs for both. So ground truth backstops
+    # it: an OPEN PR that closes the issue. Fails soft (see `next_target`), so a missing
+    # `gh` never stalls a tick, and `GH_GROUND_TRUTH=0` opts out — unit tests run pure,
+    # the tick runs full.
+    #
+    # A queue-entry check used to sit here too and had to come out: it asks "is this
+    # issue already staged?", which guards re-DRAFTING, and here every candidate IS
+    # staged — `_write_target` writes `<id>.entry.json` at SEED time, so a target was
+    # born claimed and could never be proved (six unattempted, zero selectable). That
+    # question is answered where it belongs, by `autoformalize._already_seeded`, which
+    # globs the queue off disk and so survives a lost state file just as this did.
     ask_gh = os.environ.get("GH_GROUND_TRUTH", "1") != "0"
     target = P.next_target(
         candidates, state,
-        claimed_fn=lambda c: P.queue_claimed(c, queue_dir) or (ask_gh and P.pr_claimed(c)))
+        claimed_fn=lambda c: bool(ask_gh) and P.pr_claimed(c, repo=pack.slug))
     if target is None:
-        return emit({"action": "skip", "reason": "no_unattempted_targets"})
+        # Say WHY. This skipped over six unattempted targets once because the
+        # manifest feeding `candidates` was stale, and the message was true about
+        # its inputs while being useless about reality.
+        census = P.selection_census(
+            candidates, state,
+            claimed_fn=lambda c: bool(ask_gh) and P.pr_claimed(c, repo=pack.slug),
+            queue_dir=os.path.dirname(os.path.abspath(args.queue)))
+        print(f"[plan] nothing selectable: {census}", file=sys.stderr)
+        if census.get("missing_from_candidates"):
+            print("[plan] STALE MANIFEST: stubs on disk absent from the candidate "
+                  f"list: {census['missing_from_candidates']} — rebuild it with "
+                  "`probe/build_manifest.py`", file=sys.stderr)
+        return emit({"action": "skip", "reason": "no_unattempted_targets",
+                     "census": census})
 
     difficulty = target.get("difficulty")
     if not P.can_afford(state, cfg, difficulty):

@@ -1,0 +1,2 @@
+{"target": "cal-bk-57", "stream": "backlog", "ts": "2026-08-25T07:52:23", "harness": "vibe", "arm": "cron", "tokens": 0, "outcome": "max_rounds", "experience_attempts": 1}
+{"target": "cal-bk-57", "harness": "decompose", "arm": "decompose", "outcome": "error", "tokens": 0, "ts": "2026-08-25T07:52:28", "leaves_total": 0, "leaves_closed": 0}

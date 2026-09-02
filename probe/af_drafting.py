@@ -8,6 +8,7 @@ import subprocess
 
 from af_parse import *  # noqa: F401,F403
 from af_prompts import *  # noqa: F401,F403
+from domain_pack import DomainPack
 
 __all__ = ['_JSON_FENCE_RE', '_extract_json', 'parse_verdict', 'judge_faithfulness', 'intent_reject_reason', 'parse_intent', '_CLAUDE_CAP_MARKERS', 'ClaudeCapError', '_claude_draft_args', 'claude_draft_fn', 'claude_chat_fn', 'claude_auth_present', 'draft_intent', 'loogle_candidates']
 
@@ -54,13 +55,13 @@ def parse_verdict(reply: str) -> dict:
 
 
 
-def judge_faithfulness(issue: dict, stub: str, *, chat_fn,
+def judge_faithfulness(pack: DomainPack, issue: dict, stub: str, *, chat_fn,
                        deferred: list[str] | None = None) -> dict:
     """Semantic judge: does the stub say what the issue asks? A declared-subset
     (`deferred` — the facts the drafter intentionally left for follow-up issues) is
     judged against the subset it claims, not dinged for the omission. Returns the
     verdict dict plus `tokens`."""
-    content, tokens = chat_fn(judge_messages(issue, stub, deferred))
+    content, tokens = chat_fn(judge_messages(pack, issue, stub, deferred))
     v = parse_verdict(content)
     v["tokens"] = tokens
     return v
@@ -194,18 +195,21 @@ def claude_auth_present(env=None) -> bool:
 
 
 
-def draft_intent(issue: dict, context_pack: str, *, chat_fn, feedback: str | None = None,
+def draft_intent(pack: DomainPack, issue: dict, context_pack: str, *, chat_fn,
+                 feedback: str | None = None,
                  route: str = "theorem", prior_unknowns: list[str] | None = None,
-                 prior_lessons: str | None = None) -> dict:
+                 prior_lessons: str | None = None,
+                 drafter_preamble: str = "") -> dict:
     """Stage 1: Claude SPECIFIES the intended statement (prose + objects + naming meta) from the
     issue. No Lean. `feedback` (a `render_gate_feedback` block from a rejected previous attempt)
     turns this into a REVISION round; `route="defs"` adds the new-definitions contract, with
     `prior_unknowns` (declarations earlier drafts guessed at) as hints. `prior_lessons` (item K)
     is a cross-TICK post-mortem + diversity nudge from failed prior ticks. Returns
     `{ok, intent, tokens}`."""
-    content, tokens = chat_fn(intent_messages(issue, context_pack, feedback,
+    content, tokens = chat_fn(intent_messages(pack, issue, context_pack, feedback,
                                               route=route, prior_unknowns=prior_unknowns,
-                                              prior_lessons=prior_lessons))
+                                              prior_lessons=prior_lessons,
+                                              drafter_preamble=drafter_preamble))
     intent = parse_intent(content)
     reason = None if intent is not None else intent_reject_reason(content)
     return {"ok": intent is not None, "intent": intent, "tokens": tokens, "reason": reason}

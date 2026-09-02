@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Turn a proven candidate into a ready-for-review PR on formal-mathfin.
+# Turn a proven candidate into a ready-for-review PR on the target library.
 #
 #   scripts/open-pr.sh --id <target-id> --tag <run-tag>
 #
-# Runs in the FOUNDRY CI runner (16 GB, mathfin-verify image, main checked out
+# Runs in the FOUNDRY CI runner (16 GB, the domain's verify image, main checked out
 # with MAIN_PR_TOKEN) — never on the 10 GB local box. It:
 #   1. reads the winning candidate + placement metadata,
-#   2. branches on the main checkout, places the proof in its MathFin module,
+#   2. branches on the main checkout, places the proof in its library module,
 #      appends the re-export benchmark entry, registers the module in the umbrella,
 #   3. VALIDATES + REGENERATES green-or-abort: lake build → axiom_audit_gen →
 #      formalization_yaml → ledger; any failure files an `autoform-blocked` issue
@@ -32,8 +32,18 @@ done
 [ -n "$ID" ] && [ -n "$TAG" ] || { echo "[open-pr] need --id and --tag" >&2; exit 2; }
 
 FOUNDRY="$(cd "$(dirname "$0")/.." && pwd)"
-MAIN="${MAIN_REPO:-/home/rapha/code/automated_proofs_quantfin}"
-SLUG="${MAIN_REPO_SLUG:-formal-applied-math/formal-mathfin}"
+# --- domain pack (runbook 06): the ONE place that knows which library we target ---
+# `--domain`/`DOMAIN` picks the pack; it defaults to `[domain] name` in pipeline.toml.
+# Exports DOMAIN_NAMESPACE, DOMAIN_LAKE_ROOT, MAIN_REPO_SLUG, DOMAIN_VERIFY_IMAGE,
+# DOMAIN_LEAN_LSP_CONTAINER, DOMAIN_BENCHMARK, DOMAIN_OWN_NAMESPACES, ...
+eval "$(python3 "$FOUNDRY/probe/domain_pack.py" --export-env ${DOMAIN:+"$DOMAIN"})"
+# Local default: the target library checked out BESIDE the foundry, named by the
+# pack. Both scripts used to hardcode a path, and they disagreed — open-pr.sh
+# pointed at `/home/rapha/code/automated_proofs_quantfin`, which does not exist.
+# CI always sets MAIN_REPO explicitly, so this default only bites locally, which
+# is exactly where a dead path is least likely to be noticed.
+MAIN="${MAIN_REPO:-$(dirname "$FOUNDRY")/$DOMAIN_REPO_NAME}"
+SLUG="$MAIN_REPO_SLUG"
 QUEUE="$FOUNDRY/targets/queue/manifest.json"
 CAND="$FOUNDRY/runs/$TAG-$ID.lean"
 [ -f "$CAND" ] || { echo "[open-pr] no candidate at $CAND" >&2; exit 1; }
@@ -139,50 +149,54 @@ PY
 
 # --- 3. promotion-honesty guard (reject an rfl-trivial "full") ---------------
 # H9: use the tested probe_lib.rfl_proof_present (the shell glob missed `:= by rfl`
-# before `end MathFin` and the `:=byrfl` spelling — non-EOF variants slipped through).
+# before the namespace's `end` and the `:=byrfl` spelling — non-EOF variants slipped).
 if python3 -c "import sys; sys.path.insert(0, '$FOUNDRY/probe'); from probe_lib import rfl_proof_present; sys.exit(0 if rfl_proof_present(open('$MAIN/$MODULE', encoding='utf-8').read()) else 1)"; then
   blocked "proof is rfl-trivial (reduced_core-in-disguise; test_values rfl-tripwire would reject)"
 fi
 
 # --- 4. validate + regenerate (green-or-abort) -------------------------------
-# The Lean toolchain lives in the mathfin-verify IMAGE, not on the runner host,
+# The Lean toolchain lives in the domain's verify IMAGE, not on the runner host,
 # so the build + elaboration-dependent regens run INSIDE the image against this
 # fresh checkout (mounted at /work). formalization.yaml is host-side Python (no
 # Lean) and is regenerated either way. The daemon must be DOWN for the build
 # (one Lake writer) — the workflow guarantees that before calling this script.
 # FIRST-RUN NOTE: this docker/mount/cache path is validated on the first live PR;
 # on any failure we abort to an autoform-blocked issue rather than open a red PR.
-IMAGE="${VERIFY_IMAGE:-ghcr.io/formal-applied-math/mathfin-verify:latest}"
+IMAGE="${VERIFY_IMAGE:-$DOMAIN_VERIFY_IMAGE}"
 # the proving daemon is done; stop it (all possible names: docker-run `lean-repl`,
 # compose `docker-lean-repl-1`, plus the lean-lsp) so the build has the memory
 # headroom AND is the sole Lake writer to the shared olean volume mounted below.
-docker stop lean-repl docker-lean-repl-1 mathfin-lean-lsp >/dev/null 2>&1 || true
+docker stop lean-repl docker-lean-repl-1 "$DOMAIN_LEAN_LSP_CONTAINER" >/dev/null 2>&1 || true
 # After the build, verify + record the new benchmark entry in the ledger via
 # `lake env lean` IN THIS container (LEDGER_EXEC_LOCAL — no docker-exec/daemon).
-# Default `verify` scope is stale+missing; the corpus has 0 bare-`import MathFin`
+# Default `verify` scope is stale+missing; the corpus has 0 bare umbrella imports
 # entries, so the umbrella change restales nothing and this checks only the 1 new
 # entry (~60s). A fresh ledger + status=0 is the last green gate.
 # CI-parity: this block must run EVERYTHING the main repo's build.yml gates on —
 # lake build AND lake lint (PRs #123/#124 opened red because lint never ran here:
 # defsWithUnderscore + docBlame are lint-only classes the build accepts).
+# SINGLE-quoted on purpose: `$DOMAIN_NAMESPACE` must survive to the CONTAINER's
+# shell, which means the container needs it in its env (`-e` below). Left
+# unpassed it expands to empty and this silently becomes `lake build ""`.
 REGEN='set -e
        lake exe cache get >/dev/null 2>&1 || true
-       lake build MathFin
+       lake build "$DOMAIN_NAMESPACE"
        lake lint
        python3 -m tools.verify.axiom_audit_gen --write
        python3 -m tools.formalization_yaml --write
        LEDGER_EXEC_LOCAL=1 python3 -m tools.verify.ledger verify --exec --timeout 600
        python3 -m tools.verify.ledger status'
 if command -v docker >/dev/null 2>&1; then
-  # --entrypoint bash overrides the image's default entrypoint (the mathfin-verify
+  # --entrypoint bash overrides the image's default entrypoint (the verify
   # CLI); without it the shell command is fed as args to that CLI and errors.
   # Mount the checkout at /app (the daemon's Lake root) + the SHARED olean volume at
-  # /app/.lake, so `lake build MathFin` REUSES the daemon-built Mathlib + MathFin
+  # /app/.lake, so the library build REUSES the daemon-built Mathlib + library
   # oleans and rebuilds only the new module — not the whole library from scratch
-  # (that from-scratch MathFin rebuild blew the 2h job timeout on the first live PR,
-  # 2026-07-17: 8558 Mathlib modules came from `cache get`, then heavy MathFin
+  # (that from-scratch library rebuild blew the 2h job timeout on the first live PR,
+  # 2026-07-17: 8558 Mathlib modules came from `cache get`, then heavy library
   # modules like DoobLpMaximalInequality rebuilt at ~400s each).
   docker run --rm --entrypoint bash \
+    -e DOMAIN_NAMESPACE="$DOMAIN_NAMESPACE" \
     -v "$MAIN":/app \
     -v "${COMPOSE_PROJECT_NAME:-docker}_lake_build_cache":/app/.lake \
     -w /app "$IMAGE" -lc "$REGEN" \
@@ -203,14 +217,14 @@ fi
 # --- 5. commit + push + PR ---------------------------------------------------
 # specific adds only (never -A): the proof, the benchmark entry, the umbrella
 # import, and whichever regenerated artifacts exist.
-git add "$MODULE" "$BENCH" MathFin.lean formalization.yaml
-git add MathFin/AxiomAuditGen.lean verification_ledger.json 2>/dev/null || true
+git add "$MODULE" "$BENCH" "$DOMAIN_NAMESPACE.lean" formalization.yaml
+git add "$DOMAIN_LAKE_ROOT/AxiomAuditGen.lean" verification_ledger.json 2>/dev/null || true
 # Attribution rule (honest provenance): the PR credits the prover that did the
 # mathematical work (leanstral), matching the benchmark entry's
 # metadata.provenance and the formalization.yaml automation count. Distinct from
 # the standing rule that Claude / the coding assistant is never attributed
 # anywhere.
-git -c user.name="mathfin-autoform" -c user.email="autoform@users.noreply.github.com" \
+git -c user.name="$DOMAIN_NAME-autoform" -c user.email="autoform@users.noreply.github.com" \
     commit -q \
     -m "feat(autoform): $ID — prove $(basename "$MODULE" .lean) ($CLOSE_KW #$ISSUE)" \
     -m "$PROVER_DESC" \
@@ -243,7 +257,8 @@ FIDELITY_NOTES="$(python3 "$FOUNDRY/probe/fidelity_notes.py" \
 # candidate — the MECHANICAL half of the 8-lens pass (unused constructs, wrapper smell,
 # register, obvious golf) as a checklist the human refiner starts from. NEVER gates:
 # refinery_notes.py falls back to a skip line without a key or on any API error.
-REFINERY_NOTES="$(python3 "$FOUNDRY/probe/refinery_notes.py" --lean-file "$CAND" 2>/dev/null \
+REFINERY_NOTES="$(python3 "$FOUNDRY/probe/refinery_notes.py" --lean-file "$CAND" \
+  --domain "$DOMAIN_NAME" 2>/dev/null \
   || echo "_(first-pass refinery notes unavailable)_")"
 
 # Phase 2 (Task 2.5): a decompose-path candidate carries a DAG sidecar — list the split in
@@ -270,7 +285,7 @@ $BODY_INTRO $CLOSE_LINE.
 what it adds:
 $PROOF_BULLET
 - a re-export entry in \`$BENCH\`.
-- regenerated \`MathFin/AxiomAuditGen.lean\` + \`formalization.yaml\`.
+- regenerated \`$DOMAIN_LAKE_ROOT/AxiomAuditGen.lean\` + \`formalization.yaml\`.
 $DAG_SECTION
 
 provenance: $PROVENANCE_DESC, run tag \`$TAG\`, ~$TOKENS tokens.
@@ -309,3 +324,12 @@ gh pr create --repo "$SLUG" --head "$BRANCH" --label autoform "${PR_FLAGS[@]}" \
   --title "autoform: $(basename "$MODULE" .lean) $TITLE_SUFFIX" \
   --body "$BODY" || transient "gh pr create failed (candidate is green — retry next tick)"
 echo "[open-pr] PR opened for $ID ($CLOSE_KW #$ISSUE)" >&2
+
+# The ISSUE is the state machine; move it to `status:review` now that a PR exists.
+# Without this the issue stays `status:ready` for the whole review window and the
+# refill can re-draft work that is already awaiting a human — the exposure
+# `next_target`'s docstring names. FAIL-OPEN: the PR is the deliverable and this is
+# bookkeeping about it, so a missing `issues: write` scope must not fail the run.
+python3 "$FOUNDRY/probe/issue_state.py" --repo "$SLUG" --issue "$ISSUE" \
+  --status status:review >&2 || \
+  echo "[open-pr] could not mark #$ISSUE status:review — PR is open regardless" >&2

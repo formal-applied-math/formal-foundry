@@ -9,13 +9,19 @@
 # builds the doctrine, and runs vibe.
 #
 #   scripts/leanstral-vibe.sh --agent lean --auto-approve --max-turns 40 \
-#       -p "TASK: prove the sorry in MathFin/…. Pointers: … . Use lean_goal."
+#       -p "TASK: prove the sorry in <LakeRoot>/…. Pointers: … . Use lean_goal."
 #
 # The doctrine is injected only in programmatic (-p / --prompt) mode; interactive
 # sessions run without it (paste it, or start the session with it).
 set -euo pipefail
 FOUNDRY="$(cd "$(dirname "$0")/.." && pwd)"
-MAIN="${MAIN_REPO:-/home/rapha/code/automated_proofs_quantfin}"
+
+# --- domain pack (runbook 06): the ONE place that knows which library we target ---
+# `DOMAIN` picks the pack; with none set the shim reads `[domain] name` from
+# pipeline.toml. Exports DOMAIN_NAMESPACE, DOMAIN_LAKE_ROOT, MAIN_REPO_SLUG,
+# DOMAIN_VERIFY_IMAGE, DOMAIN_LEAN_LSP_CONTAINER, DOMAIN_BENCHMARK, ...
+eval "$(python3 "$FOUNDRY/probe/domain_pack.py" --export-env ${DOMAIN:+"$DOMAIN"})"
+MAIN="${MAIN_REPO:-$(dirname "$FOUNDRY")/$DOMAIN_REPO_NAME}"
 BASE="$MAIN/docker/docker-compose.yml"
 LSP="$MAIN/docker/docker-compose.lean-lsp.yml"
 
@@ -36,8 +42,8 @@ echo "[leanstral-vibe] waiting for lean-lsp-mcp…" >&2
 # an opaque run failure. Fail fast too if the container has died.
 ready=0
 for _ in $(seq 1 40); do
-  if docker logs mathfin-lean-lsp 2>&1 | grep -q LEAN_LSP_MCP_READY; then ready=1; break; fi
-  docker ps --format '{{.Names}}' | grep -q mathfin-lean-lsp || break   # container died
+  if docker logs "$DOMAIN_LEAN_LSP_CONTAINER" 2>&1 | grep -q LEAN_LSP_MCP_READY; then ready=1; break; fi
+  docker ps --format '{{.Names}}' | grep -q "$DOMAIN_LEAN_LSP_CONTAINER" || break   # container died
   sleep 3
 done
 if [ "$ready" != "1" ]; then

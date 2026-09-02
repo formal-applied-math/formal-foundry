@@ -191,9 +191,9 @@ def rfl_proof_present(text: str) -> bool:
     reduced_core-in-disguise the values gate rejects for a `full` entry. Catches
     `:= rfl`, `:= by rfl`, `:= Iff.rfl`, `:= by exact rfl` (with the term ending the
     line or continuing on the next), ANYWHERE, not just at EOF — the shell glob it
-    replaces missed `:= by rfl` before an `end MathFin` and the `:=byrfl` variant.
+    replaces missed `:= by rfl` before a namespace `end` and the `:=byrfl` variant.
     Comment/import/structure lines are ignored; matching is per-line so a trailing
-    `end MathFin` never fuses onto the `rfl`."""
+    `end <Namespace>` never fuses onto the `rfl`."""
     prev_opens_proof = False
     for ln in text.splitlines():
         if re.match(r"\s*(--|/-|import|module|open|namespace|variable|@\[)", ln):

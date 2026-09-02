@@ -6,6 +6,11 @@ import os
 
 import assemble as A
 
+import domain_pack
+
+PACK = domain_pack.load("mathfin")
+
+
 _EXISTING = """/-
 Copyright (c) 2026 Raphael Coelho. All rights reserved.
 -/
@@ -59,13 +64,13 @@ end MathFin
 
 
 def test_splice_keeps_the_existing_declarations():
-    out = A.splice_into_module(_EXISTING, _CANDIDATE)
+    out = A.splice_into_module(PACK, _EXISTING, _CANDIDATE)
     assert "sortinoRatio" in out
     assert "open Real" in out
 
 
 def test_splice_adds_the_new_declarations_before_end_namespace():
-    out = A.splice_into_module(_EXISTING, _CANDIDATE)
+    out = A.splice_into_module(PACK, _EXISTING, _CANDIDATE)
     assert "gainToPain_nonneg" in out
     assert out.rstrip().endswith("end MathFin")
     assert out.count("end MathFin") == 1
@@ -73,7 +78,7 @@ def test_splice_adds_the_new_declarations_before_end_namespace():
 
 
 def test_splice_does_not_duplicate_the_module_scaffold():
-    out = A.splice_into_module(_EXISTING, _CANDIDATE)
+    out = A.splice_into_module(PACK, _EXISTING, _CANDIDATE)
     assert out.count("@[expose] public section") == 1
     assert out.count("namespace MathFin") == 1
     assert out.count("Copyright") == 1
@@ -81,7 +86,7 @@ def test_splice_does_not_duplicate_the_module_scaffold():
 
 
 def test_splice_carries_over_imports_the_candidate_needs():
-    out = A.splice_into_module(_EXISTING, _CANDIDATE)
+    out = A.splice_into_module(PACK, _EXISTING, _CANDIDATE)
     assert "public import MathFin.Foundations.Extra" in out
     # and keeps the existing one
     assert "public import MathFin.Performance.Ratios" in out
@@ -90,8 +95,8 @@ def test_splice_carries_over_imports_the_candidate_needs():
 
 
 def test_splice_refuses_a_candidate_it_cannot_parse():
-    assert A.splice_into_module(_EXISTING, "theorem foo : True := trivial\n") is None
-    assert A.splice_into_module("not a module", _CANDIDATE) is None
+    assert A.splice_into_module(PACK, _EXISTING, "theorem foo : True := trivial\n") is None
+    assert A.splice_into_module(PACK, "not a module", _CANDIDATE) is None
 
 
 def test_apply_contribution_still_refuses_an_accidental_clobber(tmp_path):
@@ -103,7 +108,7 @@ def test_apply_contribution_still_refuses_an_accidental_clobber(tmp_path):
     target = {"main_module": "MathFin/Performance/RatiosExtended.lean",
               "benchmark": "b.json"}
     try:
-        A.apply_contribution(_CANDIDATE, target, {"id": "x"}, main)
+        A.apply_contribution(PACK, _CANDIDATE, target, {"id": "x"}, main)
         assert False, "expected a refusal"
     except FileExistsError:
         pass
@@ -117,7 +122,7 @@ def test_apply_contribution_appends_when_the_target_says_so(tmp_path):
     open(os.path.join(main, "b.json"), "w").write('{"theorems": []}\n')
     target = {"main_module": "MathFin/Performance/RatiosExtended.lean",
               "benchmark": "b.json", "append": True}
-    written = A.apply_contribution(_CANDIDATE, target, {"id": "x"}, main)
+    written = A.apply_contribution(PACK, _CANDIDATE, target, {"id": "x"}, main)
     text = open(mod).read()
     assert "sortinoRatio" in text and "gainToPain_nonneg" in text
     assert text.count("namespace MathFin") == 1
@@ -130,7 +135,7 @@ def test_append_to_a_missing_module_falls_back_to_creating_it(tmp_path):
     open(os.path.join(main, "b.json"), "w").write('{"theorems": []}\n')
     target = {"main_module": "MathFin/Performance/New.lean",
               "benchmark": "b.json", "append": True}
-    A.apply_contribution(_CANDIDATE, target, {"id": "x"}, main)
+    A.apply_contribution(PACK, _CANDIDATE, target, {"id": "x"}, main)
     text = open(os.path.join(main, "MathFin", "Performance", "New.lean")).read()
     assert text == _CANDIDATE
 
@@ -144,7 +149,7 @@ def test_unspliceable_append_aborts_rather_than_clobbering(tmp_path):
     target = {"main_module": "MathFin/Performance/RatiosExtended.lean",
               "benchmark": "b.json", "append": True}
     try:
-        A.apply_contribution(_CANDIDATE, target, {"id": "x"}, main)
+        A.apply_contribution(PACK, _CANDIDATE, target, {"id": "x"}, main)
         assert False, "expected a refusal"
     except ValueError:
         pass
@@ -163,18 +168,18 @@ informationRatio), re-export from the MathFin umbrella
 
 
 def test_extract_location_reads_the_issue_directive():
-    assert af.extract_location(_ISSUE_BODY) == "MathFin/Performance/RatiosExtended.lean"
+    assert af.extract_location(PACK, _ISSUE_BODY) == "MathFin/Performance/RatiosExtended.lean"
 
 
 def test_extract_location_is_none_without_one():
-    assert af.extract_location("## Task\nprove a thing\n") is None
-    assert af.extract_location("") is None
+    assert af.extract_location(PACK, "## Task\nprove a thing\n") is None
+    assert af.extract_location(PACK, "") is None
 
 
 def test_extract_location_ignores_a_bare_pointer_mention():
     # a Pointers section names modules too; only an explicit `location:` counts
     body = "## Pointers\n- `MathFin/FixedIncome/ZCB.lean` (zcb discount factors)\n"
-    assert af.extract_location(body) is None
+    assert af.extract_location(PACK, body) is None
 
 
 def test_emit_places_the_contribution_where_the_issue_said():
@@ -184,7 +189,7 @@ def test_emit_places_the_contribution_where_the_issue_said():
     meta = {"benchmark_id": "mf-performance-gain_to_pain", "module_name": "GainToPain",
             "docstring": "Gain-to-pain.", "definitions": ["gainToPain"],
             "theorem_name": "gainToPain_nonneg"}
-    _lean, _entry, placement = af.emit_target_files(
+    _lean, _entry, placement = af.emit_target_files(PACK,
         issue, "theorem gainToPain_nonneg (s : Finset a) : True := by sorry\n", meta)
     assert placement["main_module"] == "MathFin/Performance/RatiosExtended.lean"
     assert placement["append"] is True
@@ -195,7 +200,7 @@ def test_emit_still_mints_a_module_when_the_issue_names_no_location():
              "body": "no directive here", "pointers": [], "difficulty": "good-first"}
     meta = {"benchmark_id": "x", "module_name": "GainToPain", "docstring": "d",
             "definitions": ["gainToPain"], "theorem_name": "gainToPain_nonneg"}
-    _l, _e, placement = af.emit_target_files(
+    _l, _e, placement = af.emit_target_files(PACK,
         issue, "theorem gainToPain_nonneg (s : Finset a) : True := by sorry\n", meta)
     assert placement["main_module"] == "MathFin/Performance/GainToPain.lean"
     assert placement["append"] is False
@@ -207,7 +212,7 @@ def test_append_rides_the_stub_header_into_the_manifest():
              "pointers": [], "difficulty": "good-first"}
     meta = {"benchmark_id": "x", "module_name": "GainToPain", "docstring": "d",
             "definitions": ["gainToPain"], "theorem_name": "gainToPain_nonneg"}
-    lean, _e, placement = af.emit_target_files(
+    lean, _e, placement = af.emit_target_files(PACK,
         issue, "theorem gainToPain_nonneg (s : Finset a) : True := by sorry\n", meta)
     assert "-- append: true" in lean
     assert B.parse_meta(lean)["append"] is True
@@ -220,7 +225,7 @@ def test_no_append_header_when_the_module_is_new():
              "pointers": [], "difficulty": "good-first"}
     meta = {"benchmark_id": "x", "module_name": "GainToPain", "docstring": "d",
             "definitions": ["gainToPain"], "theorem_name": "gainToPain_nonneg"}
-    lean, _e, _p = af.emit_target_files(
+    lean, _e, _p = af.emit_target_files(PACK,
         issue, "theorem gainToPain_nonneg (s : Finset a) : True := by sorry\n", meta)
     assert "-- append:" not in lean
     assert B.parse_meta(lean).get("append") in (None, False)
@@ -270,7 +275,7 @@ def test_apply_contribution_scrubs_before_the_entry_lands(tmp_path):
     os.makedirs(os.path.join(main, "MathFin", "Performance"))
     open(os.path.join(main, "b.json"), "w").write('{"theorems": []}\n')
     target = {"main_module": "MathFin/Performance/New.lean", "benchmark": "b.json"}
-    A.apply_contribution(_CANDIDATE, target,
+    A.apply_contribution(PACK, _CANDIDATE, target,
                          _entry("magistral-autoform", "magistral-medium"), main)
     got = json.load(open(os.path.join(main, "b.json")))["theorems"][0]
     assert "magistral" not in json.dumps(got)

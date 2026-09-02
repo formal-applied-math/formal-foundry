@@ -1,0 +1,23 @@
+{
+  "id": "mf-actuarial-life-annuity-due",
+  "name": "Add the life-contingent annuity EPV ä_x:n = ∑ vᵏ·ₖpₓ (survival-weighted)",
+  "description": "Survival-weighted discrete life annuity-due ä_x:n, with nonnegativity, monotone decrease in i, and reduction to the certain annuity when survival is identically 1.",
+  "domain": "mathematical_finance",
+  "code": {
+    "lean": "import MathFin.Actuarial.LifeAnnuityDue\n\nopen MathFin\n\n/-- Survival-weighted discrete life annuity-due ä_x:n, with nonnegativity, monotone decrease in i, and reduction to the certain annuity when survival is identically 1. -/\ntheorem mf_actuarial_life_annuity_due (μ : ℝ → ℝ) (x : ℝ) (n : ℕ) :\n    (∀ i : ℝ, -1 < i → 0 ≤ lifeAnnuityDue μ x i n) ∧\n    (∀ i₁ i₂ : ℝ, -1 < i₁ → -1 < i₂ → i₁ ≤ i₂ →\n      lifeAnnuityDue μ x i₂ n ≤ lifeAnnuityDue μ x i₁ n) ∧\n    (∀ i : ℝ, i ≠ 0 →\n      (∀ k < n, survivalFromForce μ (x + (k : ℝ)) = survivalFromForce μ x) →\n      lifeAnnuityDue μ x i n = (1 - (1 / (1 + i)) ^ n) / (1 - 1 / (1 + i))) :=\n  MathFin.lifeAnnuityDue_basic_properties μ x n\n"
+  },
+  "metadata": {
+    "chapter": 0,
+    "reference": "Add the life-contingent annuity EPV ä_x:n = ∑ vᵏ·ₖpₓ (survival-weighted)",
+    "difficulty": "medium",
+    "formalization_status": "full",
+    "formalization_scope": "Full formal proof in MathFin/Actuarial/LifeAnnuityDue.lean (autoformalized statement, leanstral proof). Re-export from MathFin. Axioms-clean.",
+    "provenance": {
+      "statement_source": "autoform",
+      "statement_model": "autoform",
+      "source": "leanstral-autoform",
+      "model": "labs-leanstral-1-5",
+      "issue": 82
+    }
+  }
+}

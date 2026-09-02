@@ -5,6 +5,11 @@ import tempfile
 from assemble import append_entry, apply_contribution
 
 
+import domain_pack
+
+PACK = domain_pack.load("mathfin")
+
+
 def test_append_entry_preserves_formatting_and_trailing_newline():
     original = ('{\n  "description": "d",\n  "theorems": [\n'
                 '    {\n      "id": "a"\n    }\n  ]\n}\n')  # trailing newline
@@ -34,7 +39,7 @@ def test_apply_contribution_writes_module_and_entry():
         target = {"main_module": "MathFin/FX/IRP.lean",
                   "benchmark": "benchmarks/x.json", "benchmark_id": "mf-irp"}
         entry = {"id": "mf-irp", "name": "IRP", "code": {"lean": "..."}}
-        written = apply_contribution("theorem foo : True := trivial\n",
+        written = apply_contribution(PACK, "theorem foo : True := trivial\n",
                                      target, entry, main)
         assert "MathFin/FX/IRP.lean" in written
         assert "benchmarks/x.json" in written
@@ -50,7 +55,7 @@ def test_apply_contribution_adds_trailing_newline_to_module():
             f.write('{\n  "theorems": []\n}\n')
         target = {"main_module": "MathFin/A.lean",
                   "benchmark": "benchmarks/x.json", "benchmark_id": "id"}
-        apply_contribution("theorem foo : True := trivial", target, {"id": "id"}, main)
+        apply_contribution(PACK, "theorem foo : True := trivial", target, {"id": "id"}, main)
         assert open(os.path.join(main, "MathFin/A.lean")).read().endswith("\n")
 
 
@@ -73,7 +78,7 @@ def test_apply_contribution_refuses_to_overwrite_existing_module():
         target = {"main_module": "MathFin/Performance/RatiosExtended.lean",
                   "benchmark": "benchmarks/x.json", "benchmark_id": "id"}
         try:
-            apply_contribution("theorem upCapture_x : True := trivial\n",
+            apply_contribution(PACK, "theorem upCapture_x : True := trivial\n",
                                target, {"id": "id"}, main)
             raised = False
         except FileExistsError:
@@ -87,11 +92,11 @@ def test_ensure_umbrella_import_appends_once():
     with tempfile.TemporaryDirectory() as main:
         with open(os.path.join(main, "MathFin.lean"), "w") as f:
             f.write("import MathFin.A\nimport MathFin.B\n")
-        changed = ensure_umbrella_import(main, "MathFin/FX/Siegel.lean")
+        changed = ensure_umbrella_import(main, "MathFin/FX/Siegel.lean", PACK.namespace + ".lean")
         assert changed == ["MathFin.lean"]
         text = open(os.path.join(main, "MathFin.lean")).read()
         assert "import MathFin.FX.Siegel\n" in text
-        assert ensure_umbrella_import(main, "MathFin/FX/Siegel.lean") == []  # idempotent
+        assert ensure_umbrella_import(main, "MathFin/FX/Siegel.lean", PACK.namespace + ".lean") == []  # idempotent
 
 
 def test_ensure_umbrella_import_handles_no_trailing_newline():
@@ -99,6 +104,6 @@ def test_ensure_umbrella_import_handles_no_trailing_newline():
     with tempfile.TemporaryDirectory() as main:
         with open(os.path.join(main, "MathFin.lean"), "w") as f:
             f.write("import MathFin.A")  # no trailing newline
-        ensure_umbrella_import(main, "MathFin/C.lean")
+        ensure_umbrella_import(main, "MathFin/C.lean", PACK.namespace + ".lean")
         text = open(os.path.join(main, "MathFin.lean")).read()
         assert text == "import MathFin.A\nimport MathFin.C\n"

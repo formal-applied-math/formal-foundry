@@ -11,6 +11,11 @@ import tempfile
 import index_filter as ixf
 
 
+import domain_pack
+
+PACK = domain_pack.load("mathfin")
+
+
 def _write(d, name, recs):
     path = os.path.join(d, name)
     with open(path, "w", encoding="utf-8") as f:
@@ -51,7 +56,7 @@ def test_reached_constants_only_from_own_modules():
             {"name": "MeasureTheory.Integrable.add", "module": "Mathlib.MeasureTheory.Integral",
              "deps": ["Nat.succ", "Set.univ"]},
         ])
-        assert ixf.reached_constants(p) == {"MeasureTheory.Integrable.add", "Real.exp"}
+        assert ixf.reached_constants(p, PACK.own_namespaces) == {"MeasureTheory.Integrable.add", "Real.exp"}
 
 
 def test_neighborhood_is_the_modules_hosting_reached_constants():
@@ -61,7 +66,7 @@ def test_neighborhood_is_the_modules_hosting_reached_constants():
             {"name": "MeasureTheory.Integrable.sub", "module": "Mathlib.MeasureTheory.Integral"},
             {"name": "Polynomial.roots", "module": "Mathlib.Algebra.Polynomial"},
         ])
-        mods = ixf.neighborhood_modules(p, {"MeasureTheory.Integrable.add"})
+        mods = ixf.neighborhood_modules(p, {"MeasureTheory.Integrable.add"}, own=PACK.own_namespaces)
         assert mods == {"Mathlib.MeasureTheory.Integral"}
 
 
@@ -73,14 +78,14 @@ def test_neighborhood_excludes_disallowed_namespaces():
             {"name": "Eq.mpr", "module": "Init.Core"},
             {"name": "Real.exp", "module": "Mathlib.Analysis.SpecialFunctions.Exp"},
         ])
-        mods = ixf.neighborhood_modules(p, {"Eq.mpr", "Real.exp"})
+        mods = ixf.neighborhood_modules(p, {"Eq.mpr", "Real.exp"}, own=PACK.own_namespaces)
         assert mods == {"Mathlib.Analysis.SpecialFunctions.Exp"}
 
 
 def test_neighborhood_excludes_own_modules():
     with tempfile.TemporaryDirectory() as d:
         p = _write(d, "types.jsonl", [{"name": "MathFin.helper", "module": "MathFin.Foo"}])
-        assert ixf.neighborhood_modules(p, {"MathFin.helper"}) == set()
+        assert ixf.neighborhood_modules(p, {"MathFin.helper"}, own=PACK.own_namespaces) == set()
 
 
 # --- the slice ----------------------------------------------------------------
@@ -114,7 +119,7 @@ def _full_index(d):
 def test_slice_keeps_own_and_the_reached_neighborhood():
     with tempfile.TemporaryDirectory() as d:
         _full_index(d)
-        stats = ixf.slice_index(d)
+        stats = ixf.slice_index(d, own=PACK.own_namespaces)
         names = {r["name"] for r in _read(os.path.join(d, "types.jsonl"))}
         assert "MathFin.price" in names                      # own
         assert "MeasureTheory.Integrable.add" in names       # reached
@@ -129,7 +134,7 @@ def test_slice_keeps_tactics_own_only():
     # tactic exemplars teach HOUSE style; Mathlib's own tactics are not that.
     with tempfile.TemporaryDirectory() as d:
         _full_index(d)
-        ixf.slice_index(d)
+        ixf.slice_index(d, own=PACK.own_namespaces)
         mods = {r["module"] for r in _read(os.path.join(d, "tactics.jsonl"))}
         assert mods == {"MathFin.BlackScholes.Call"}
 
@@ -137,7 +142,7 @@ def test_slice_keeps_tactics_own_only():
 def test_slice_also_prunes_const_dep():
     with tempfile.TemporaryDirectory() as d:
         _full_index(d)
-        ixf.slice_index(d)
+        ixf.slice_index(d, own=PACK.own_namespaces)
         names = {r["name"] for r in _read(os.path.join(d, "const_dep.jsonl"))}
         assert names == {"MathFin.price", "MeasureTheory.Integrable.add"}
 
@@ -148,9 +153,9 @@ def test_slice_is_idempotent():
     # exactly the ones the first pass kept.
     with tempfile.TemporaryDirectory() as d:
         _full_index(d)
-        first = ixf.slice_index(d)
+        first = ixf.slice_index(d, own=PACK.own_namespaces)
         after_first = _read(os.path.join(d, "types.jsonl"))
-        second = ixf.slice_index(d)
+        second = ixf.slice_index(d, own=PACK.own_namespaces)
         assert _read(os.path.join(d, "types.jsonl")) == after_first
         assert second["types"]["kept"] == first["types"]["kept"]
 
@@ -160,7 +165,7 @@ def test_missing_tactics_file_is_tolerated():
     with tempfile.TemporaryDirectory() as d:
         _full_index(d)
         os.remove(os.path.join(d, "tactics.jsonl"))
-        stats = ixf.slice_index(d)
+        stats = ixf.slice_index(d, own=PACK.own_namespaces)
         assert stats["tactics"] == {"kept": 0, "total": 0}
 
 
@@ -170,13 +175,14 @@ def test_unparseable_line_is_skipped_not_fatal():
         _full_index(d)
         with open(os.path.join(d, "types.jsonl"), "a", encoding="utf-8") as f:
             f.write("{not json\n")
-        stats = ixf.slice_index(d)
+        stats = ixf.slice_index(d, own=PACK.own_namespaces)
         assert stats["types"]["kept"] == 3
 
 
 def test_filter_leaves_original_intact_on_missing_input():
     with tempfile.TemporaryDirectory() as d:
-        assert ixf.filter_file(os.path.join(d, "nope.jsonl"), set()) == (0, 0)
+        assert ixf.filter_file(os.path.join(d, "nope.jsonl"), set(),
+                               own=PACK.own_namespaces) == (0, 0)
 
 
 def test_cli_reports_and_exits_zero(capsys):
@@ -200,7 +206,7 @@ def test_sliced_index_feeds_both_consumers_with_mathlib_visible():
 
     with tempfile.TemporaryDirectory() as d:
         _full_index(d)
-        ixf.slice_index(d)
+        ixf.slice_index(d, own=PACK.own_namespaces)
 
         # consumer 1: the premise corpus the drafter searches semantically
         names = {p["name"] for p in embed.load_premises(d)}
@@ -228,6 +234,6 @@ def test_own_only_index_still_works_when_nothing_external_is_reached():
         _write(d, "const_dep.jsonl", [{"name": "MathFin.a", "module": "MathFin.Foo", "deps": []}])
         _write(d, "types.jsonl", [{"name": "MathFin.a", "module": "MathFin.Foo",
                                    "type": "ℝ", "allowCompletion": True}])
-        stats = ixf.slice_index(d)
+        stats = ixf.slice_index(d, own=PACK.own_namespaces)
         assert stats["neighborhood_modules"] == 0
         assert [p["name"] for p in embed.load_premises(d)] == ["MathFin.a"]

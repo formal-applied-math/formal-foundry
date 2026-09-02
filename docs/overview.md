@@ -146,6 +146,116 @@ PutnamBench curve climbs 44 → 587 solves as the per-problem budget goes
 can't close escalates to the **decompose** path. (This replaced an earlier pass@k
 text-loop of `fanout` parallel whole-proof samples + `repair_rounds`.)
 
+### Domain packs — the target library is data, not code
+
+`probe/` is **domain-free**. Everything specific to the library being formalized —
+the Lean namespace, the house doctrine, every system prompt, the worked-example
+constants, the issue `area:` vocabulary, the license header, the container and
+image names — lives in `domains/<name>/`, and `probe/domain_pack.py` is the single
+access path. `pipeline.toml`'s `[domain] name` picks the default; every CLI takes a
+`--domain` override.
+
+```
+domains/mathfin/
+  target.toml            namespace · lake root · own namespaces · repo slug ·
+                         benchmark path · corpus domain · dependency pin rows ·
+                         container + verify image · module opens · splice anchor ·
+                         license · the issue area -> section map
+  house.md               the prover's house doctrine (values gate · coherence · idioms)
+  statement-design.md    the drafter's fallback when patterns.md has no such section
+  exemplars.json         worked-example constants the prompt templates substitute
+  gate-instructions.json per-gate repair directions for the semantic repair cascade
+  prompts/*.md           judge · intent · formalize · defs-addendum · golf ·
+                         agentic-pitfalls · decompose
+```
+
+Prompt and prose files carry `{{placeholder}}` slots (`{{namespace}}`,
+`{{exemplar_applied}}`, …) that the loader substitutes at load time; an unknown
+placeholder raises rather than reaching a model verbatim. Text files store the
+string minus exactly one trailing newline, so a prompt round-trips through a file
+byte-for-byte — which `probe/test_domain_pack_golden.py` pins across **72 surfaces**,
+prompts *and* emitted Lean (the module skeleton, both gate meta-blocks, the
+re-export snippet, a splice round-trip, the three issue-parsing regexes).
+
+**The pack is passed DOWN as a parameter — there is no module-level default
+instance.** Two domains must be able to live in one process (a matrix CI run is the
+point), and a global would let the second silently inherit the first's namespace.
+
+**Adding a domain.** Copy `domains/mathfin/` to `domains/<name>/`; set the
+namespace, lake root, slug, benchmark and sections; rewrite `house.md` for that
+library's idioms and `exemplars.json` for one real, fully-applied def of its own;
+trim `[areas]` to the labels its issues actually use. Then run
+`python3 -m pytest probe/ -q` — `test_no_domain_leakage.py` fails if any domain
+string crept back into `probe/`.
+
+### The target plane — which repo the pipeline actually points at
+
+A domain-free `probe/` is necessary and not sufficient: the pipeline does not read
+`probe/` to decide which repo it operates on. It reads shell scripts, four
+workflows, a compose file, a GHCR image with the library's oleans baked in, and the
+target repo's issue labels. Those are the **target plane**, and they now read the
+same pack.
+
+- **Scripts** source it once and use `DOMAIN_*` — the shell stays shell:
+  ```bash
+  eval "$(python3 "$FOUNDRY/probe/domain_pack.py" --export-env ${DOMAIN:+"$DOMAIN"})"
+  ```
+  With no `DOMAIN` the shim resolves `[domain] name` from `pipeline.toml`, so no
+  script parses TOML itself. `MAIN_REPO` now defaults to the target checked out
+  *beside* the foundry, named by the pack — it used to be a hardcoded path, and the
+  two scripts that hardcoded it disagreed, one pointing somewhere that no longer
+  exists.
+- **Workflows** take a `domain` dispatch input (default `mathfin`), resolve the pack
+  into job env, and read `repository:`, the image pull and the cache keys from it.
+  The cache keys hash the pack's own Lake root via `format('main/{0}/**', …)`, not a
+  literal a second library would not even have. Use `--format env` when writing to
+  `$GITHUB_ENV` — it is not shell-parsed, so the quoted form would put literal
+  quotes inside every value.
+- **The compose service** uses `${DOMAIN_*:-<flagship default>}`, so a bare
+  `docker compose` outside the scripts behaves exactly as it always did.
+- **The verify image** builds from one generic `docker/Dockerfile.verify.domain`
+  (three build args) against the target's checkout, via
+  `.github/workflows/publish-verify-image.yml`. **CI only, never locally** — it runs
+  `lake build` over a full Mathlib olean tree, which is the one Lean process the
+  memory doctrine allows, for tens of minutes. That rule does not relax because a
+  library is small. The workflow defaults to a dry run that builds and smoke-tests
+  without pushing.
+
+`probe/test_no_domain_leakage.py` gates all of it — `probe/*.py`, `scripts/*.sh`,
+`.github/workflows/*.yml` and `docker/*.yml` — with an explicit, reason-annotated
+allowlist and a test that fails on a *stale* allowlist entry.
+
+**The second domain's queue is live.** `formal-econometrics` now carries the same
+`status:` / `type:` / `difficulty:` vocabulary as the flagship plus
+`area:identification`, and
+[issue #1](https://github.com/formal-applied-math/formal-econometrics/issues/1) is
+its first `status:ready` + `type:proof` target — random assignment identifies the
+ATT, the second design on the same skeleton as the DiD theorem already there.
+
+Note what the runbook's two *named* first targets turned out to need. Omitted-variable
+bias and Frisch–Waugh–Lovell are both "Mathlib ready" in `applied-areas.md` §3.1, but
+they are about **linear projection**, and `Econometrics/` has no projection layer —
+pointed at the modules that do exist they consume nothing from them, which is runbook
+06's own kill criterion firing. The gate is not weakened for them; they wait for the
+layer, and the seeded target is one whose type genuinely lives in the existing
+definitional layer so the depth gate has something real to check.
+
+**What is still open.** The acceptance criterion runbook 06 actually sets is a live
+artifact, not a green test suite: a ready-for-review PR opened by the pipeline on the
+second library, plus an unregressed flagship tick beside it. Neither has run, and
+neither can from the dev box — the prove path needs `MISTRAL_API_KEY` (Leanstral is
+the prover *and* the vacuity/disproof kernel gates) and the `econometrics-verify`
+image has never been published; the workflow exists, nobody has dispatched it.
+
+What HAS been observed is everything up to the first Lean call, against the live
+repo: pack → slug → `gh issue list` → select → pointers → route → context pack → the
+emitted module and the gate probes. That path resolves `Econometrics` throughout —
+16 real declarations offered to the drafter, the module minted at
+`Econometrics/Identification/RandomAssignment.lean`, the splice round-tripping, and
+the depth probe looking up `` `Econometrics.att_eq_meanDiff `` against the two real
+pointer modules. Until a tick closes one, this is a retarget whose read path is
+verified and whose prove path is not.
+
 ### The hard rules (read these before touching anything)
 
 - **The foundry reads `formal-mathfin`; it never *merges* to it.** The pipeline may

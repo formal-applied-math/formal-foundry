@@ -26,6 +26,7 @@ import time
 import urllib.error
 import urllib.request
 
+import domain_pack
 from house_context import build_system_prompt, extract_signatures
 from probe_lib import (
     TokenLedger,
@@ -284,7 +285,8 @@ def main() -> int:
         print("MISTRAL_API_KEY not set", file=sys.stderr)
         return 2
 
-    system_prompt = build_system_prompt(args.main_repo)
+    system_prompt = build_system_prompt(args.main_repo, domain_pack.load(
+        getattr(args, "domain", None) or domain_pack.DEFAULT_NAME))
     manifest = json.load(open(args.manifest))
     root = os.path.dirname(os.path.abspath(args.manifest))
     # runs/ lives at the FOUNDRY root (where pipeline-tick.sh writes + reads the

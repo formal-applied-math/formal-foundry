@@ -6,11 +6,16 @@
 # main — R authors the PR (scout-not-author).
 #
 #   scripts/contribute.sh --tag pipeline-20260709 --id cal-bk-1 \
-#       --issue 53 --module MathFin/BlackScholes/BarrierParity.lean
+#       --issue 53 --module <LakeRoot>/<Section>/<Module>.lean
 #
 # Emits contrib/<id>/{candidate.lean, provenance.yaml, PR.md}.
 set -euo pipefail
 FOUNDRY="$(cd "$(dirname "$0")/.." && pwd)"
+
+# --- domain pack (runbook 06): the ONE place that knows which library we target ---
+# `DOMAIN` picks the pack; with none set the shim reads `[domain] name` from
+# pipeline.toml.
+eval "$(python3 "$FOUNDRY/probe/domain_pack.py" --export-env ${DOMAIN:+"$DOMAIN"})"
 TAG=""; ID=""; ISSUE=""; MODULE=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -29,7 +34,7 @@ SUMMARY="$FOUNDRY/runs/$TAG-summary.jsonl"
 OUT="$FOUNDRY/contrib/$ID"; mkdir -p "$OUT"
 cp "$CAND" "$OUT/candidate.lean"
 
-MODULE_DISPLAY="${MODULE:-MathFin/<Section>/<Module>.lean  (choose the home)}"
+MODULE_DISPLAY="${MODULE:-$DOMAIN_LAKE_ROOT/<Section>/<Module>.lean  (choose the home)}"
 ISSUE_LINE="${ISSUE:+closes #$ISSUE}"
 
 # provenance.yaml — the formalization.yaml automation.methods[] fragment R merges.
