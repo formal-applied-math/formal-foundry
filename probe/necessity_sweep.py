@@ -147,9 +147,20 @@ def load_mathfin_entries(bench_glob: str) -> list[Entry]:
     return out
 
 
+#: `private` matches here so that a private declaration still ENDS the previous one —
+#: drop it from the boundary and a public declaration's body swallows every private
+#: lemma that follows it. Private declarations are filtered out at emit time instead:
+#: `autoformalize._locate_named`, the parser the sweep itself uses, does not accept the
+#: modifier, so such a declaration can be extracted but never probed, and it would then
+#: arrive as a blind entry and inflate the very fraction the paper reports. 272 of them
+#: in this library.
 _LIB_DECL = re.compile(
     r"^(?:@\[[^\]]*\]\s*\n)?(?:private\s+|protected\s+|nonrec\s+)?"
     r"(?:theorem|lemma)\s+([A-Za-z_][A-Za-z0-9_'.]*)", re.M)
+#: anchored, not searched: it asks whether THIS declaration is private, not whether one
+#: appears anywhere in the text that follows it.
+_LIB_PRIVATE = re.compile(r"^(?:@\[[^\]]*\]\s*\n)?private\s")
+_COMMENT = re.compile(r"/-.*?-/|--[^\n]*", re.S)
 _LIB_CONTEXT = re.compile(r"^(open\s.*|open\s+scoped\s.*|variable\s.*)$", re.M)
 _LIB_NAMESPACE = re.compile(r"^(namespace|end)\s+([A-Za-z_][A-Za-z0-9_'.]*)\s*$", re.M)
 
@@ -221,6 +232,7 @@ def load_library_entries(root: str, max_proof_lines: int = 10,
     stratifies on `status`.
     """
     import os
+    from autoformalize import _locate_named
     out: list[Entry] = []
     # Only the package: a checkout also holds vendored upstream sources, exercise files
     # and tests, whose modules do not resolve as imports and which are not the library
@@ -237,7 +249,12 @@ def load_library_entries(root: str, max_proof_lines: int = 10,
                     src = f.read()
             except (OSError, UnicodeDecodeError):
                 continue
-            starts = [(m.start(), m.group(1)) for m in _LIB_DECL.finditer(src)]
+            # Prose in a docstring can begin a line with `theorem`, and matching it
+            # invents a declaration (`theorem for ±1 walks` -> a decl named `for`)
+            # whose probe cannot elaborate — which the sweep would record as the
+            # theorem being unprovable. Mask comments, keeping offsets intact.
+            masked = _COMMENT.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), src)
+            starts = [(m.start(), m.group(1)) for m in _LIB_DECL.finditer(masked)]
             for i, (pos, name) in enumerate(starts):
                 end = starts[i + 1][0] if i + 1 < len(starts) else len(src)
                 body = src[pos:end].rstrip()
@@ -263,9 +280,19 @@ def load_library_entries(root: str, max_proof_lines: int = 10,
                 head = [f"import {import_root or module}", ""] + context
                 tail = [f"end {ns_}" for ns_ in reversed(stack)]
                 code = "\n".join(head + ["", renamed, ""] + tail) + "\n"
-                out.append(Entry(arm="mathfin-lib", entry_id=f"{module}.{probe_name}",
-                                 domain=module, thm=probe_name, status=status,
-                                 provenance="mathfin-library", code=code))
+                if _LIB_PRIVATE.match(body):
+                    continue
+                entry = Entry(arm="mathfin-lib", entry_id=f"{module}.{probe_name}",
+                              domain=module, thm=probe_name, status=status,
+                              provenance="mathfin-library", code=code)
+                # The invariant that stops extraction failure from masquerading as
+                # blindness: if the sweep's own parser cannot find the declaration, no
+                # probe can be built from it and it must not enter the population.
+                try:
+                    _locate_named(entry.code, entry.thm)
+                except ValueError:
+                    continue
+                out.append(entry)
     out.sort(key=lambda e: e.entry_id)
     return out
 

@@ -720,3 +720,49 @@ def test_a_probe_imports_its_own_module_by_default(tmp_path):
 def test_a_shared_root_header_is_still_available(tmp_path):
     got = ns.load_library_entries(_lib_file(tmp_path), import_root="MathFin")
     assert {e.code.splitlines()[0] for e in got} == {"import MathFin"}
+
+
+LIB_TRAPS_SRC = '''import Mathlib
+
+namespace MathFin
+
+/-- A docstring whose prose starts a line with a keyword:
+theorem for ±1 walks, combined with the bijection above.
+-/
+theorem real_one (h : True) : 0 ≤ 1 := by norm_num
+
+private lemma helper_one (h : True) : 0 ≤ 2 := by norm_num
+
+end MathFin
+'''
+
+
+def _traps(tmp_path):
+    d = tmp_path / "MathFin"
+    d.mkdir(parents=True)
+    (d / "T.lean").write_text(LIB_TRAPS_SRC, encoding="utf-8")
+    return str(tmp_path)
+
+
+def test_prose_inside_a_docstring_is_not_a_declaration(tmp_path):
+    """`theorem for ±1 walks` inside a doc comment is English, not Lean. Matching it
+    invents a declaration named `for` whose probe cannot elaborate — which the sweep
+    would then record as the theorem being unprovable."""
+    got = ns.load_library_entries(_traps(tmp_path))
+    assert "for" + ns.PROBE_SUFFIX not in {e.thm for e in got}
+
+
+def test_private_declarations_are_left_out(tmp_path):
+    """`_locate_named` — the parser the sweep itself uses — does not accept a `private`
+    modifier, so a private declaration cannot be probed. Emitting one anyway would make
+    it arrive as a blind entry and inflate the blind fraction."""
+    got = {e.thm for e in ns.load_library_entries(_traps(tmp_path))}
+    assert "helper_one" + ns.PROBE_SUFFIX not in got
+    assert "real_one" + ns.PROBE_SUFFIX in got
+
+
+def test_every_emitted_entry_is_locatable_by_the_shared_parser(tmp_path):
+    """The invariant that keeps extraction failure from masquerading as blindness."""
+    from autoformalize import _locate_named
+    for e in ns.load_library_entries(_traps(tmp_path)):
+        _locate_named(e.code, e.thm)      # raises if the loader emitted a dud
