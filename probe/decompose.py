@@ -276,15 +276,64 @@ def _module_text(pack: DomainPack, pointers, body: str) -> str:
     )
 
 
-def assemble_skeleton(pack: DomainPack, dag: Dag, meta: dict | None = None) -> str:
+def target_preamble(target_text: str) -> str:
+    """The target stub's own declarations MINUS its theorem — the `def`s/`abbrev`s the
+    stub introduces, which exist in no importable module.
+
+    Cut at the first `theorem`/`lemma` at column zero: everything before it is the
+    definitions the target brings with it, everything after is the statement the DAG is
+    replacing. Boilerplate (license, `module`, imports, `namespace`) is dropped, since
+    `_module_text` re-emits it from the pack."""
+    body = re.split(r"^(?:@\[[^\]]*\]\s*\n)?(?:private\s+|protected\s+|nonrec\s+)*"
+                    r"(?:theorem|lemma)\s", target_text, maxsplit=1, flags=re.M)[0]
+    keep, skip = [], re.compile(
+        r"^\s*(?:/-|-/|module\b|public\s+import\b|import\b|set_option\b|"
+        r"@\[expose\]|namespace\b|end\b|open\b|Copyright|Released|Authors)")
+    in_block_comment = False
+    for line in body.splitlines():
+        if line.lstrip().startswith("/-") and not line.lstrip().startswith("/--"):
+            in_block_comment = not line.rstrip().endswith("-/")
+            continue
+        if in_block_comment:
+            in_block_comment = not line.rstrip().endswith("-/")
+            continue
+        if skip.match(line):
+            continue
+        keep.append(line)
+    return "\n".join(keep).strip()
+
+
+def assemble_skeleton(pack: DomainPack, dag: Dag, meta: dict | None = None,
+                      target_text: str = "") -> str:
     """The skeleton module: every leaf `<statement> := by sorry`, the main theorem
     `<statement> := <main.proof>` (its proof applying the leaves, NOT sorry). If a
     good decomposition, this elaborates with exactly `len(leaves)` sorries — that is
-    what `skeleton_gate` checks, before any leaf gets proving budget."""
+    what `skeleton_gate` checks, before any leaf gets proving budget.
+
+    `target_text` is the target stub, and omitting it is why the decomposer never once
+    produced a leaf. A pipeline target INTRODUCES definitions — `cal-bk-69` defines `P`,
+    `KRD` and `ED` in the stub itself, in no importable module — and every leaf statement
+    the splitter writes refers to them. A skeleton assembled from the DAG alone therefore
+    cannot elaborate, for a reason that has nothing to do with the split being good or
+    bad, and the gate correctly rejected it every time from 2026-07-27 to 2026-08-31.
+
+    Imports likewise come from the target as well as the leaves: the splitter declares
+    the pointers it happens to notice (on `cal-bk-69`, one of the target's three), and
+    trusting only those drops the rest."""
     blocks = [f"{n.statement} := {n.proof or 'by sorry'}" if n.is_main
               else f"{n.statement} := by sorry"
-              for n in topo_order(dag)]   # leaves first, main last
+              for n in topo_order(dag)]
+    preamble = target_preamble(target_text) if target_text else ""
+    if preamble:
+        blocks.insert(0, preamble)
+    # `_module_text` keys on `.lean` PATHS, so the target's `import A.B.C` lines are
+    # converted to paths rather than the pointers to modules. Mathlib is dropped: the
+    # pack emits it unconditionally.
     pointers = [p for leaf in dag.leaves for p in leaf.pointers]
+    for mod in (re.findall(r"^\s*(?:public\s+)?import\s+([A-Za-z0-9_.]+)",
+                           target_text, re.M) if target_text else []):
+        if mod.split(".")[0] != "Mathlib":
+            pointers.append(mod.replace(".", "/") + ".lean")
     return _module_text(pack, pointers, "\n\n".join(blocks))
 
 

@@ -366,3 +366,67 @@ def test_applied_to_must_be_list_of_strings():
         parse_dag({"main": {"name": "m", "statement": "theorem m : P", "proof": "by exact a"},
                    "leaves": [{"name": "a", "statement": "theorem a : P",
                                "applied_to": "not-a-list"}]})
+
+
+PREAMBLE_STUB = '''/-
+Copyright (c) 2026 Raphael Coelho. All rights reserved.
+-/
+module
+
+public import Mathlib
+public import MathFin.FixedIncome.ZCB
+
+set_option autoImplicit false
+
+@[expose] public section
+
+namespace MathFin
+
+/-- Multi-tenor bond price. -/
+noncomputable def P {ι : Type*} (s : Finset ι) (T c ρ : ι → ℝ) : ℝ :=
+  ∑ i ∈ s, c i * zcb (ρ i) 0 (T i)
+
+/-- Key-rate duration. -/
+noncomputable def KRD {ι : Type*} (s : Finset ι) (T c r : ι → ℝ) (k : ι) : ℝ := 0
+
+theorem key_rate_target {ι : Type*} (s : Finset ι) (T c r : ι → ℝ) :
+    ∑ j ∈ s, KRD s T c r j = 0 := by sorry
+
+end MathFin
+'''
+
+
+def test_skeleton_carries_the_targets_own_definitions():
+    """The stub INTRODUCES `P` and `KRD`; they exist in no importable module. Without
+    them the leaf statements reference unknown identifiers and the skeleton cannot
+    elaborate — which is how the decomposer failed on every target that defines
+    something, i.e. nearly all of them."""
+    from decompose import assemble_skeleton, parse_dag
+    dag = parse_dag({
+        "main": {"name": "m", "statement": "theorem m (s : Finset ℕ) (T c r : ℕ → ℝ) : "
+                                           "∑ j ∈ s, KRD s T c r j = 0",
+                 "proof": "l1 s T c r"},
+        "leaves": [{"name": "l1", "statement": "theorem l1 (s : Finset ℕ) (T c r : ℕ → ℝ) : "
+                                              "∑ j ∈ s, KRD s T c r j = 0"}],
+    })
+    lean = assemble_skeleton(PACK, dag, target_text=PREAMBLE_STUB)
+    assert "noncomputable def P" in lean
+    assert "noncomputable def KRD" in lean
+    # ... and NOT the target's own theorem, which the DAG replaces
+    assert "key_rate_target" not in lean
+
+
+def test_skeleton_keeps_the_targets_imports():
+    from decompose import assemble_skeleton, parse_dag
+    dag = parse_dag({"main": {"name": "m", "statement": "theorem m : True", "proof": "l1"},
+                     "leaves": [{"name": "l1", "statement": "theorem l1 : True"}]})
+    lean = assemble_skeleton(PACK, dag, target_text=PREAMBLE_STUB)
+    assert "MathFin.FixedIncome.ZCB" in lean
+
+
+def test_skeleton_without_a_target_text_is_unchanged():
+    """Back-compat: the existing callers and tests pass no target."""
+    from decompose import assemble_skeleton, parse_dag
+    dag = parse_dag({"main": {"name": "m", "statement": "theorem m : True", "proof": "l1"},
+                     "leaves": [{"name": "l1", "statement": "theorem l1 : True"}]})
+    assert "noncomputable def P" not in assemble_skeleton(PACK, dag)

@@ -58,7 +58,8 @@ def do_draft(pack, tid, tag, runs_dir, *, target_text, context_pack, drafter_pre
         return {"outcome": "fail_draft", "reason": r["error"], "tokens": r["tokens"]}
     dag, tokens = r["dag"], r["tokens"]
 
-    g = skeleton_gate(assemble_skeleton(pack, dag), len(dag.leaves), check_fn=check_fn)
+    g = skeleton_gate(assemble_skeleton(pack, dag, target_text=target_text),
+                      len(dag.leaves), check_fn=check_fn)
     if not g["passed"] and not g["indeterminate"]:
         # one bounded re-decomposition, feedback = the elaboration errors (Task 2.3.2)
         r2 = draft_decomposition(pack, target_text, context_pack, chat_fn=chat_fn,
@@ -70,7 +71,8 @@ def do_draft(pack, tid, tag, runs_dir, *, target_text, context_pack, drafter_pre
         tokens += r2["tokens"]
         if r2["ok"]:
             dag = r2["dag"]
-            g = skeleton_gate(assemble_skeleton(pack, dag), len(dag.leaves),
+            g = skeleton_gate(assemble_skeleton(pack, dag, target_text=target_text),
+                              len(dag.leaves),
                               check_fn=check_fn)
     if g["indeterminate"]:
         return {"outcome": "indeterminate", "reason": g["verdict"], "tokens": tokens}
