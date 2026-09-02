@@ -80,28 +80,51 @@ pipeline around it. Per theorem, per explicit hypothesis:
 3. **Verdict** — a hypothesis whose removal leaves a statement the sweep closes is
    **certified unnecessary**, and we hold the stronger theorem *with its proof in hand*.
 
-**Population, measured (not estimated).** The instrument was run in parse-only mode over
-`formal-mathfin/benchmarks/*.json`, pinned at corpus commit `48cb004` (2026-08-20):
+**Population: the library, not the catalogue.** The first two drafts of this section
+measured `formal-mathfin/benchmarks/*.json` — 357 catalogued entries, 700 probe-worthy
+binders. That population was abandoned on 2026-09-01 for a reason that would have
+invalidated the result: **330 of its 332 `full` entries (99.4%) are term-mode
+re-exports**, `:= MathFin.brownian_markov_property hXpb hX t₀`, whose real proof lives in
+the library. A tactic sweep cannot reprove a research theorem from scratch, so the power
+control fails on essentially all of them and the blind fraction is 100% *by construction*
+— a measurement of the re-export layer, not of the mathematics. The stratification below
+was written to defend against exactly this and keyed on `formalization_status`, which
+labels 14 entries `library_wrapper`; the structural rate is 99.4%. The defence did not
+separate what it was built to separate.
 
-| | |
-|---|---|
-| entries with a locatable primary declaration | **357 / 357** (the parser never failed) |
-| `full`-status entries with a buildable probe | **330** |
-| explicit binders in those | **1,489** |
-| after a sound syntactic pre-filter | **700** across **262** entries |
+The instrument is therefore pointed at `formal-mathfin/MathFin/**/*.lean`, where the
+proofs and the hypotheses are, and where both motivating cases actually live —
+`gainToPain_nonneg` (#161) and `upCapture_smul` (#162) are library lemmas, not catalogue
+rows. Measured in parse-only mode:
+
+| | declarations | explicit binders | probe-worthy | across |
+|---|---|---|---|---|
+| `tactic_short` (proof ≤ 10 lines) | **615** | 2,120 | **609** | 343 decls |
+| `tactic_long` | 745 | 3,480 | 1,729 | 581 decls |
+| `term` | 186 | 687 | 237 | 99 decls |
+| **total** | **1,546** | 6,287 | 2,575 | 1,023 decls |
+
+Locatable by the sweep's own parser: **1,546 / 1,546**. That is enforced rather than
+observed — the loader refuses to emit a declaration it cannot locate, because an
+unlocatable one produces no probe, fails its power control, and is recorded as *blind*.
+An earlier draft leaked 278 such declarations (272 `private`, which the shared parser's
+regex does not accept, and 6 conjured out of prose in doc comments — `theorem for ±1
+walks` yielding a declaration named `for`). That is a 15% inflation of the paper's
+headline denominator arriving as a finding rather than as a bug, and it is the
+characteristic failure mode of this study: **instrument breakage is indistinguishable
+from a result unless something is built to tell them apart.**
+
+The headline stratum is `tactic_short`: 609 binders over 343 declarations. The sweep's
+power varies sharply with proof length, so the strata are reported separately and never
+pooled.
 
 The pre-filter is the cost lever and it is sound: if a binder's name occurs free in the
 rest of the signature or in the conclusion, dropping it *cannot* elaborate, so the daemon
-call is a certain failure and skipping it removes no possible positive. It cuts the
-workload 1,489 → 700 (47%). Most of what it removes are data binders (`r`, `δ`, `K`, `μ`,
-`σ`) rather than hypotheses.
+call is a certain failure and skipping it removes no possible positive. On the short
+stratum it cuts 2,120 explicit binders to 609 (29%). Most of what it removes are data
+binders (`r`, `δ`, `K`, `μ`, `σ`) rather than hypotheses.
 
-The first draft of this section quoted 348 / 320 / 1,465 / 689, measured the same day at
-corpus commit `8e52f446`. The shipped `probe_worthy_binders` still reproduces that row
-exactly on that snapshot; the corpus then grew by nine entries in `c419f0f0` (the reified
-payoff language). The filter's meaning did not move — the population did, and the numbers
-above are re-pinned to a named commit so the next drift is legible rather than alarming.
-The run itself records the corpus commit it swept, and the paper quotes that row, not
+Every run records the corpus commit it swept, and the paper quotes that row rather than
 this one.
 
 **Stratify by faithfulness status, or the result is an artifact of wrappers.** Grounding
