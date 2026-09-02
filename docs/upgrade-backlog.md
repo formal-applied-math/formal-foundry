@@ -291,7 +291,30 @@ These require a general reasoning model *above* Leanstral. Kept here, designed, 
 the day we decide to add one there is no re-discovery. All must respect the hard
 rule: any model sees only public-corpus + fresh-textbook statements.
 
-### F. Subgoal decomposition (Draft-Sketch-Prove) [LANDED — `probe/decompose.py`, `[decompose] enabled`]
+### F. Subgoal decomposition (Draft-Sketch-Prove) [LANDED, and INERT until 2026-09-01]
+
+> **It shipped and never once worked.** `leaves_total=0` on every invocation from
+> 2026-07-27 to 2026-08-31 — seven ticks, no `*.dag.json` ever written — while the direct
+> prover returned `max_rounds` on every target, so the foundry produced nothing for five
+> weeks with all of CI green.
+>
+> The cause was not the split. Isolating the stages against `cal-bk-69` on 2026-09-01
+> cleared the drafter outright: one `claude -p` call, a valid 3-leaf DAG, no re-ask. It
+> died at the skeleton gate, and correctly — `assemble_skeleton` built the skeleton from
+> the DAG's statements alone, while a pipeline target *introduces* definitions (`cal-bk-69`
+> defines `P`, `KRD`, `ED` in the stub, in no importable module) that every leaf statement
+> then refers to. The skeleton could not elaborate for a reason having nothing to do with
+> the decomposition. Imports were dropped the same way: taken from the pointers the
+> splitter declared, one of that target's three.
+>
+> Fixed by `target_preamble` + `assemble_skeleton(..., target_text=...)`. The lesson is
+> the one that recurs across this backlog: **an instrument defect presents as a result** —
+> this read for five weeks as "the remaining targets are too hard".
+>
+> Three observability gaps let it hide, all now closed: the failure `reason` was computed
+> and discarded, CI reported success on a barren tick, and `probe/health.py` did not exist.
+
+**Design (unchanged):** `probe/decompose.py`, `[decompose] enabled`
 
 The single largest capability step (survey #3), and what the most productive ops in
 existence run on ([Gauss](https://www.math.inc/gauss), Aristotle).
