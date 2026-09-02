@@ -35,22 +35,32 @@ LEAFMAN="$RUNS/$TAG-$ID-leaves/manifest.json"
 jout() { printf '%s' "$1" | python3 -c "import sys,json;print(json.load(sys.stdin).get('$2',''))" 2>/dev/null || true; }
 
 # summary row (vibe-shaped) so pipeline-tick step 3 reads the outcome; ab scoreboard row
-# + md refresh (Task 2.6). $1=outcome $2=tokens $3=leaves_total $4=leaves_closed
+# + md refresh (Task 2.6). $1=outcome $2=tokens $3=leaves_total $4=leaves_closed $5=reason
+#
+# $5 is why this outcome happened, and it is not optional. `do_draft` computes a `reason`
+# on every failure path and this function used to drop it, so seven consecutive
+# decompose failures (2026-07-27 .. 2026-08-31, every one of them leaves_total=0) left
+# NOTHING on disk saying whether the split was undraftable, the skeleton did not
+# elaborate, or the daemon was wedged. A loop that fails invisibly cannot be repaired
+# from its own telemetry, which is the whole point of running it unattended.
 record() {
   python3 - "$SUMMARY" "$RUNS" "$ID" "$1" "${2:-0}" "${3:-0}" "${4:-0}" \
-    "$FOUNDRY/docs/research/ab-decomposer.md" <<'PY'
+    "$FOUNDRY/docs/research/ab-decomposer.md" "${5:-}" <<'PY'
 import json, sys, time
 sys.path.insert(0, ".")
 from scoreboard import ab_row, append_ab_row, update_scoreboard_md
 summ, runs, tid, outcome, tok, lt, lc, md = sys.argv[1:9]
+reason = (sys.argv[9] if len(sys.argv) > 9 else "").strip()
 tok, lt, lc = int(tok), int(lt), int(lc)
 ts = time.strftime("%Y-%m-%dT%H:%M:%S")
 with open(summ, "a", encoding="utf-8") as f:
     f.write(json.dumps({"target": tid, "harness": "decompose", "arm": "decompose",
                         "outcome": outcome, "tokens": tok, "ts": ts,
-                        "leaves_total": lt, "leaves_closed": lc}) + "\n")
+                        "leaves_total": lt, "leaves_closed": lc,
+                        "reason": reason}) + "\n")
 append_ab_row(runs, ab_row(target=tid, arm="decompose", outcome=outcome, ts=ts,
-                           leaves_total=lt, leaves_closed=lc, tokens=tok))
+                           leaves_total=lt, leaves_closed=lc, tokens=tok,
+                           note=reason[:200]))
 update_scoreboard_md(md, runs)
 PY
 }
@@ -63,13 +73,14 @@ DRAFT="$(python3 decompose_tick.py draft --id "$ID" --tag "$TAG" --runs "$RUNS" 
   --queue "$QUEUE" --main-repo "$MAIN" --config "$CFG" || echo '{"outcome":"error"}')"
 DOUT="$(jout "$DRAFT" outcome)"
 LT="$(jout "$DRAFT" leaves_total)"; LT="${LT:-0}"
-echo "[decompose] draft outcome=$DOUT leaves_total=$LT" >&2
+DREASON="$(jout "$DRAFT" reason)"
+echo "[decompose] draft outcome=$DOUT leaves_total=$LT reason=${DREASON:-none}" >&2
 if [ "$DOUT" != "drafted" ]; then
   # indeterminate = wedged daemon (retryable → error); a bad/undraftable split records so
   # the pipeline moves on (max_rounds). Either way: no candidate this tick.
   case "$DOUT" in
-    indeterminate|error) record error 0 "$LT" 0 ;;
-    *) record max_rounds 0 "$LT" 0 ;;
+    indeterminate|error) record error 0 "$LT" 0 "$DREASON" ;;
+    *) record max_rounds 0 "$LT" 0 "$DREASON" ;;
   esac
   echo "[decompose] no split to prove ($DOUT) — done" >&2
   exit 0
@@ -100,7 +111,7 @@ echo "[decompose] recompose outcome=$ROUT leaves=$LC/$LT" >&2
 #    partial banks the proved leaves (run artifacts) + records so the pipeline moves on.
 case "$ROUT" in
   pass)    record pass 0 "$LT" "$LC" ;;
-  partial) record max_rounds 0 "$LT" "$LC" ;;   # honest partial: banked leaves, declared remainder
-  *)       record fail_gate 0 "$LT" "$LC" ;;
+  partial) record max_rounds 0 "$LT" "$LC" "remainder: $(jout "$RECMP" remainder)" ;;
+  *)       record fail_gate 0 "$LT" "$LC" "$(jout "$RECMP" reason)" ;;
 esac
 exit 0
