@@ -5,8 +5,13 @@ import re
 
 __all__ = ['_DECL_RE', '_OPEN', '_CLOSE', '_locate', 'split_statement', 'vacuity_goal', 'disproof_goal']
 
+#: `private`/`protected`/`nonrec` are ordinary declaration modifiers. Omitting them made
+#: `_locate` raise "no theorem/lemma declaration found" on a perfectly well-formed
+#: declaration, and callers read that as unprobeable rather than unparsed — 272 of
+#: MathFin's 1,831 declarations carry `private`, which surfaced as a 15% blindness rate.
 _DECL_RE = re.compile(
-    r"^\s*(?:@\[[^\]]*\]\s*)?(?:theorem|lemma)\s+([A-Za-z0-9_'.]+)",
+    r"^\s*(?:@\[[^\]]*\]\s*)?(?:(?:private|protected|nonrec)\s+)*"
+    r"(?:theorem|lemma)\s+([A-Za-z0-9_'.]+)",
     re.MULTILINE,
 )
 

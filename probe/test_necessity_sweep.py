@@ -752,12 +752,11 @@ def test_prose_inside_a_docstring_is_not_a_declaration(tmp_path):
     assert "for" + ns.PROBE_SUFFIX not in {e.thm for e in got}
 
 
-def test_private_declarations_are_left_out(tmp_path):
-    """`_locate_named` — the parser the sweep itself uses — does not accept a `private`
-    modifier, so a private declaration cannot be probed. Emitting one anyway would make
-    it arrive as a blind entry and inflate the blind fraction."""
+def test_private_declarations_are_probed_now_that_the_locator_parses_them(tmp_path):
+    """They used to be dropped because the shared locator rejected the modifier and they
+    would have arrived as blind entries. Fixed at the source, so they are population."""
     got = {e.thm for e in ns.load_library_entries(_traps(tmp_path))}
-    assert "helper_one" + ns.PROBE_SUFFIX not in got
+    assert "helper_one" + ns.PROBE_SUFFIX in got
     assert "real_one" + ns.PROBE_SUFFIX in got
 
 

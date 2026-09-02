@@ -2286,3 +2286,23 @@ def test_build_retrieve_fns_falls_open_to_loogle_when_index_absent():
                                  index_dir="/no/index", k=8,
                                  embed_model="mistral-embed", api_key="k")
     assert r is not None and p is None
+
+
+def test_locate_named_accepts_declaration_modifiers():
+    """`private`/`protected`/`nonrec` are ordinary Lean declaration modifiers, and a
+    locator that rejects them silently reports the declaration as absent. Every caller
+    reads that as "cannot be probed": `strengthen.necessity_probe` returns None,
+    `necessity_sweep.sweep_can_prove` returns False and the theorem is recorded as one
+    the instrument cannot prove. 272 of MathFin's 1,831 declarations are `private`, so
+    the gap reads as a 15% blindness rate rather than as a parser bug."""
+    for modifier in ("private ", "protected ", "nonrec ", "private nonrec ", ""):
+        src = f"{modifier}theorem t (h : True) : 0 ≤ 1 := by norm_num\n"
+        bstart, sep, end = af._locate_named(src, "t")
+        assert src[bstart:sep].strip() == "(h : True)", modifier
+        assert src[sep:end].strip().startswith(":"), modifier
+
+
+def test_locate_named_still_accepts_an_attribute_before_a_modifier():
+    src = "@[simp]\nprivate theorem t (h : True) : 0 ≤ 1 := by norm_num\n"
+    bstart, sep, _end = af._locate_named(src, "t")
+    assert src[bstart:sep].strip() == "(h : True)"

@@ -149,11 +149,13 @@ def load_mathfin_entries(bench_glob: str) -> list[Entry]:
 
 #: `private` matches here so that a private declaration still ENDS the previous one —
 #: drop it from the boundary and a public declaration's body swallows every private
-#: lemma that follows it. Private declarations are filtered out at emit time instead:
-#: `autoformalize._locate_named`, the parser the sweep itself uses, does not accept the
-#: modifier, so such a declaration can be extracted but never probed, and it would then
-#: arrive as a blind entry and inflate the very fraction the paper reports. 272 of them
-#: in this library.
+#: lemma that follows it.
+#:
+#: Private declarations used to be dropped at emit time as well, because the shared
+#: locator could not parse the modifier and they would have arrived as blind entries.
+#: That was fixed at the source (`af_parse._DECL_RE`, `autoformalize._locate_named`), so
+#: the 272 private declarations in this library are now probeable and stay in the
+#: population. The emit-time locatability guard below still stands as the backstop.
 _LIB_DECL = re.compile(
     r"^(?:@\[[^\]]*\]\s*\n)?(?:private\s+|protected\s+|nonrec\s+)?"
     r"(?:theorem|lemma)\s+([A-Za-z_][A-Za-z0-9_'.]*)", re.M)
@@ -280,8 +282,6 @@ def load_library_entries(root: str, max_proof_lines: int = 10,
                 head = [f"import {import_root or module}", ""] + context
                 tail = [f"end {ns_}" for ns_ in reversed(stack)]
                 code = "\n".join(head + ["", renamed, ""] + tail) + "\n"
-                if _LIB_PRIVATE.match(body):
-                    continue
                 entry = Entry(arm="mathfin-lib", entry_id=f"{module}.{probe_name}",
                               domain=module, thm=probe_name, status=status,
                               provenance="mathfin-library", code=code)

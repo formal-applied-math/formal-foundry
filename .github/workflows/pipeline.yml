@@ -255,6 +255,19 @@ jobs:
           echo "::error::persist push FAILED — this run's state/telemetry is NOT on main (recover from the pipeline-runs artifact)"
           exit 1
 
+      # A green check has always meant "the machinery ran", never "the machinery
+      # worked": the tick exits 0 on a target the prover cannot close, which is
+      # correct — that is not an infrastructure error. The consequence was that the
+      # loop ran from 2026-07-28 to 2026-09-01 producing NOTHING, five consecutive
+      # max_rounds ticks, every run green, and nobody noticed for five weeks. One
+      # barren tick is ordinary; a streak is a foundry that has stopped working.
+      - name: Foundry health — is the loop still producing?
+        if: always()
+        run: |
+          cd probe
+          python3 health.py --state ../pipeline_state.json --fail-on-alarm \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: Upload telemetry
         if: always()
         uses: actions/upload-artifact@v4
