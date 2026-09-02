@@ -4,9 +4,12 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-if docker ps --format '{{.Image}}' | grep -q 'mathfin-verify'; then
+# the pack names the verify image; the foundry does not (runbook 06)
+eval "$(python3 probe/domain_pack.py --export-env ${DOMAIN:+"$DOMAIN"})"
+
+if docker ps --format '{{.Image}}' | grep -q "$DOMAIN_VERIFY_IMAGE"; then
   if ! docker ps --format '{{.Names}}' | grep -q 'lean-repl'; then
-    echo "refusing: a mathfin-verify build is holding the Lean slot" >&2
+    echo "refusing: a verify build is holding the Lean slot" >&2
     exit 1
   fi
 fi

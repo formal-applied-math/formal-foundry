@@ -1010,7 +1010,7 @@ def _locate_named(text: str, name: str) -> tuple[int, int, int]:
     the locator raises "not found" on a perfectly ordinary declaration, and every caller
     reads that as unprobeable rather than unparsed: `strengthen.necessity_probe` returns
     None and `necessity_sweep.sweep_can_prove` returns False, so the theorem is recorded
-    as one the instrument cannot prove. 272 of MathFin's 1,831 declarations carry
+    as one the instrument cannot prove. 272 of the flagship's 1,831 declarations carry
     `private`, which made the gap look like a 15% blindness rate."""
     m = re.search(rf"^\s*(?:@\[[^\]]*\]\s*)?"
                   rf"(?:(?:private|protected|nonrec)\s+)*"

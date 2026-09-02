@@ -28,8 +28,8 @@ def load_records(path_glob: str) -> list[dict]:
 
 
 def domain_area(domain: str) -> str:
-    """A module path rolled up to its library area — `MathFin.Foundations.PointwiseBracket`
-    to `MathFin.Foundations`. The library arm spans 150 modules and one row each is not a
+    """A module path rolled up to its library area — `Lib.Area.Module` to `Lib.Area`.
+    The library arm spans 150 modules and one row each is not a
     table anyone reads; 13 areas is. Names without a path (the catalogue arm's domains)
     pass through unchanged."""
     parts = domain.split(".")

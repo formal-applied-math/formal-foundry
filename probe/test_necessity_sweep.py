@@ -1,5 +1,8 @@
 """Daemon-free tests for the necessity sweep driver."""
+import domain_pack
 import necessity_sweep as ns
+
+PACK = domain_pack.load("mathfin")
 
 WRAPPER = '''import MathFin.Performance.RatiosExtended
 
@@ -55,7 +58,7 @@ def test_loader_partitions_by_provenance_and_status(tmp_path):
              "metadata": {"formalization_status": "library_wrapper",
                           "provenance": {"source": "leanstral-autoform"}}},
         ]}), encoding="utf-8")
-    entries = ns.load_mathfin_entries(str(tmp_path / "*.json"))
+    entries = ns.load_catalogue_entries(str(tmp_path / "*.json"))
     assert [(e.entry_id, e.status, e.provenance) for e in entries] == [
         ("a", "full", "human"), ("b", "library_wrapper", "leanstral-autoform")]
     assert entries[0].domain == "d"
@@ -112,7 +115,7 @@ def _fakes(closes: set[str]):
 
 def test_a_removable_hypothesis_is_certified_unnecessary():
     check_fn, prove_fn = _fakes({"h"})
-    e = ns.Entry("mathfin", "e1", "d", "gainToPain_nonneg_of_denom_pos", "full",
+    e = ns.Entry("catalogue", "e1", "d", "gainToPain_nonneg_of_denom_pos", "full",
                  "human", GUARDED)
     recs = ns.sweep_entry(e, check_fn=check_fn, prove_fn=prove_fn,
                           regate_fn=lambda c: {"passed": True})
@@ -124,7 +127,7 @@ def test_a_removable_hypothesis_is_certified_unnecessary():
 
 def test_every_entry_emits_exactly_one_power_control_record():
     check_fn, prove_fn = _fakes({"h"})
-    e = ns.Entry("mathfin", "e1", "d", "gainToPain_nonneg_of_denom_pos", "full",
+    e = ns.Entry("catalogue", "e1", "d", "gainToPain_nonneg_of_denom_pos", "full",
                  "human", GUARDED)
     recs = ns.sweep_entry(e, check_fn=check_fn, prove_fn=prove_fn,
                           regate_fn=lambda c: {"passed": True})
@@ -133,7 +136,7 @@ def test_every_entry_emits_exactly_one_power_control_record():
 
 def test_a_red_regate_is_not_a_positive():
     check_fn, prove_fn = _fakes({"h"})
-    e = ns.Entry("mathfin", "e1", "d", "gainToPain_nonneg_of_denom_pos", "full",
+    e = ns.Entry("catalogue", "e1", "d", "gainToPain_nonneg_of_denom_pos", "full",
                  "human", GUARDED)
     recs = ns.sweep_entry(e, check_fn=check_fn, prove_fn=prove_fn,
                           regate_fn=lambda c: {"passed": False, "reason": "axioms"})
@@ -153,7 +156,7 @@ def test_daemon_trouble_records_an_error_and_never_a_verdict():
     def prove_fn(probe):
         return {"lean_text": probe.replace("sorry", "positivity"), "tokens": 0}
 
-    e = ns.Entry("mathfin", "e1", "d", "gainToPain_nonneg_of_denom_pos", "full",
+    e = ns.Entry("catalogue", "e1", "d", "gainToPain_nonneg_of_denom_pos", "full",
                  "human", GUARDED)
     recs = ns.sweep_entry(e, check_fn=check_fn, prove_fn=prove_fn,
                           regate_fn=lambda c: {"passed": True})
@@ -165,9 +168,9 @@ def test_daemon_trouble_records_an_error_and_never_a_verdict():
 def test_done_keys_reads_back_what_was_written(tmp_path):
     p = tmp_path / "out.jsonl"
     import json as _j
-    p.write_text("\n".join(_j.dumps({"arm": "mathfin", "entry_id": x})
+    p.write_text("\n".join(_j.dumps({"arm": "catalogue", "entry_id": x})
                            for x in ("a", "b")) + "\n", encoding="utf-8")
-    assert ns.done_keys(str(p)) == {("mathfin", "a"), ("mathfin", "b")}
+    assert ns.done_keys(str(p)) == {("catalogue", "a"), ("catalogue", "b")}
 
 
 def test_done_keys_is_empty_when_the_file_does_not_exist(tmp_path):
@@ -176,14 +179,14 @@ def test_done_keys_is_empty_when_the_file_does_not_exist(tmp_path):
 
 def test_done_keys_tolerates_a_truncated_final_line(tmp_path):
     p = tmp_path / "out.jsonl"
-    p.write_text('{"arm": "mathfin", "entry_id": "a"}\n{"arm": "mathfin", "ent',
+    p.write_text('{"arm": "catalogue", "entry_id": "a"}\n{"arm": "catalogue", "ent',
                  encoding="utf-8")
-    assert ns.done_keys(str(p)) == {("mathfin", "a")}
+    assert ns.done_keys(str(p)) == {("catalogue", "a")}
 
 
 def test_run_sweep_skips_entries_already_recorded(tmp_path):
     check_fn, prove_fn = _fakes({"h"})
-    e = ns.Entry("mathfin", "e1", "d", "gainToPain_nonneg_of_denom_pos", "full",
+    e = ns.Entry("catalogue", "e1", "d", "gainToPain_nonneg_of_denom_pos", "full",
                  "human", GUARDED)
     out = str(tmp_path / "out.jsonl")
     first = ns.run_sweep([e], out, check_fn=check_fn, prove_fn=prove_fn,
@@ -220,18 +223,18 @@ def _mathfin_root(tmp_path):
 
 def test_module_defs_reads_the_imported_modules_own_definitions(tmp_path):
     # WRAPPER imports MathFin.Performance.RatiosExtended and names `gainToPain`.
-    assert ns.module_defs(WRAPPER, _mathfin_root(tmp_path)) == ["gainToPain"]
+    assert ns.module_defs(PACK, WRAPPER, _mathfin_root(tmp_path)) == ["gainToPain"]
 
 
 def test_module_defs_drops_definitions_the_statement_never_names(tmp_path):
     # `painIndex` is defined in the same module but absent from the statement;
     # splicing it into `unfold` would just make every sweep tactic fail to elaborate.
-    assert "painIndex" not in ns.module_defs(WRAPPER, _mathfin_root(tmp_path))
+    assert "painIndex" not in ns.module_defs(PACK, WRAPPER, _mathfin_root(tmp_path))
 
 
 def test_module_defs_ignores_mathlib_imports_and_missing_modules(tmp_path):
     code = "import Mathlib\nimport MathFin.Nope\n\ntheorem t (n : Nat) : n + 0 = n := by simp\n"
-    assert ns.module_defs(code, _mathfin_root(tmp_path)) == []
+    assert ns.module_defs(PACK, code, _mathfin_root(tmp_path)) == []
 
 
 def test_run_sweep_builds_a_prover_per_entry_when_given_a_factory(tmp_path):
@@ -242,7 +245,7 @@ def test_run_sweep_builds_a_prover_per_entry_when_given_a_factory(tmp_path):
         seen.append(entry.entry_id)
         return prove_fn
 
-    e = ns.Entry("mathfin", "e1", "d", "gainToPain_nonneg_of_denom_pos", "full",
+    e = ns.Entry("catalogue", "e1", "d", "gainToPain_nonneg_of_denom_pos", "full",
                  "human", GUARDED)
     ns.run_sweep([e], str(tmp_path / "out.jsonl"), check_fn=check_fn,
                  prove_for=prove_for, regate_fn=lambda c: {"passed": True},
@@ -293,7 +296,7 @@ def _corpus(counts):
     out = []
     for domain, n in counts.items():
         for i in range(n):
-            out.append(ns.Entry("mathfin", f"{domain}-{i}", domain,
+            out.append(ns.Entry("catalogue", f"{domain}-{i}", domain,
                                 "gainToPain_nonneg_of_denom_pos", "full", "human",
                                 GUARDED))
     return out
@@ -329,7 +332,7 @@ def test_sample_larger_than_the_population_returns_everything():
 
 def test_sweep_entry_probes_only_the_binders_it_was_given():
     check_fn, prove_fn = _fakes({"h"})
-    e = ns.Entry("mathfin", "e1", "d", "gainToPain_nonneg_of_denom_pos", "full",
+    e = ns.Entry("catalogue", "e1", "d", "gainToPain_nonneg_of_denom_pos", "full",
                  "human", GUARDED)
     recs = ns.sweep_entry(e, check_fn=check_fn, prove_fn=prove_fn,
                           regate_fn=lambda c: {"passed": True}, binders=[])
@@ -339,7 +342,7 @@ def test_sweep_entry_probes_only_the_binders_it_was_given():
 def test_run_sweep_restricts_to_the_sampled_binders(tmp_path):
     import json as _j
     check_fn, prove_fn = _fakes({"h"})
-    e = ns.Entry("mathfin", "e1", "d", "gainToPain_nonneg_of_denom_pos", "full",
+    e = ns.Entry("catalogue", "e1", "d", "gainToPain_nonneg_of_denom_pos", "full",
                  "human", GUARDED)
     out = str(tmp_path / "out.jsonl")
     ns.run_sweep([e], out, check_fn=check_fn, prove_fn=prove_fn,
@@ -386,7 +389,7 @@ def test_a_blind_entrys_binders_are_recorded_but_never_probed():
         probed.append(code)
         return check_fn(code)
 
-    e = ns.Entry("mathfin", "e1", "d", "gainToPain_nonneg_of_denom_pos", "full",
+    e = ns.Entry("catalogue", "e1", "d", "gainToPain_nonneg_of_denom_pos", "full",
                  "human", GUARDED)
     recs = ns.sweep_entry(e, check_fn=counting_check, prove_fn=prove_fn,
                           regate_fn=lambda c: {"passed": True})
@@ -404,7 +407,7 @@ def test_a_blind_entrys_binders_are_recorded_but_never_probed():
 
 def test_the_short_circuit_can_be_turned_off_for_a_census_of_attempts():
     check_fn, prove_fn = _blind_fakes()
-    e = ns.Entry("mathfin", "e1", "d", "gainToPain_nonneg_of_denom_pos", "full",
+    e = ns.Entry("catalogue", "e1", "d", "gainToPain_nonneg_of_denom_pos", "full",
                  "human", GUARDED)
     recs = ns.sweep_entry(e, check_fn=check_fn, prove_fn=prove_fn,
                           regate_fn=lambda c: {"passed": True}, skip_blind=False)
@@ -413,7 +416,7 @@ def test_the_short_circuit_can_be_turned_off_for_a_census_of_attempts():
 
 def test_a_reachable_entry_still_probes_every_binder():
     check_fn, prove_fn = _fakes({"h"})
-    e = ns.Entry("mathfin", "e1", "d", "gainToPain_nonneg_of_denom_pos", "full",
+    e = ns.Entry("catalogue", "e1", "d", "gainToPain_nonneg_of_denom_pos", "full",
                  "human", GUARDED)
     recs = ns.sweep_entry(e, check_fn=check_fn, prove_fn=prove_fn,
                           regate_fn=lambda c: {"passed": True})
@@ -494,19 +497,19 @@ def test_an_entry_that_only_hit_daemon_errors_is_not_done(tmp_path):
     import json as _j
     p = tmp_path / "out.jsonl"
     p.write_text("\n".join(_j.dumps(r) for r in [
-        {"arm": "mathfin", "entry_id": "good", "verdict": "power_control"},
-        {"arm": "mathfin", "entry_id": "good", "verdict": "not_shown_unnecessary"},
-        {"arm": "mathfin", "entry_id": "lost", "verdict": "power_control"},
-        {"arm": "mathfin", "entry_id": "lost", "verdict": "daemon_error"},
+        {"arm": "catalogue", "entry_id": "good", "verdict": "power_control"},
+        {"arm": "catalogue", "entry_id": "good", "verdict": "not_shown_unnecessary"},
+        {"arm": "catalogue", "entry_id": "lost", "verdict": "power_control"},
+        {"arm": "catalogue", "entry_id": "lost", "verdict": "daemon_error"},
     ]) + "\n", encoding="utf-8")
-    assert ns.done_keys(str(p)) == {("mathfin", "good")}
+    assert ns.done_keys(str(p)) == {("catalogue", "good")}
 
 
 def test_run_sweep_stops_instead_of_burning_the_queue_on_an_outage(tmp_path):
     """A dead daemon answers instantly, so without this the run races through every
     remaining entry writing daemon_error and calls itself finished."""
     check_fn, prove_fn = _dead_daemon()
-    entries = [ns.Entry("mathfin", f"e{i}", "d", "gainToPain_nonneg_of_denom_pos",
+    entries = [ns.Entry("catalogue", f"e{i}", "d", "gainToPain_nonneg_of_denom_pos",
                         "full", "human", GUARDED) for i in range(50)]
     stats = ns.run_sweep(entries, str(tmp_path / "out.jsonl"), check_fn=check_fn,
                          prove_fn=prove_fn, regate_fn=lambda c: {"passed": True},
@@ -517,7 +520,7 @@ def test_run_sweep_stops_instead_of_burning_the_queue_on_an_outage(tmp_path):
 
 def test_a_healthy_run_does_not_abort(tmp_path):
     check_fn, prove_fn = _fakes({"h"})
-    entries = [ns.Entry("mathfin", f"e{i}", "d", "gainToPain_nonneg_of_denom_pos",
+    entries = [ns.Entry("catalogue", f"e{i}", "d", "gainToPain_nonneg_of_denom_pos",
                         "full", "human", GUARDED) for i in range(6)]
     stats = ns.run_sweep(entries, str(tmp_path / "out.jsonl"), check_fn=check_fn,
                          prove_fn=prove_fn, regate_fn=lambda c: {"passed": True},
@@ -530,7 +533,7 @@ def test_a_dead_daemon_is_not_mistaken_for_a_blind_entry():
     raises the reported blind fraction. A dead daemon must therefore never look like
     one, or an outage silently becomes the result."""
     check_fn, prove_fn = _dead_daemon()
-    e = ns.Entry("mathfin", "e1", "d", "gainToPain_nonneg_of_denom_pos", "full",
+    e = ns.Entry("catalogue", "e1", "d", "gainToPain_nonneg_of_denom_pos", "full",
                  "human", GUARDED)
     recs = ns.sweep_entry(e, check_fn=check_fn, prove_fn=prove_fn,
                           regate_fn=lambda c: {"passed": True})
@@ -540,7 +543,7 @@ def test_a_dead_daemon_is_not_mistaken_for_a_blind_entry():
 
 def test_a_live_daemon_that_simply_cannot_prove_it_is_blind():
     check_fn, prove_fn = _blind_fakes()      # answers fine, just closes nothing
-    e = ns.Entry("mathfin", "e1", "d", "gainToPain_nonneg_of_denom_pos", "full",
+    e = ns.Entry("catalogue", "e1", "d", "gainToPain_nonneg_of_denom_pos", "full",
                  "human", GUARDED)
     recs = ns.sweep_entry(e, check_fn=check_fn, prove_fn=prove_fn,
                           regate_fn=lambda c: {"passed": True})
@@ -588,20 +591,20 @@ def _lib(tmp_path):
 
 
 def test_library_probe_imports_the_module_and_reopens_its_context(tmp_path):
-    got = {e.thm: e for e in ns.load_library_entries(_lib(tmp_path))}
+    got = {e.thm: e for e in ns.load_library_entries(PACK, _lib(tmp_path))}
     e = got["gainToPain_nonneg" + ns.PROBE_SUFFIX]
     assert e.code.startswith("import MathFin.Performance.Ratios")
     assert "open MeasureTheory" in e.code
     assert "open scoped NNReal" in e.code
     assert "namespace MathFin" in e.code and e.code.rstrip().endswith("end MathFin")
     assert "variable {ι : Type*} (s : Finset ι)" in e.code
-    assert e.domain == "MathFin.Performance.Ratios" and e.arm == "mathfin-lib"
+    assert e.domain == "MathFin.Performance.Ratios" and e.arm == "library"
 
 
 def test_library_declaration_is_renamed_so_it_cannot_clash_with_the_import(tmp_path):
     """The probe imports the module that already defines this theorem. Re-declaring the
     same name inside the same namespace is an error, so the probe carries a fresh one."""
-    e = {x.thm: x for x in ns.load_library_entries(_lib(tmp_path))}[
+    e = {x.thm: x for x in ns.load_library_entries(PACK, _lib(tmp_path))}[
         "gainToPain_nonneg" + ns.PROBE_SUFFIX]
     assert "theorem gainToPain_nonneg " not in e.code
     assert ns.primary_decl(e.code) == e.thm
@@ -610,14 +613,14 @@ def test_library_declaration_is_renamed_so_it_cannot_clash_with_the_import(tmp_p
 
 
 def test_library_entries_are_stratified_by_proof_shape(tmp_path):
-    got = {x.entry_id: x for x in ns.load_library_entries(_lib(tmp_path))}
+    got = {x.entry_id: x for x in ns.load_library_entries(PACK, _lib(tmp_path))}
     statuses = {k.rsplit(".", 1)[-1]: v.status for k, v in got.items()}
     assert statuses["gainToPain_nonneg_necessity_probe"] == "tactic_short"
     assert statuses["long_one_necessity_probe"] == "tactic_long"
 
 
 def test_library_binders_are_pre_filtered_the_same_way(tmp_path):
-    e = {x.thm: x for x in ns.load_library_entries(_lib(tmp_path))}[
+    e = {x.thm: x for x in ns.load_library_entries(PACK, _lib(tmp_path))}[
         "gainToPain_nonneg" + ns.PROBE_SUFFIX]
     assert ns.probe_worthy_binders(e.code, e.thm) == ["h"]
 
@@ -646,7 +649,7 @@ def test_a_declaration_does_not_swallow_the_next_ones_docstring(tmp_path):
     d = tmp_path / "MathFin"
     d.mkdir(parents=True)
     (d / "A.lean").write_text(LIB_DOC_SRC, encoding="utf-8")
-    got = {e.thm: e for e in ns.load_library_entries(str(tmp_path))}
+    got = {e.thm: e for e in ns.load_library_entries(PACK, str(tmp_path))}
     one = got["one" + ns.PROBE_SUFFIX]
     assert "second" not in one.code
     assert "@[simp]" not in one.code
@@ -659,7 +662,7 @@ def test_context_keeps_source_order_around_the_namespace(tmp_path):
     d = tmp_path / "MathFin"
     d.mkdir(parents=True)
     (d / "A.lean").write_text(LIB_DOC_SRC, encoding="utf-8")
-    code = {e.thm: e for e in ns.load_library_entries(str(tmp_path))}[
+    code = {e.thm: e for e in ns.load_library_entries(PACK, str(tmp_path))}[
         "one" + ns.PROBE_SUFFIX].code
     assert code.index("namespace MathFin") < code.index("variable {ι : Type*}")
 
@@ -674,7 +677,7 @@ def test_library_loader_stays_inside_the_package(tmp_path):
     (tmp_path / "upstream").mkdir()
     (tmp_path / "upstream" / "B.lean").write_text(
         "theorem theirs (h : True) : 0 ≤ 1 := by norm_num\n", encoding="utf-8")
-    got = ns.load_library_entries(str(tmp_path))
+    got = ns.load_library_entries(PACK, str(tmp_path))
     assert [e.domain for e in got] == ["MathFin.A"]
 
 
@@ -712,13 +715,13 @@ def test_a_probe_imports_its_own_module_by_default(tmp_path):
     shared root header was tried to keep the REPL warm across 149 modules and measured
     worthless — the REPL respawns on nearly every call, so nothing is ever warm, and no
     import shape was cheaper."""
-    got = ns.load_library_entries(_lib_file(tmp_path))
+    got = ns.load_library_entries(PACK, _lib_file(tmp_path))
     assert {e.code.splitlines()[0] for e in got} == {"import MathFin.Performance.Ratios"}
     assert {e.domain for e in got} == {"MathFin.Performance.Ratios"}
 
 
 def test_a_shared_root_header_is_still_available(tmp_path):
-    got = ns.load_library_entries(_lib_file(tmp_path), import_root="MathFin")
+    got = ns.load_library_entries(PACK, _lib_file(tmp_path), import_root="MathFin")
     assert {e.code.splitlines()[0] for e in got} == {"import MathFin"}
 
 
@@ -748,14 +751,14 @@ def test_prose_inside_a_docstring_is_not_a_declaration(tmp_path):
     """`theorem for ±1 walks` inside a doc comment is English, not Lean. Matching it
     invents a declaration named `for` whose probe cannot elaborate — which the sweep
     would then record as the theorem being unprovable."""
-    got = ns.load_library_entries(_traps(tmp_path))
+    got = ns.load_library_entries(PACK, _traps(tmp_path))
     assert "for" + ns.PROBE_SUFFIX not in {e.thm for e in got}
 
 
 def test_private_declarations_are_probed_now_that_the_locator_parses_them(tmp_path):
     """They used to be dropped because the shared locator rejected the modifier and they
     would have arrived as blind entries. Fixed at the source, so they are population."""
-    got = {e.thm for e in ns.load_library_entries(_traps(tmp_path))}
+    got = {e.thm for e in ns.load_library_entries(PACK, _traps(tmp_path))}
     assert "helper_one" + ns.PROBE_SUFFIX in got
     assert "real_one" + ns.PROBE_SUFFIX in got
 
@@ -763,5 +766,5 @@ def test_private_declarations_are_probed_now_that_the_locator_parses_them(tmp_pa
 def test_every_emitted_entry_is_locatable_by_the_shared_parser(tmp_path):
     """The invariant that keeps extraction failure from masquerading as blindness."""
     from autoformalize import _locate_named
-    for e in ns.load_library_entries(_traps(tmp_path)):
+    for e in ns.load_library_entries(PACK, _traps(tmp_path)):
         _locate_named(e.code, e.thm)      # raises if the loader emitted a dud

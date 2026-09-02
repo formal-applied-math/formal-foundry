@@ -17,8 +17,8 @@ import re
 from dataclasses import dataclass
 
 __all__ = ["PRIMARY_DECL", "Entry", "primary_decl", "probe_worthy_binders",
-           "load_mathfin_entries", "load_library_entries", "PROBE_SUFFIX", "sweep_can_prove", "sweep_entry", "done_keys",
-           "module_defs", "MATHFIN_IMPORT", "MODULE_DEF", "write_run_meta",
+           "load_catalogue_entries", "load_library_entries", "PROBE_SUFFIX", "sweep_can_prove", "sweep_entry", "done_keys",
+           "module_defs", "MODULE_DEF", "write_run_meta",
            "stratified_binder_sample", "batched_sweep_prover", "daemon_is_alive",
            "run_sweep", "main"]
 
@@ -59,7 +59,7 @@ def probe_worthy_binders(code: str, thm: str) -> list[str]:
     SOUND PRE-FILTER: if a binder's name occurs free in the rest of the signature or in
     the conclusion, dropping it cannot elaborate, so the free filter would reject it and
     the call is wasted. Skipping those removes only certain-failures — never a possible
-    positive. Measured on formal-mathfin `benchmarks/` at 48cb004 (2026-08-20): 1,489
+    positive. Measured on the flagship's `benchmarks/` at 48cb004 (2026-08-20): 1,489
     explicit binders in the 330 `full` entries -> 700, across 262 entries.
 
     The spec and plan quote 1,465 -> 689 from corpus commit 8e52f446; this function
@@ -90,18 +90,22 @@ _SWEEP_SORRY = re.compile(r"\bsorry\b")
 #: consecutive daemon-error entries that mean the daemon is gone rather than flaky
 _DEAD_DAEMON_LIMIT = 3
 
-MATHFIN_IMPORT = re.compile(r"^import\s+(MathFin(?:\.[A-Za-z0-9_']+)*)\s*$", re.M)
+def _own_import_re(pack) -> re.Pattern:
+    """Imports of the target library's OWN modules, from the pack's namespaces. The
+    foundry does not name a domain: a second library is configuration (runbook 02)."""
+    alt = "|".join(re.escape(n) for n in pack.own_namespaces)
+    return re.compile(rf"^import\s+((?:{alt})(?:\.[A-Za-z0-9_']+)*)\s*$", re.M)
 MODULE_DEF = re.compile(
     r"^(?:@\[[^\]]*\]\s*\n)?(?:private\s+|protected\s+|noncomputable\s+)*"
     r"(?:def|abbrev)\s+([A-Za-z_][A-Za-z0-9_']*)", re.M)
 
 
-def module_defs(code: str, mathfin_root: str) -> list[str]:
-    """The definitions an entry's own MathFin modules introduce and its statement names.
+def module_defs(pack, code: str, root: str) -> list[str]:
+    """The definitions an entry's own library modules introduce and its statement names.
 
     These fill the sweep's `{defs}`/`{unfold}` slots. Without them `tactic_sweep_prover`
     skips six of its eight tactics and the instrument degrades to `positivity` + `grind`
-    — and every `full` entry in this corpus states a theorem about a MathFin definition,
+    — and every `full` entry in this corpus states a theorem about a library definition,
     the case `strengthen.py`'s own trace says bare `positivity` fails on and
     `unfold gainToPain; positivity` closes. A sweep without these slots would report the
     corpus unreachable and measure its own wiring.
@@ -113,8 +117,8 @@ def module_defs(code: str, mathfin_root: str) -> list[str]:
     """
     import os
     out: list[str] = []
-    for module in MATHFIN_IMPORT.findall(code):
-        path = os.path.join(mathfin_root, *module.split(".")) + ".lean"
+    for module in _own_import_re(pack).findall(code):
+        path = os.path.join(root, *module.split(".")) + ".lean"
         try:
             with open(path, encoding="utf-8") as f:
                 src = f.read()
@@ -126,7 +130,7 @@ def module_defs(code: str, mathfin_root: str) -> list[str]:
     return out
 
 
-def load_mathfin_entries(bench_glob: str) -> list[Entry]:
+def load_catalogue_entries(bench_glob: str) -> list[Entry]:
     """Catalogued entries from a `benchmarks/*.json` glob, one per primary declaration.
     Entries with no theorem declaration (definition-only catalogue rows) are skipped."""
     out: list[Entry] = []
@@ -141,7 +145,7 @@ def load_mathfin_entries(bench_glob: str) -> list[Entry]:
                 continue
             md = e.get("metadata") or {}
             prov = ((md.get("provenance") or {}).get("source")) or "human"
-            out.append(Entry(arm="mathfin", entry_id=e.get("id", ""), domain=domain,
+            out.append(Entry(arm="catalogue", entry_id=e.get("id", ""), domain=domain,
                              thm=thm, status=md.get("formalization_status") or "(none)",
                              provenance=prov, code=code))
     return out
@@ -192,13 +196,12 @@ def _context_at(src: str, pos: int) -> tuple[list[str], list[str]]:
     return [text for _p, text in sorted(items)], stack
 
 
-def load_library_entries(root: str, max_proof_lines: int = 10,
-                         package: str = "MathFin",
+def load_library_entries(pack, root: str, max_proof_lines: int = 10,
                          import_root: str | None = None) -> list[Entry]:
     """Theorem declarations from a Lean library's own sources, each wrapped as a probe.
 
     **Why the library and not the catalogue.** Measured 2026-09-01: 330 of 332 catalogued
-    `full` entries are term-mode re-exports — `:= MathFin.brownian_markov_property hXpb hX
+    `full` entries are term-mode re-exports — `:= Lib.brownian_markov_property hXpb hX
     t₀` — whose real proof lives here. A tactic sweep cannot reprove a research result
     from scratch, so sweeping the catalogue makes the power control fail on essentially
     everything and the blind fraction is 100% by construction, measuring the re-export
@@ -214,7 +217,7 @@ def load_library_entries(root: str, max_proof_lines: int = 10,
     and Lean will not take the name twice. Renaming cannot let the sweep cheat by citing
     the original, since applying it would need the very hypothesis the probe dropped.
 
-`root` is the directory *containing* `package` — the checkout root, not `.../MathFin` —
+`root` is the directory *containing* the pack's `lake_root` — the checkout root —
     since the module name is the path relative to it. Only `package` is walked.
 
     `import_root` optionally replaces every probe's import with one shared module — the
@@ -239,7 +242,7 @@ def load_library_entries(root: str, max_proof_lines: int = 10,
     # Only the package: a checkout also holds vendored upstream sources, exercise files
     # and tests, whose modules do not resolve as imports and which are not the library
     # under study.
-    for dirpath, _dirs, files in os.walk(os.path.join(root, package)):
+    for dirpath, _dirs, files in os.walk(os.path.join(root, pack.lake_root)):
         for fn in sorted(files):
             if not fn.endswith(".lean"):
                 continue
@@ -282,9 +285,9 @@ def load_library_entries(root: str, max_proof_lines: int = 10,
                 head = [f"import {import_root or module}", ""] + context
                 tail = [f"end {ns_}" for ns_ in reversed(stack)]
                 code = "\n".join(head + ["", renamed, ""] + tail) + "\n"
-                entry = Entry(arm="mathfin-lib", entry_id=f"{module}.{probe_name}",
+                entry = Entry(arm="library", entry_id=f"{module}.{probe_name}",
                               domain=module, thm=probe_name, status=status,
-                              provenance="mathfin-library", code=code)
+                              provenance=f"{pack.name}-library", code=code)
                 # The invariant that stops extraction failure from masquerading as
                 # blindness: if the sweep's own parser cannot find the declaration, no
                 # probe can be built from it and it must not enter the population.
@@ -327,7 +330,7 @@ def sweep_can_prove(code: str, thm: str, *, prove_fn) -> bool:
 
 
 #: import-free liveness probe. Measured 1.9 s, against 35.7 s for anything that imports
-#: MathFin — cheap enough to ask after every failed power control.
+#: the library — cheap enough to ask after every failed power control.
 _LIVENESS_PROBE = "example : True := by trivial\n"
 
 
@@ -440,7 +443,7 @@ def batched_sweep_prover(check_fn, def_names=(), tactics=None):
     """The whole sweep in ONE daemon call, then a per-tactic pass only on a hit.
 
     Same verdict as `strengthen.tactic_sweep_prover`, measured ~6x cheaper. On this
-    corpus a daemon call costs 35.7 s of which 33.8 s is the `import MathFin` — the same
+    corpus a daemon call costs 35.7 s of which 33.8 s is the library import — the same
     import, eight times, to do a few seconds of tactic work. Lean's
     `first | t1 | t2 | ...` tries alternatives in order inside a single elaboration,
     which is precisely the sweep's semantics, for one import.
@@ -657,18 +660,20 @@ def write_run_meta(out_path: str, *, arm: str, corpus_root: str, extra=None) -> 
 
 def main(argv=None) -> int:
     import argparse
+    import os
     import sys
     from probe import daemon_check
     from strengthen import tactic_sweep_prover
 
     ap = argparse.ArgumentParser(description="necessity sweep over a Lean corpus")
-    ap.add_argument("--arm", choices=("mathfin", "mathfin-lib", "mathlib"),
-                    default="mathfin-lib",
-                    help="'mathfin-lib' sweeps the library's own declarations, where the "
-                         "proofs and the hypotheses actually are; 'mathfin' sweeps the "
-                         "catalogue, which is 99.4%% term-mode re-exports and on which the "
-                         "instrument is blind by construction")
-    ap.add_argument("--bench", default="../../formal-mathfin/benchmarks/*.json")
+    ap.add_argument("--arm", choices=("library", "catalogue", "mathlib"),
+                    default="library",
+                    help="'library' sweeps the target library's own declarations, where "
+                         "the proofs and the hypotheses are; 'catalogue' sweeps the "
+                         "benchmark entries, which are 99.4%% term-mode re-exports and on "
+                         "which the instrument is blind by construction")
+    ap.add_argument("--bench", default="", help="catalogue glob; defaults to the "
+                                                "pack's benchmarks directory")
     ap.add_argument("--out", required=True)
     ap.add_argument("--status", default="tactic_short",
                     help="only sweep entries with this status; 'all' for every one. The "
@@ -691,15 +696,26 @@ def main(argv=None) -> int:
                          "runs/necessity-sweep/daemon-stability.md")
     ap.add_argument("--seed", type=int, default=20260913,
                     help="seed for the stratified draw, reported with the result")
-    ap.add_argument("--mathfin-root", default="../../formal-mathfin",
-                    help="checkout whose MathFin/*.lean supply the definitions that fill "
-                         "the sweep's unfold/simp slots")
+    ap.add_argument("--domain", default=None, help="pack name; defaults to pipeline.toml")
+    ap.add_argument("--repo-root", default="",
+                    help="the target library's checkout; defaults to the sibling named "
+                         "by the pack. Its sources supply the definitions that fill the "
+                         "sweep's unfold/simp slots")
     args = ap.parse_args(argv)
 
-    if args.arm == "mathfin-lib":
-        entries = load_library_entries(args.mathfin_root, args.max_proof_lines)
+    import domain_pack
+    pack = domain_pack.load(getattr(args, "domain", None)
+                            or domain_pack.name_from_config("../pipeline.toml"))
+    # the sibling checkout the pack names — `owner/repo` in the pack's slug
+    repo_root = args.repo_root or os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath("."))),
+        pack.slug.split("/")[-1])
+    bench = args.bench or os.path.join(repo_root, "benchmarks", "*.json")
+
+    if args.arm == "library":
+        entries = load_library_entries(pack, repo_root, args.max_proof_lines)
     else:
-        entries = load_mathfin_entries(args.bench)
+        entries = load_catalogue_entries(bench)
     if args.status != "all":
         entries = [e for e in entries if e.status == args.status]
     binders_for = None
@@ -721,7 +737,7 @@ def main(argv=None) -> int:
         # Per entry, not once: the sweep's {defs}/{unfold} slots take THIS entry's
         # imported definitions. Passed nothing, tactic_sweep_prover skips six of its
         # eight tactics and the instrument silently becomes `positivity` + `grind`.
-        defs = module_defs(entry.code, args.mathfin_root)
+        defs = module_defs(pack, entry.code, repo_root)
         if args.batched:
             return batched_sweep_prover(daemon_check, defs)
         return tactic_sweep_prover(daemon_check, defs)
@@ -732,9 +748,9 @@ def main(argv=None) -> int:
             return {"passed": False, "reason": res["error"]}
         return {"passed": not res.get("errors") and res.get("sorry_count", 0) == 0}
 
-    write_run_meta(args.out, arm=args.arm, corpus_root=args.mathfin_root,
+    write_run_meta(args.out, arm=args.arm, corpus_root=repo_root,
                    extra={"status": args.status, "limit": args.limit,
-                          "bench": args.bench, "entries_selected": len(entries),
+                          "bench": bench, "entries_selected": len(entries),
                           "sample": args.sample, "seed": args.seed,
                           "batched": args.batched,
                           "binders_drawn": None if binders_for is None
