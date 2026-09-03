@@ -1,0 +1,4 @@
+{"target": "cal-bk-71", "stream": "backlog", "ts": "2026-09-03T11:25:07", "harness": "vibe", "arm": "cron", "tokens": 0, "outcome": "max_rounds", "experience_attempts": 1}
+{"target": "cal-bk-71__apt_zero_beta_return_constant", "stream": "", "ts": "2026-09-03T11:36:56", "harness": "vibe", "arm": "decompose", "tokens": 0, "outcome": "max_rounds", "experience_attempts": 1}
+{"target": "cal-bk-71__apt_factor_insertion_step", "stream": "", "ts": "2026-09-03T11:36:57", "harness": "vibe", "arm": "decompose", "tokens": 0, "outcome": "max_rounds", "experience_attempts": 1}
+{"target": "cal-bk-71", "harness": "decompose", "arm": "decompose", "outcome": "max_rounds", "tokens": 0, "ts": "2026-09-03T11:36:58", "leaves_total": 2, "leaves_closed": 0, "reason": "remainder: ['apt_zero_beta_return_constant', 'apt_factor_insertion_step']"}
