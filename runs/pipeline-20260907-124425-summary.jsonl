@@ -1,0 +1,5 @@
+{"target": "cal-bk-82", "stream": "backlog", "ts": "2026-09-07T12:45:34", "harness": "vibe", "arm": "cron", "tokens": 0, "outcome": "max_rounds", "experience_attempts": 1}
+{"target": "cal-bk-82__lifeAnnuityDue_antitone", "stream": "", "ts": "2026-09-07T12:47:20", "harness": "vibe", "arm": "decompose", "tokens": 0, "outcome": "max_rounds", "experience_attempts": 1}
+{"target": "cal-bk-82__lifeAnnuityDue_nonneg", "stream": "", "ts": "2026-09-07T12:47:20", "harness": "vibe", "arm": "decompose", "tokens": 0, "outcome": "max_rounds", "experience_attempts": 1}
+{"target": "cal-bk-82__lifeAnnuityDue_eq_certain_annuity", "stream": "", "ts": "2026-09-07T12:47:21", "harness": "vibe", "arm": "decompose", "tokens": 0, "outcome": "max_rounds", "experience_attempts": 1}
+{"target": "cal-bk-82", "harness": "decompose", "arm": "decompose", "outcome": "max_rounds", "tokens": 0, "ts": "2026-09-07T12:47:22", "leaves_total": 3, "leaves_closed": 0, "reason": "remainder: ['lifeAnnuityDue_antitone', 'lifeAnnuityDue_nonneg', 'lifeAnnuityDue_eq_certain_annuity']"}

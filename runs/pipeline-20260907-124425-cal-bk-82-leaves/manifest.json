@@ -1,0 +1,47 @@
+{
+  "toolchain": "leanprover/lean4:v4.32.0",
+  "main_commit": "",
+  "decompose_parent": "cal-bk-82",
+  "targets": [
+    {
+      "id": "cal-bk-82__lifeAnnuityDue_antitone",
+      "kind": "prove",
+      "file": "leaf-cal-bk-82-lifeAnnuityDue_antitone.lean",
+      "sorry_name": "lifeAnnuityDue_antitone",
+      "pointers": [
+        "MathFin/Actuarial/Mortality.lean"
+      ],
+      "parent": "lifeAnnuityDue_basic_properties",
+      "parent_id": "cal-bk-82",
+      "dag_order": 0,
+      "input_hash": "0f6e8f7b537b43f72be6d4648cdc26721c60177685892f455fa37b0e3a51d28c"
+    },
+    {
+      "id": "cal-bk-82__lifeAnnuityDue_nonneg",
+      "kind": "prove",
+      "file": "leaf-cal-bk-82-lifeAnnuityDue_nonneg.lean",
+      "sorry_name": "lifeAnnuityDue_nonneg",
+      "pointers": [
+        "MathFin/Actuarial/Mortality.lean"
+      ],
+      "parent": "lifeAnnuityDue_basic_properties",
+      "parent_id": "cal-bk-82",
+      "dag_order": 1,
+      "input_hash": "23952359487e3cd91d6b48ea20080ed0398946d81be4bb8fa741bf452e4cb1c5"
+    },
+    {
+      "id": "cal-bk-82__lifeAnnuityDue_eq_certain_annuity",
+      "kind": "prove",
+      "file": "leaf-cal-bk-82-lifeAnnuityDue_eq_certain_annuity.lean",
+      "sorry_name": "lifeAnnuityDue_eq_certain_annuity",
+      "pointers": [
+        "MathFin/Actuarial/Insurance.lean",
+        "MathFin/Actuarial/Mortality.lean"
+      ],
+      "parent": "lifeAnnuityDue_basic_properties",
+      "parent_id": "cal-bk-82",
+      "dag_order": 2,
+      "input_hash": "936ae18433dc8077925748b83ea57e8f5467563479bd62d1e6755f7c087b95b4"
+    }
+  ]
+}

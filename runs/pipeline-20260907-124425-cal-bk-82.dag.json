@@ -1,0 +1,54 @@
+{
+  "main": {
+    "name": "lifeAnnuityDue_basic_properties",
+    "statement": "theorem lifeAnnuityDue_basic_properties (\u03bc : \u211d \u2192 \u211d) (x : \u211d) (n : \u2115) :\n    (\u2200 i : \u211d, -1 < i \u2192 0 \u2264 lifeAnnuityDue \u03bc x i n) \u2227\n    (\u2200 i\u2081 i\u2082 : \u211d, -1 < i\u2081 \u2192 -1 < i\u2082 \u2192 i\u2081 \u2264 i\u2082 \u2192\n      lifeAnnuityDue \u03bc x i\u2082 n \u2264 lifeAnnuityDue \u03bc x i\u2081 n) \u2227\n    (\u2200 i : \u211d, i \u2260 0 \u2192\n      (\u2200 k < n, survivalFromForce \u03bc (x + (k : \u211d)) = survivalFromForce \u03bc x) \u2192\n      lifeAnnuityDue \u03bc x i n = (1 - (1 / (1 + i)) ^ n) / (1 - 1 / (1 + i)))",
+    "proof": "\u27e8lifeAnnuityDue_nonneg \u03bc x n, lifeAnnuityDue_antitone \u03bc x n, lifeAnnuityDue_eq_certain_annuity \u03bc x n\u27e9"
+  },
+  "leaves": [
+    {
+      "name": "lifeAnnuityDue_antitone",
+      "statement": "theorem lifeAnnuityDue_antitone (\u03bc : \u211d \u2192 \u211d) (x : \u211d) (n : \u2115) :\n    \u2200 i\u2081 i\u2082 : \u211d, -1 < i\u2081 \u2192 -1 < i\u2082 \u2192 i\u2081 \u2264 i\u2082 \u2192\n      lifeAnnuityDue \u03bc x i\u2082 n \u2264 lifeAnnuityDue \u03bc x i\u2081 n",
+      "pointers": [
+        "MathFin/Actuarial/Mortality.lean"
+      ],
+      "depends_on": [],
+      "applied_to": [
+        "one_div_le_one_div_of_le",
+        "pow_le_pow_left",
+        "mul_le_mul_of_nonneg_right",
+        "Finset.sum_le_sum",
+        "survivalFromForce_pos"
+      ]
+    },
+    {
+      "name": "lifeAnnuityDue_nonneg",
+      "statement": "theorem lifeAnnuityDue_nonneg (\u03bc : \u211d \u2192 \u211d) (x : \u211d) (n : \u2115) :\n    \u2200 i : \u211d, -1 < i \u2192 0 \u2264 lifeAnnuityDue \u03bc x i n",
+      "pointers": [
+        "MathFin/Actuarial/Mortality.lean"
+      ],
+      "depends_on": [],
+      "applied_to": [
+        "Finset.sum_nonneg",
+        "mul_nonneg",
+        "pow_nonneg",
+        "div_nonneg",
+        "survivalFromForce_pos"
+      ]
+    },
+    {
+      "name": "lifeAnnuityDue_eq_certain_annuity",
+      "statement": "theorem lifeAnnuityDue_eq_certain_annuity (\u03bc : \u211d \u2192 \u211d) (x : \u211d) (n : \u2115) :\n    \u2200 i : \u211d, i \u2260 0 \u2192\n      (\u2200 k < n, survivalFromForce \u03bc (x + (k : \u211d)) = survivalFromForce \u03bc x) \u2192\n      lifeAnnuityDue \u03bc x i n = (1 - (1 / (1 + i)) ^ n) / (1 - 1 / (1 + i))",
+      "pointers": [
+        "MathFin/Actuarial/Insurance.lean",
+        "MathFin/Actuarial/Mortality.lean"
+      ],
+      "depends_on": [],
+      "applied_to": [
+        "annuityDue_closed_form",
+        "Finset.sum_congr",
+        "div_self",
+        "survivalFromForce_pos"
+      ]
+    }
+  ]
+}
