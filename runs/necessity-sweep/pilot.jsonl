@@ -1,0 +1,2 @@
+{"arm": "mathfin", "entry_id": "cm-thm-4.3.10", "domain": "continuous_martingales", "thm": "lp_continuous_martingale_full", "status": "full", "provenance": "human", "binder": null, "verdict": "power_control", "sweep_proves_original": false, "closing_tactic": null, "elapsed_s": 347.47}
+{"arm": "mathfin", "entry_id": "cm-thm-4.3.10", "domain": "continuous_martingales", "thm": "lp_continuous_martingale_full", "status": "full", "provenance": "human", "binder": "hp", "verdict": "not_shown_unnecessary", "sweep_proves_original": false, "closing_tactic": null, "elapsed_s": 438.283}

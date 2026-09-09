@@ -1,0 +1,2 @@
+{"arm": "mathfin", "entry_id": "gir-simple-adapted", "domain": "girsanov_finance", "thm": "girsanov_simple_adapted_qbm", "status": "full", "provenance": "human", "binder": null, "verdict": "power_control", "sweep_proves_original": false, "closing_tactic": null, "elapsed_s": 191.156}
+{"arm": "mathfin", "entry_id": "gir-simple-adapted", "domain": "girsanov_finance", "thm": "girsanov_simple_adapted_qbm", "status": "full", "provenance": "human", "binder": "hc_bdd", "verdict": "power_control_failed", "sweep_proves_original": false, "closing_tactic": null, "elapsed_s": 0.0}
