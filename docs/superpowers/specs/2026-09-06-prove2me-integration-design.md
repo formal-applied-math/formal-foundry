@@ -1,6 +1,27 @@
 # Design — Prove2Me integration: statements out, proofs in
 
-**Status:** proposed, 2026-09-06. **Owner:** R.
+**Status:** **DECLINED 2026-09-09 by R** — the platform integration is not happening.
+Kept as the record of what was evaluated and why. What survives the decision is harvested
+in [`docs/research/2026-09-09-prove2me-harvest.md`](../../research/2026-09-09-prove2me-harvest.md):
+the blind read-back (§1 there), a proof-idea account per candidate (§4 there), and three
+mechanisms this paper independently validates. **Owner:** R.
+
+Three facts below were true when written and are not now, all confirmed against
+`origin/main` at `5dce78f`:
+
+- The **opens gap** diagnosed in §6 is real and **fixed at `c7e9294`** — root cause was
+  two-sided (`target_preamble` strips the stub's opens, `_module_text` suppressed the
+  pack's), verified against the daemon on `cal-bk-80`: 5 errors pre-fix, 0 post-fix.
+- The decomposer has routed **two** splits, not one: `cal-bk-71` (2 leaves, 2026-09-03)
+  and `cal-bk-82` (3 leaves, 2026-09-07). §1 and §5 say "one".
+- The `cal-bk-80` row of 2026-09-08 is an **environment artifact, not a split verdict**
+  (the REPL lost its Mathlib environment mid-run; the same skeleton passed on a healthy
+  daemon). §6's "keeps failing at the skeleton gate" no longer reads on the evidence.
+
+The `4 of 4` in §3(e) is superseded by `e3e0d25`: two defect classes wearing one number.
+#66 and #85 carried plainly-unused binders a warning pass catches; only #161 and #162
+consume a guard the theorem does not need. Both closed in production. The read-back
+argument rests on Class B alone.
 
 **Source.** *Prove2Me: An Open Collaborative Platform for Scaling Math Formalization*
 (Chen, Marwaha, Lu, Yuen, Peng — [arXiv 2608.28433v2](https://arxiv.org/abs/2608.28433),
