@@ -49,3 +49,28 @@ def test_update_scoreboard_md_tolerates_a_junk_log_line(tmp_path):
         encoding="utf-8")
     update_scoreboard_md(str(md), str(tmp_path))          # must not raise
     assert "| cron |" in md.read_text(encoding="utf-8")
+
+
+def test_the_committed_scoreboard_matches_the_log():
+    """The doc is generated from `runs/ab-decomposer.jsonl` by every decompose tick, and
+    it is the A/B evidence the 2026-09-30 decision gate reads. It sat at "(no rows yet —
+    first decompose attempt pending)" from 2026-07-18 while seven decompose failures
+    accumulated in the log, because the tick regenerated it and the CI persist step
+    staged `pipeline_state.json runs targets/queue` — never `docs/`. The evidence
+    surface existed and was silently empty, which is how the five-week stall stayed
+    invisible.
+
+    Asserting the committed doc against the log catches that whatever the cause."""
+    import os
+    import provenance
+    from scoreboard import _END, _START, render_scoreboard
+
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    md = os.path.join(root, "docs", "research", "ab-decomposer.md")
+    rows = provenance.read_jsonl(os.path.join(root, "runs", "ab-decomposer.jsonl"))
+    text = open(md, encoding="utf-8").read()
+    assert _START in text and _END in text, "scoreboard markers missing — the refresh no-ops"
+    committed = text.split(_START, 1)[1].split(_END, 1)[0].strip()
+    assert committed == render_scoreboard(rows).strip(), (
+        "docs/research/ab-decomposer.md is stale against runs/ab-decomposer.jsonl "
+        f"({len(rows)} rows) — regenerate with scoreboard.update_scoreboard_md")

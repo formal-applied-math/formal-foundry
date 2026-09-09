@@ -235,7 +235,13 @@ jobs:
           git config user.email "pipeline@users.noreply.github.com"
           # targets/queue: a self-feeding tick autoformalizes a new stub + entry +
           # manifest into the queue; commit those alongside the state + telemetry.
-          git add pipeline_state.json runs targets/queue 2>/dev/null || true
+          # docs/research/ab-decomposer.md: the decompose tick REGENERATES it from
+          # runs/ab-decomposer.jsonl on every run, and omitting it here meant the
+          # regeneration was discarded every time — the doc read "(no rows yet)" from
+          # 2026-07-18 while seven decompose failures piled up in the log it is
+          # generated from. It is the A/B evidence the 2026-09-30 decision gate reads.
+          git add pipeline_state.json runs targets/queue \
+                  docs/research/ab-decomposer.md 2>/dev/null || true
           git diff --cached --quiet && exit 0
           git commit -m "pipeline: state + telemetry + autoformalized targets [skip ci]"
           # The push must survive commits landing on main MID-RUN (2026-07-17: a
