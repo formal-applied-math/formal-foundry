@@ -126,9 +126,11 @@ def _parse_daemon_response(raw: bytes) -> dict:
     except (ValueError, UnicodeDecodeError) as e:
         # A malformed/empty payload is INFRASTRUCTURE, not a verdict about the code, so
         # it carries the `error` sentinel exactly like a socket failure does. This is
-        # what an OOM kill looks like from the client: the container dies mid-reply
-        # (exit 137, `OOMKilled: true` — observed twice 2026-09-09 on the ~6 GiB cap)
-        # and the socket closes early. Without the sentinel this came back as `errors`
+        # what a killed daemon looks like from the client: the container dies mid-reply
+        # and the socket closes early. Most often that is another session flipping the
+        # Lean slot (`docker compose stop lean-repl` SIGKILLs a container that does not
+        # exit in time, so exit 137 says nothing about memory). Without the sentinel this
+        # came back as `errors`
         # alone with `sorry_count: 0`, i.e. indistinguishable from a well-formed
         # rejection with real-looking messages — so every caller keying on `error` to
         # return INDETERMINATE instead scored a kill as a judgement on the submitted

@@ -161,46 +161,55 @@ same call. The instrument does not need the box to be fast; it needs the REPL to
 long enough to answer twice in a row.
 
 
-## 2026-09-09 — the ceiling is a hard OOM kill, and the fix is two lines
+## 2026-09-09 — RETRACTED: the deaths were slot contention, not the memory ceiling
 
-Every earlier entry here described the symptom: calls that should take 5–30 s taking
-150–200, a REPL that "respawns cold". The mechanism is now confirmed, twice, from
-`docker inspect`:
+An earlier version of this section asserted that the daemon was being OOM-killed at
+`mem_limit: 6g`, cited `OOMKilled: true` / exit 137, and called for raising `.wslconfig`
+to 13GB and `mem_limit` to 9g. **Retracted 2026-09-09 on R's correction: another session
+had taken the Lean slot and stopped the container.**
 
-```
-OOMKilled: true
-exit    : 137
-```
+I did not verify that diagnosis. It came from a peer session's `docker inspect` reading
+and I wrote it up as established mechanism. Two things should have stopped me:
 
-Not slow, not wedged — **killed**. The container hits `mem_limit: 6g` on a heavy
-elaboration and dies mid-reply.
+* **Exit 137 is SIGKILL, not proof of OOM.** `docker compose stop` sends SIGTERM and then
+  SIGKILLs a container that does not exit in time — producing exit 137 on a perfectly
+  healthy container. Every death this evening is consistent with a slot flip.
+* **I had first-hand evidence of contention and did not connect it.** Earlier the same
+  evening I stopped a concurrent session's daemon myself, by smoke-testing
+  `scripts/claude-prove.sh` with incomplete arguments: it performed the slot flip before
+  validating its args. Two sessions were sharing one Lean slot all evening.
 
-**What that looks like from the client, and why it has been poisoning verdicts.** The
-socket closes early, so `_parse_daemon_response` gets an empty or truncated payload. It
-used to return that as `errors` with **no `error` sentinel** and `sorry_count: 0` — which
-is indistinguishable from a well-formed rejection carrying real messages. Every caller
-that keys on `error` to return INDETERMINATE therefore scored an OOM kill as a judgement
-about the Lean it had submitted. Fixed 2026-09-09: a malformed reply now carries the
-sentinel, because it is infrastructure and never a verdict about the code.
+**What was actually observed**, separated from what was inferred:
 
-This is almost certainly the mechanism behind the 2026-09-08 22:33 cal-bk-80 row —
-`unknown namespace MeasureTheory` is what a REPL says after respawning without its
-Mathlib heap, and the container died two minutes later. That row is annotated in
-`runs/ab-decomposer.jsonl` as an environment artifact; the mechanism now has a name.
+| observed | inferred (wrong) |
+|---|---|
+| `ConnectionResetError`, malformed/truncated replies | the container hit its memory cap |
+| exit 137 | it was OOM-killed rather than SIGKILLed by a `stop` |
+| `unknown namespace MeasureTheory` after a restart | the heap was lost to OOM |
 
-**The headroom is real and unused.** Windows host 15.7 GB; `.wslconfig` caps WSL at
-`memory=10GB`; the container caps at `mem_limit: 6g`. So roughly **5.7 GB of the machine
-sits idle while the verifier is being killed at 6.**
+A container that is stopped and restarted loses its Mathlib heap exactly as an OOM-killed
+one does, so every downstream symptom fits contention at least as well.
 
-**The fix, which needs R and only R:**
+**What survives the retraction.** The `probe.py` fix is correct on its own terms and
+unaffected: a malformed reply is infrastructure whatever killed the process, and it must
+never read as a verdict about the submitted Lean. The same holds for the `skeleton_gate`
+canary, the annotated cal-bk-80 row, and the annotated cal-bk-71 row — all of them turn on
+*the environment was not intact*, which is true under either cause.
 
-1. `/mnt/c/Users/rapha/.wslconfig` — `memory=10GB` → `13GB`
-2. `formal-mathfin/docker/docker-compose.yml`, `lean-repl` and `lean-lsp` — `mem_limit: 6g` → `9g`
-3. `wsl --shutdown` from Windows, then restart the daemon
+**What does not survive**: the claim that this box needs more memory, and the two-line
+`.wslconfig` / `mem_limit` change. No memory change is called for on this evidence. The
+real constraint is the one the doctrine already names — **one Lean process at a time** —
+and the enforcement gap is that nothing stops a second session from taking the slot from a
+run already in flight. `scripts/necessity-sweep.sh` refuses to *start* into a held slot;
+nothing defends a run already underway.
 
-Step 3 terminates every session on this box, so it must be R's call and R's timing — no
-agent should run it unilaterally.
+**The one measurement here that stands** is attempt 2 (2026-08-28), taken with nothing
+else on the box: median 35.7 s per `import MathFin` call on a freshly created container,
+with 2 respawns in 5 calls. That is the number to plan against, and whether those two
+respawns were memory or contention is now also open.
 
-**What it unblocks.** The necessity sweep's measurement arm is blocked on precisely this
-and has been since 2026-08-17. It is no longer a vague "the box is slow": it is a
-diagnosed hard kill with a specific two-line remedy and 5.7 GB of unused RAM behind it.
+**Where that leaves the sweep's measurement arm.** Still unrun, and now honestly
+undiagnosed. It is NOT blocked on a diagnosed memory kill with a known remedy — that was
+the retracted claim. What it needs is an uninterrupted Lean slot for long enough to
+finish, which on a box where a second session can flip the slot mid-run is a coordination
+problem, not a hardware one.

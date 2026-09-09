@@ -16,6 +16,8 @@ unsupported in the record.
 Each `*.jsonl.meta.jsonl` sidecar records the corpus commit, arm, seed and tactic set the
 run actually read, so a row can be traced to the population it came from.
 
-**The measurement arm has never run.** It is blocked on the daemon memory ceiling — a
-confirmed `OOMKilled: true` / exit 137 at `mem_limit: 6g`, with ~5.7 GB of the machine
-idle. See `daemon-stability.md` for the two-line remedy, which needs R.
+**The measurement arm has never run.** An earlier version of this line blamed a daemon
+memory ceiling; that diagnosis is retracted (see `daemon-stability.md`) — the deaths were
+another session taking the Lean slot, and exit 137 is SIGKILL, which `docker stop`
+produces on a healthy container. What the arm needs is an uninterrupted Lean slot, which
+is a coordination problem rather than a hardware one.
