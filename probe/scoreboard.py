@@ -43,15 +43,27 @@ def _leaves_cell(r: dict) -> str:
             if r.get("arm") == "decompose" else "—")
 
 
+#: notes are prose and can run long; the full text stays in the jsonl
+_NOTE_WIDTH = 120
+
+
+def _note_cell(r: dict) -> str:
+    """The row's note, pipe-escaped and clipped. An outcome without its reason is a
+    verdict a reader cannot check, and this column is also where a hand correction goes
+    — the same convention `refinery_minutes` already follows."""
+    note = str(r.get("note") or "").replace("|", "\\|").replace("\n", " ").strip()
+    return note if len(note) <= _NOTE_WIDTH else note[:_NOTE_WIDTH - 1].rstrip() + "…"
+
 def render_scoreboard(rows) -> str:
     """A markdown table (newest first) of the ab rows — leaves shown only for the
     decompose arm; a blank refinery cell = not yet reviewed/merged."""
-    head = ("| ts | target | arm | outcome | leaves | tokens | refinery min |\n"
-            "|----|--------|-----|---------|--------|--------|--------------|")
+    head = ("| ts | target | arm | outcome | leaves | tokens | refinery min | note |\n"
+            "|----|--------|-----|---------|--------|--------|--------------|------|")
     lines = [
         f"| {r.get('ts', '')} | {r.get('target', '')} | {r.get('arm', '')} | "
         f"{r.get('outcome', '')} | {_leaves_cell(r)} | {r.get('tokens', 0)} | "
-        f"{'' if r.get('refinery_minutes') is None else r['refinery_minutes']} |"
+        f"{'' if r.get('refinery_minutes') is None else r['refinery_minutes']} | "
+        f"{_note_cell(r)} |"
         for r in reversed(rows)
     ]
     return head + "\n" + ("\n".join(lines) if lines else "| (no rows yet) |") + "\n"

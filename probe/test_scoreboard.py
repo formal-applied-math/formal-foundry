@@ -74,3 +74,29 @@ def test_the_committed_scoreboard_matches_the_log():
     assert committed == render_scoreboard(rows).strip(), (
         "docs/research/ab-decomposer.md is stale against runs/ab-decomposer.jsonl "
         f"({len(rows)} rows) — regenerate with scoreboard.update_scoreboard_md")
+
+
+def test_the_note_is_rendered_beside_the_outcome():
+    """`ab_row` has carried a `note` since it was written and `render_scoreboard` never
+    showed it — dead data. It is where the failure reason lands (and, by the file's own
+    hand-annotation convention, where a correction lands), so a verdict without it is a
+    bare outcome a reader cannot check."""
+    from scoreboard import ab_row, render_scoreboard
+    md = render_scoreboard([ab_row(target="t", arm="decompose", outcome="max_rounds",
+                                   ts="2026-09-09T00:00:00", note="unknown namespace")])
+    assert "note" in md.split("\n")[0]
+    assert "unknown namespace" in md
+
+
+def test_a_long_note_is_truncated_so_the_table_stays_readable():
+    from scoreboard import ab_row, render_scoreboard
+    md = render_scoreboard([ab_row(target="t", arm="decompose", outcome="pass",
+                                   ts="x", note="y" * 400)])
+    assert "…" in md
+    assert max(len(line) for line in md.split("\n")) < 260
+
+
+def test_a_row_without_a_note_renders_an_empty_cell():
+    from scoreboard import ab_row, render_scoreboard
+    md = render_scoreboard([ab_row(target="t", arm="cron", outcome="pass", ts="x")])
+    assert md.rstrip().endswith("|")
