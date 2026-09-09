@@ -1,0 +1,34 @@
+{
+  "toolchain": "leanprover/lean4:v4.32.0",
+  "main_commit": "",
+  "decompose_parent": "cal-bk-93",
+  "targets": [
+    {
+      "id": "cal-bk-93__binomialPrice_put_deep_itm_lt",
+      "kind": "prove",
+      "file": "leaf-cal-bk-93-binomialPrice_put_deep_itm_lt.lean",
+      "sorry_name": "binomialPrice_put_deep_itm_lt",
+      "pointers": [
+        "MathFin/Binomial/Model.lean",
+        "MathFin/Binomial/MertonAmericanCallTree.lean"
+      ],
+      "parent": "binomialPrice_lt_americanPrice_put_deep_itm",
+      "parent_id": "cal-bk-93",
+      "dag_order": 0,
+      "input_hash": "339b9bf21a95d8e4e04b806e6b078716aea5f985544ab8d21ac574b82e4c9499"
+    },
+    {
+      "id": "cal-bk-93__le_strike_of_deep_itm",
+      "kind": "prove",
+      "file": "leaf-cal-bk-93-le_strike_of_deep_itm.lean",
+      "sorry_name": "le_strike_of_deep_itm",
+      "pointers": [
+        "MathFin/Binomial/Model.lean"
+      ],
+      "parent": "binomialPrice_lt_americanPrice_put_deep_itm",
+      "parent_id": "cal-bk-93",
+      "dag_order": 1,
+      "input_hash": "3a0d376fab49ecdd98c04a785e4b1c0accb677969d089037bec51661c937fa7b"
+    }
+  ]
+}

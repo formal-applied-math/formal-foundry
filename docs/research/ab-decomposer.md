@@ -38,6 +38,7 @@ bottleneck: it is **filled by hand at merge**, not by the machine.
 <!-- SCOREBOARD:START -->
 | ts | target | arm | engine | outcome | leaves | tokens | refinery min | note |
 |----|--------|-----|--------|---------|--------|--------|--------------|------|
+| 2026-09-09T12:24:57 | cal-bk-93 | decompose | leanstral | max_rounds | 0/2 | 0 |  | remainder: ['binomialPrice_put_deep_itm_lt', 'le_strike_of_deep_itm'] |
 | 2026-09-08T22:33:05 | cal-bk-80 | decompose | leanstral | max_rounds | 0/0 | 0 |  | ENVIRONMENT ARTIFACT, not a split verdict — the REPL lost its Mathlib environment mid-run (container died 2 min later);… |
 | 2026-09-07T12:47:22 | cal-bk-82 | decompose | leanstral | max_rounds | 0/3 | 0 |  | remainder: ['lifeAnnuityDue_antitone', 'lifeAnnuityDue_nonneg', 'lifeAnnuityDue_eq_certain_annuity'] |
 | 2026-09-05T10:51:17 | cal-bk-80 | decompose | leanstral | max_rounds | 0/0 | 0 |  | skeleton does not elaborate: line 34:33: Unknown identifier `Measure`  Note: It is not possible to treat `Measure` as a… |

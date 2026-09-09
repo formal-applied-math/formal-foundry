@@ -1,0 +1,54 @@
+{
+  "main": {
+    "name": "binomialPrice_lt_americanPrice_put_deep_itm",
+    "statement": "theorem binomialPrice_lt_americanPrice_put_deep_itm {u d r K S : \u211d} {n : \u2115} (hn : 1 \u2264 n) (h : BinomialNoArb u d r) (hr : 0 < r) (hK : 0 < K) (hS : 0 < S) (hdeep : S * u ^ n \u2264 K) : binomialPrice u d r (fun S' => max (K - S') 0) n S < americanPrice u d r (fun S' => max (K - S') 0) n S",
+    "proof": "by\n  have hle : S \u2264 K := le_strike_of_deep_itm h hr hS hdeep\n  have hgS : (fun S' : \u211d => max (K - S') 0) S = K - S := max_eq_left (sub_nonneg.mpr hle)\n  have hAmer : K - S \u2264 americanPrice u d r (fun S' => max (K - S') 0) n S := by\n    rw [\u2190 hgS]\n    exact americanPrice_ge_intrinsic u d r (fun S' => max (K - S') 0) n S\n  exact (binomialPrice_put_deep_itm_lt hn h hr hK hdeep).trans_le hAmer"
+  },
+  "leaves": [
+    {
+      "name": "binomialPrice_put_deep_itm_lt",
+      "statement": "theorem binomialPrice_put_deep_itm_lt {u d r K S : \u211d} {n : \u2115} (hn : 1 \u2264 n) (h : BinomialNoArb u d r) (hr : 0 < r) (hK : 0 < K) (hdeep : S * u ^ n \u2264 K) : binomialPrice u d r (fun S' => max (K - S') 0) n S < K - S",
+      "pointers": [
+        "MathFin/Binomial/Model.lean",
+        "MathFin/Binomial/MertonAmericanCallTree.lean"
+      ],
+      "depends_on": [],
+      "applied_to": [
+        "binomialPrice_succ",
+        "binomial_martingale_identity",
+        "binomialPrice_const",
+        "binomialPrice_id",
+        "binomialPrice_add",
+        "binomialPrice_smul",
+        "d_pos",
+        "d_lt_u",
+        "lt_u",
+        "Real.exp_zero",
+        "Real.exp_lt_exp"
+      ]
+    },
+    {
+      "name": "le_strike_of_deep_itm",
+      "statement": "theorem le_strike_of_deep_itm {u d r K S : \u211d} {n : \u2115} (h : BinomialNoArb u d r) (hr : 0 < r) (hS : 0 < S) (hdeep : S * u ^ n \u2264 K) : S \u2264 K",
+      "pointers": [
+        "MathFin/Binomial/Model.lean"
+      ],
+      "depends_on": [],
+      "applied_to": [
+        "lt_u",
+        "Real.exp_zero",
+        "Real.exp_lt_exp",
+        "one_le_pow\u2080",
+        "le_mul_of_one_le_right"
+      ]
+    }
+  ],
+  "target": {
+    "preamble": "-- pointers: MathFin/Binomial/American.lean, MathFin/Binomial/MertonAmericanCallTree.lean, MathFin/Binomial/Model.lean\n-- main-module: MathFin/Binomial/AmericanPutEarlyExercisePremium.lean\n-- benchmark: benchmarks/mathematical_finance.json\n-- benchmark-id: mf-binomial-put-early-exercise-premium\n-- source-issue: 93\n\n\n\n\n\n\n/-- **Deep in-the-money American put early-exercise premium.** In a\nno-arbitrage binomial tree, if the spot is so far in-the-money that even\nafter `n` consecutive up-moves it never exceeds the strike (`S * u ^ n \u2264 K`),\nthen for positive rate `r`, positive strike `K`, positive spot `S`, and at\nleast one time step, the American put price at `(n, S)` strictly exceeds the\nEuropean binomial put price with the same payoff. -/",
+    "pointers": [
+      "MathFin/Binomial/American.lean",
+      "MathFin/Binomial/MertonAmericanCallTree.lean",
+      "MathFin/Binomial/Model.lean"
+    ]
+  }
+}

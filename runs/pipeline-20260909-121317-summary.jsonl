@@ -1,0 +1,4 @@
+{"target": "cal-bk-93", "stream": "backlog", "ts": "2026-09-09T12:14:27", "harness": "vibe", "arm": "cron", "tokens": 0, "outcome": "max_rounds", "experience_attempts": 1}
+{"target": "cal-bk-93__binomialPrice_put_deep_itm_lt", "stream": "", "ts": "2026-09-09T12:24:55", "harness": "vibe", "arm": "decompose", "tokens": 0, "outcome": "max_rounds", "experience_attempts": 1}
+{"target": "cal-bk-93__le_strike_of_deep_itm", "stream": "", "ts": "2026-09-09T12:24:55", "harness": "vibe", "arm": "decompose", "tokens": 0, "outcome": "max_rounds", "experience_attempts": 1}
+{"target": "cal-bk-93", "harness": "decompose", "arm": "decompose", "outcome": "max_rounds", "tokens": 0, "ts": "2026-09-09T12:24:57", "leaves_total": 2, "leaves_closed": 0, "reason": "remainder: ['binomialPrice_put_deep_itm_lt', 'le_strike_of_deep_itm']"}
