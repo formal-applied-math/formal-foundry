@@ -496,7 +496,31 @@ def recompose(pack: DomainPack, dag: Dag, proved_leaves: dict, *, check_fn,
             "remainder": [], "reason": g.get("reason", "recomposition failed the full gate")}
 
 
-def skeleton_gate(lean_text: str, n_leaves: int, *, check_fn) -> dict:
+def environment_probe(pack: DomainPack) -> str:
+    """A module that exercises the environment a skeleton verdict depends on.
+
+    Deliberately NOT `example : True := by trivial`. That needs no environment, so a REPL
+    which has lost its Mathlib heap answers it happily, the canary reports healthy, and a
+    bogus rejection stands — the probe has to fail on exactly the state it exists to
+    detect. Built through `_module_text`, so it carries the same imports and house opens
+    every assembled skeleton does, and fails when those cannot resolve."""
+    return _module_text(pack, [], "example : True := by trivial")
+
+
+def environment_canary(pack: DomainPack, check_fn) -> bool:
+    """Whether the Lean environment is intact enough for a rejection to mean anything.
+
+    Fails CLOSED: a canary we could not run tells us nothing about the environment, and
+    asserting a real rejection on that is precisely how a false verdict gets recorded."""
+    try:
+        res = check_fn(environment_probe(pack))
+    except Exception:
+        return False
+    if not res or res.get("error"):
+        return False
+    return not res.get("errors")
+
+def skeleton_gate(lean_text: str, n_leaves: int, *, check_fn, canary_fn=None) -> dict:
     """Elaborate the assembled skeleton. PASSES iff elaboration is clean AND
     `sorry_count == n_leaves` — the leaves are the only sorries and the main genuinely
     reduces to them. A daemon infra-error ⇒ INDETERMINATE (Task 1.4 `error` sentinel),
@@ -511,6 +535,18 @@ def skeleton_gate(lean_text: str, n_leaves: int, *, check_fn) -> dict:
     errors = [str(e) for e in (res.get("errors") or [])]
     sc = res.get("sorry_count", 0)
     passed = (not errors) and (sc == n_leaves)
+    if not passed and canary_fn is not None and not canary_fn():
+        # The narrow, nasty window: the REPL answers WELL-FORMED but has lost its
+        # environment, so the gate sees real-looking errors and has no doubt at all.
+        # 2026-09-08 22:33 recorded a good cal-bk-80 split as a bad one this way —
+        # `unknown namespace MeasureTheory`, container died two minutes later, and the
+        # same skeleton passed on a healthy daemon. A transport failure was already
+        # indeterminate; this is the case that was not. Paid only when the gate is
+        # about to reject, so the happy path is unaffected.
+        return {"passed": False, "indeterminate": True, "sorry_count": sc,
+                "errors": errors,
+                "verdict": "indeterminate: the Lean environment is unhealthy, so these "
+                           "errors are not a verdict on the split — " + "; ".join(errors[:2])}
     if passed:
         verdict = ""
     elif errors:

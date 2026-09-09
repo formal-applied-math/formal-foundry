@@ -654,3 +654,74 @@ def test_leaf_stub_carries_the_house_opens(tmp_path):
     stub = (tmp_path / man["targets"][0]["file"]).read_text(encoding="utf-8")
     assert "open MeasureTheory ProbabilityTheory" in stub
     assert stub.index("open MeasureTheory") < stub.index("(P : Measure Ω)")
+
+
+# --- the environment canary: a broken REPL must not read as a bad split ----------
+
+def _gate_inputs(errors):
+    """A check_fn that returns `errors` — well-formed, no transport failure. This is the
+    dangerous shape: the gate currently has no doubt about it at all."""
+    return lambda code: {"errors": errors, "sorry_count": 1}
+
+
+def test_a_failing_gate_with_a_healthy_environment_is_a_real_rejection():
+    from decompose import skeleton_gate
+    g = skeleton_gate("x", 1, check_fn=_gate_inputs(["unknown identifier foo"]),
+                      canary_fn=lambda: True)
+    assert g["passed"] is False and g["indeterminate"] is False
+
+
+def test_a_failing_gate_with_a_broken_environment_is_indeterminate():
+    """2026-09-08 22:33: a REPL that had lost its Mathlib environment answered
+    well-formed with `unknown namespace MeasureTheory`, the gate scored it a real
+    rejection, and the scoreboard recorded a good split as bad. The same skeleton
+    passed on a healthy daemon minutes later."""
+    from decompose import skeleton_gate
+    g = skeleton_gate("x", 1, check_fn=_gate_inputs(["unknown namespace `MeasureTheory`"]),
+                      canary_fn=lambda: False)
+    assert g["indeterminate"] is True
+    assert g["passed"] is False
+    assert "environment" in g["verdict"].lower()
+
+
+def test_the_canary_is_not_paid_when_the_gate_passes():
+    """It costs a full elaboration, so it runs only when the gate is about to reject."""
+    from decompose import skeleton_gate
+    calls = []
+    skeleton_gate("x", 1, check_fn=lambda c: {"errors": [], "sorry_count": 1},
+                  canary_fn=lambda: calls.append(1) or True)
+    assert calls == []
+
+
+def test_without_a_canary_the_gate_behaves_exactly_as_before():
+    from decompose import skeleton_gate
+    g = skeleton_gate("x", 1, check_fn=_gate_inputs(["nope"]))
+    assert g["passed"] is False and g["indeterminate"] is False
+
+
+def test_a_transport_failure_is_still_indeterminate_without_consulting_the_canary():
+    from decompose import skeleton_gate
+    calls = []
+    g = skeleton_gate("x", 1, check_fn=lambda c: {"error": "connection refused"},
+                      canary_fn=lambda: calls.append(1) or True)
+    assert g["indeterminate"] is True and calls == []
+
+
+def test_the_canary_probe_carries_the_imports_and_opens_it_must_exercise():
+    """An import-free probe is worthless here: a Mathlib-less REPL answers
+    `example : True := by trivial` happily, reports healthy, and the bogus rejection
+    stands. The probe has to fail on exactly the state it is built to detect."""
+    from decompose import environment_probe
+    probe = environment_probe(PACK)
+    assert "public import Mathlib" in probe
+    assert "open MeasureTheory" in probe
+    assert "sorry" not in probe
+
+
+def test_a_canary_that_cannot_be_reached_counts_as_unhealthy():
+    """Fails closed: if the canary itself errors we do not know the environment is
+    good, and asserting a rejection on that is how a false verdict gets recorded."""
+    from decompose import environment_canary
+    assert environment_canary(PACK, lambda c: {"error": "connection reset"}) is False
+    assert environment_canary(PACK, lambda c: {"errors": ["boom"]}) is False
+    assert environment_canary(PACK, lambda c: {"errors": [], "sorry_count": 0}) is True

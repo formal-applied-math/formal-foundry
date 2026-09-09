@@ -42,12 +42,35 @@ def test_do_draft_writes_dag_and_leaf_manifest_on_skeleton_pass(tmp_path):
 
 
 def test_do_draft_reports_skeleton_failure(tmp_path):
+    """A HEALTHY Lean that rejects this particular skeleton. The distinction is the
+    point: a check_fn that errors on everything — including the canary's trivial probe —
+    is a broken environment, and `do_draft` must call that indeterminate rather than
+    blame the split (see test_do_draft_defers_when_the_environment_is_unhealthy)."""
     good_chat = lambda msgs, **_kw: (json.dumps(_DAG), 1)             # noqa: E731
-    boom = lambda code: {"errors": ["type mismatch"], "sorry_count": 9}  # noqa: E731
+
+    def healthy_but_rejects(code):
+        if "example : True" in code:            # the environment canary's probe
+            return {"errors": [], "sorry_count": 0}
+        return {"errors": ["type mismatch"], "sorry_count": 9}
+
     r = do_draft(PACK, "cal-bk-99", "T", str(tmp_path), target_text="t", context_pack="",
                  drafter_preamble="", cfg_max_leaves=3, cfg_max_reask=1,
-                 chat_fn=good_chat, check_fn=boom)
+                 chat_fn=good_chat, check_fn=healthy_but_rejects)
     assert r["outcome"] == "fail_skeleton" and not (tmp_path / "T-cal-bk-99.dag.json").exists()
+
+
+def test_do_draft_defers_when_the_environment_is_unhealthy(tmp_path):
+    """The 2026-09-08 22:33 shape: a REPL that answers well-formed but has lost its
+    Mathlib heap. Every module fails, including the canary's, so the errors are not a
+    verdict on the split and the tick must not record one."""
+    good_chat = lambda msgs, **_kw: (json.dumps(_DAG), 1)             # noqa: E731
+    lost_mathlib = lambda code: {"errors": ["unknown namespace `MeasureTheory`"],  # noqa: E731
+                                 "sorry_count": 0}
+    r = do_draft(PACK, "cal-bk-99", "T", str(tmp_path), target_text="t", context_pack="",
+                 drafter_preamble="", cfg_max_leaves=3, cfg_max_reask=1,
+                 chat_fn=good_chat, check_fn=lost_mathlib)
+    assert r["outcome"] == "indeterminate"
+    assert not (tmp_path / "T-cal-bk-99.dag.json").exists()
 
 
 def test_do_recompose_assembles_candidate_from_proved_leaves(tmp_path):
