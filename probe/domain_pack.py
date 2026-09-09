@@ -152,13 +152,18 @@ class DomainPack:
 
     # --- derived: the emitted module's preamble --------------------------
 
-    def module_preamble(self, *, opens: bool = True) -> str:
+    def module_preamble(self) -> str:
         """The block between the `/-! … -/` doc and the body: the pinned options,
         `@[expose] public section`, and the namespace — with the house opens on the
-        side of `namespace` this library puts them. `opens=False` is the
-        decomposer's skeleton, which has never carried them."""
+        side of `namespace` this library puts them.
+
+        There is deliberately no `opens=False`. It existed for the decomposer's
+        skeleton, which turned out to be the one caller that must NOT skip them:
+        `decompose.target_preamble` drops the stub's own `open` lines expecting this to
+        re-emit the house set, so suppressing them here left the module with none from
+        either source. A switch whose only use was to reproduce that is not a switch."""
         ns = f"namespace {self.namespace}"
-        open_block = "\n".join(self.opens) if (opens and self.opens) else ""
+        open_block = "\n".join(self.opens) if self.opens else ""
         middle = ([open_block, ns] if self.opens_before_namespace else [ns, open_block])
         parts = [self.options, "@[expose] public section"] + [m for m in middle if m]
         return "\n\n".join(p for p in parts if p)

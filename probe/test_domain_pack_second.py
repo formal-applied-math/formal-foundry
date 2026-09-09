@@ -96,10 +96,6 @@ def test_the_preamble_matches_the_real_library_not_the_flagship():
     mf = MATHFIN.module_preamble()
     assert mf.index("namespace MathFin") < mf.index("open MeasureTheory")
 
-    # the decomposer's skeleton carries no opens, in either domain
-    assert "open " not in ECON.module_preamble(opens=False)
-    assert "open " not in MATHFIN.module_preamble(opens=False)
-
 
 def test_the_splice_anchor_is_derived_so_emit_and_read_cannot_disagree():
     """The anchor is the last preamble line, not a stored field — which is the only

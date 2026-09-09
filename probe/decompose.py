@@ -288,15 +288,23 @@ def draft_decomposition(pack: DomainPack, target: str, context_pack: str, *, cha
 def _module_text(pack: DomainPack, pointers, body: str) -> str:
     """Wrap a declaration `body` in the target library's module boilerplate: license,
     `module` header, Mathlib + `.lean`-pointer imports, autoImplicit off, the
-    `@[expose] public section` (without which the decls are module-private), and the
-    pack's namespace."""
+    `@[expose] public section` (without which the decls are module-private), the
+    pack's namespace, and the HOUSE OPENS.
+
+    The opens are not decoration. `target_preamble` strips the stub's own `open` lines
+    as boilerplate on the promise that this function re-emits them, and for five weeks
+    it did not — so a decompose-path module carried none at all, from either source.
+    A stub defining `certaintyEquivalent (P : Measure Ω)` (cal-bk-80) then dies
+    `Unknown identifier Measure` on a split that is structurally fine. The pack is the
+    right source: `[module] opens` is declared as what EVERY emitted module carries, and
+    the skeleton is one of the three consumers that contract names."""
     mods = sorted({p for p in pointers if p.endswith(".lean")})
     imports = "\n".join(["public import Mathlib"]
                         + [pack.import_line(p) for p in mods])
     return (
         f"{pack.license}\nmodule\n\n"
         f"{imports}\n\n"
-        f"{pack.module_preamble(opens=False)}\n\n"
+        f"{pack.module_preamble()}\n\n"
         + body
         + f"\n\nend {pack.namespace}\n"
     )
@@ -309,7 +317,7 @@ def target_preamble(target_text: str) -> str:
     Cut at the first `theorem`/`lemma` at column zero: everything before it is what the
     target brings with it, everything after is the statement the DAG replaces. The
     licence block and the boilerplate `_module_text` re-emits (module header, imports,
-    `set_option`, `@[expose]`, `namespace`) are dropped.
+    `set_option`, `@[expose]`, `namespace`, and the house `open`s) are dropped.
 
     Comment state is tracked rather than pattern-matched line by line, because both
     shortcuts are wrong. A `/--` doc comment starts with `/-`, so a regex that skips
@@ -366,8 +374,8 @@ def assemble_skeleton(pack: DomainPack, dag: Dag, meta: dict | None = None) -> s
     good decomposition, this elaborates with exactly `len(leaves)` sorries — that is
     what `skeleton_gate` checks, before any leaf gets proving budget.
 
-    `target_text` is the target stub, and omitting it is why the decomposer never once
-    produced a leaf. A pipeline target INTRODUCES definitions — `cal-bk-69` defines `P`,
+    `dag.preamble` is the target stub's own context, and omitting it is why the
+    decomposer never once produced a leaf. A pipeline target INTRODUCES definitions — `cal-bk-69` defines `P`,
     `KRD` and `ED` in the stub itself, in no importable module — and every leaf statement
     the splitter writes refers to them. A skeleton assembled from the DAG alone therefore
     cannot elaborate, for a reason that has nothing to do with the split being good or
@@ -436,8 +444,12 @@ def build_leaf_manifest(pack: DomainPack, dag: Dag, meta: dict, out_dir: str, *,
 
 def extract_leaf_decl(pack: DomainPack, module_text: str, name: str) -> str | None:
     """The `theorem/lemma <name> ... := <proof>` block from a proved leaf module (from
-    its keyword to just before the namespace's `end` / end of file). None if absent. The generated
-    leaf modules hold exactly one declaration, so the slice is unambiguous."""
+    its keyword to just before the namespace's `end` / end of file). None if absent.
+
+    Anchoring on the declaration NAME rather than on "the module's only declaration" is
+    load-bearing now that a leaf module also carries the target's own definitions: the
+    slice must begin BELOW them, because `recompose` re-emits the preamble itself and a
+    slice that reached above the theorem would define everything twice."""
     m = re.search(
         rf"(?m)^\s*(?:@\[[^\]]*\]\s*)?(?:private\s+|protected\s+)?(?:theorem|lemma)\s+{re.escape(name)}\b",
         module_text)

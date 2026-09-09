@@ -560,3 +560,97 @@ def test_a_dag_without_a_target_is_unchanged(tmp_path):
     from decompose import assemble_skeleton, parse_dag
     lean = assemble_skeleton(PACK, parse_dag(TARGET_DAG))
     assert "noncomputable def KRD" not in lean
+
+
+def test_the_extracted_leaf_decl_excludes_the_preamble():
+    """The leaf module now CARRIES the target's definitions, and recompose adds them
+    once itself. If the slice reached above the theorem, the candidate would define
+    everything twice and fail on a duplicate declaration."""
+    from decompose import build_leaf_manifest, extract_leaf_decl
+    import tempfile, os
+    d = tempfile.mkdtemp()
+    man = build_leaf_manifest(PACK, _targeted_dag(), {"id": "t"}, d)
+    stub = open(os.path.join(d, man["targets"][0]["file"]), encoding="utf-8").read()
+    decl = extract_leaf_decl(PACK, stub, "krd_leaf")
+    assert decl.startswith("theorem krd_leaf")
+    assert "noncomputable def KRD" not in decl
+
+
+def test_the_candidate_defines_each_target_definition_exactly_once():
+    from decompose import recompose
+    import tempfile, os
+    from decompose import build_leaf_manifest
+    d = tempfile.mkdtemp()
+    dag = _targeted_dag()
+    man = build_leaf_manifest(PACK, dag, {"id": "t"}, d)
+    stub = open(os.path.join(d, man["targets"][0]["file"]), encoding="utf-8").read()
+    proved = stub.replace("krd_leaf (c : ℝ) : KRD c = c := by sorry",
+                          "krd_leaf (c : ℝ) : KRD c = c := by rfl")
+    seen = {}
+    recompose(PACK, dag, {"krd_leaf": proved},
+              check_fn=lambda m: (seen.setdefault("m", m), {"passed": True})[1])
+    assert seen["m"].count("noncomputable def KRD") == 1
+
+
+# --- the house opens (the layer under the target-preamble fix) ----------------
+
+MEASURE_STUB = '''/-
+Copyright (c) 2026 Raphael Coelho. All rights reserved.
+-/
+module
+
+public import Mathlib
+public import MathFin.RiskMeasures.UtilityDerivation
+
+set_option autoImplicit false
+
+@[expose] public section
+
+namespace MathFin
+
+open MeasureTheory ProbabilityTheory
+open scoped NNReal ENNReal
+
+/-- The certainty equivalent of a utility `w` for a random variable `Y` under `P`. -/
+noncomputable def certaintyEquivalent {Ω : Type*} [MeasurableSpace Ω]
+    (w : ℝ → ℝ) (Y : Ω → ℝ) (P : Measure Ω) : ℝ :=
+  Function.invFun w (∫ ω, w (Y ω) ∂P)
+
+theorem ce_target : True := by sorry
+
+end MathFin
+'''
+
+MEASURE_DAG = {
+    "main": {"name": "ce_main", "statement": "theorem ce_main : True", "proof": "ce_leaf"},
+    "leaves": [{"name": "ce_leaf", "statement": "theorem ce_leaf : True"}],
+}
+
+
+def _measure_dag():
+    from decompose import parse_dag, with_target
+    return with_target(parse_dag(MEASURE_DAG), MEASURE_STUB)
+
+
+def test_skeleton_carries_the_house_opens():
+    """`target_preamble` drops the stub's `open` lines as boilerplate, so the module
+    builder must re-emit the pack's — otherwise NOTHING supplies them. cal-bk-80 defines
+    `certaintyEquivalent (P : Measure Ω)`, and `Measure` resolves only under
+    `open MeasureTheory`: the skeleton dies `Unknown identifier Measure` on a split that
+    is structurally fine. cal-bk-69 passed the 2026-09-01 fix only because its own
+    definitions are plain ℝ arithmetic and need no open."""
+    from decompose import assemble_skeleton
+    lean = assemble_skeleton(PACK, _measure_dag())
+    assert "open MeasureTheory ProbabilityTheory" in lean
+    assert "open scoped NNReal ENNReal" in lean
+    # and ABOVE the definition that needs them
+    assert lean.index("open MeasureTheory") < lean.index("(P : Measure Ω)")
+
+
+def test_leaf_stub_carries_the_house_opens(tmp_path):
+    """The stub vibe_prove receives is assembled the same way and needs the same opens."""
+    from decompose import build_leaf_manifest
+    man = build_leaf_manifest(PACK, _measure_dag(), {"id": "t"}, str(tmp_path))
+    stub = (tmp_path / man["targets"][0]["file"]).read_text(encoding="utf-8")
+    assert "open MeasureTheory ProbabilityTheory" in stub
+    assert stub.index("open MeasureTheory") < stub.index("(P : Measure Ω)")
