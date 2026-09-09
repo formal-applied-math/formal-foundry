@@ -24,7 +24,8 @@ import sys
 import domain_pack
 
 from decompose import (assemble_skeleton, build_leaf_manifest, dag_to_dict,
-                       draft_decomposition, parse_dag, recompose, skeleton_gate)
+                       draft_decomposition, parse_dag, recompose, skeleton_gate,
+                       with_target)
 
 
 def _pack(args):
@@ -56,10 +57,12 @@ def do_draft(pack, tid, tag, runs_dir, *, target_text, context_pack, drafter_pre
                             max_reask=cfg_max_reask)
     if not r["ok"]:
         return {"outcome": "fail_draft", "reason": r["error"], "tokens": r["tokens"]}
-    dag, tokens = r["dag"], r["tokens"]
+    # attach the target's own definitions + imports ONCE: the skeleton the gate
+    # elaborates, every leaf stub, and the recomposed candidate are then assembled
+    # against the same context, and it survives the dag.json handoff to recompose.
+    dag, tokens = with_target(r["dag"], target_text), r["tokens"]
 
-    g = skeleton_gate(assemble_skeleton(pack, dag, target_text=target_text),
-                      len(dag.leaves), check_fn=check_fn)
+    g = skeleton_gate(assemble_skeleton(pack, dag), len(dag.leaves), check_fn=check_fn)
     if not g["passed"] and not g["indeterminate"]:
         # one bounded re-decomposition, feedback = the elaboration errors (Task 2.3.2)
         r2 = draft_decomposition(pack, target_text, context_pack, chat_fn=chat_fn,
@@ -70,9 +73,8 @@ def do_draft(pack, tid, tag, runs_dir, *, target_text, context_pack, drafter_pre
                                  "applications with the leaves left `:= by sorry`.")
         tokens += r2["tokens"]
         if r2["ok"]:
-            dag = r2["dag"]
-            g = skeleton_gate(assemble_skeleton(pack, dag, target_text=target_text),
-                              len(dag.leaves),
+            dag = with_target(r2["dag"], target_text)
+            g = skeleton_gate(assemble_skeleton(pack, dag), len(dag.leaves),
                               check_fn=check_fn)
     if g["indeterminate"]:
         return {"outcome": "indeterminate", "reason": g["verdict"], "tokens": tokens}

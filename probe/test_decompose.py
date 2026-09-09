@@ -401,7 +401,7 @@ def test_skeleton_carries_the_targets_own_definitions():
     them the leaf statements reference unknown identifiers and the skeleton cannot
     elaborate — which is how the decomposer failed on every target that defines
     something, i.e. nearly all of them."""
-    from decompose import assemble_skeleton, parse_dag
+    from decompose import assemble_skeleton, parse_dag, with_target
     dag = parse_dag({
         "main": {"name": "m", "statement": "theorem m (s : Finset ℕ) (T c r : ℕ → ℝ) : "
                                            "∑ j ∈ s, KRD s T c r j = 0",
@@ -409,7 +409,7 @@ def test_skeleton_carries_the_targets_own_definitions():
         "leaves": [{"name": "l1", "statement": "theorem l1 (s : Finset ℕ) (T c r : ℕ → ℝ) : "
                                               "∑ j ∈ s, KRD s T c r j = 0"}],
     })
-    lean = assemble_skeleton(PACK, dag, target_text=PREAMBLE_STUB)
+    lean = assemble_skeleton(PACK, with_target(dag, PREAMBLE_STUB))
     assert "noncomputable def P" in lean
     assert "noncomputable def KRD" in lean
     # ... and NOT the target's own theorem, which the DAG replaces
@@ -417,10 +417,10 @@ def test_skeleton_carries_the_targets_own_definitions():
 
 
 def test_skeleton_keeps_the_targets_imports():
-    from decompose import assemble_skeleton, parse_dag
+    from decompose import assemble_skeleton, parse_dag, with_target
     dag = parse_dag({"main": {"name": "m", "statement": "theorem m : True", "proof": "l1"},
                      "leaves": [{"name": "l1", "statement": "theorem l1 : True"}]})
-    lean = assemble_skeleton(PACK, dag, target_text=PREAMBLE_STUB)
+    lean = assemble_skeleton(PACK, with_target(dag, PREAMBLE_STUB))
     assert "MathFin.FixedIncome.ZCB" in lean
 
 
@@ -481,3 +481,82 @@ def test_preamble_drops_the_licence_block_and_the_boilerplate():
     for gone in ("Copyright", "module", "public import", "set_option", "@[expose]",
                  "namespace MathFin"):
         assert gone not in out, gone
+
+
+TARGET_STUB = '''/-
+Copyright (c) 2026 Raphael Coelho. All rights reserved.
+-/
+module
+
+public import Mathlib
+public import MathFin.FixedIncome.ZCB
+
+set_option autoImplicit false
+
+@[expose] public section
+
+namespace MathFin
+
+/-- Key-rate duration. -/
+noncomputable def KRD (c : ℝ) : ℝ := c
+
+theorem krd_target (c : ℝ) : KRD c = c := by sorry
+
+end MathFin
+'''
+
+TARGET_DAG = {
+    "main": {"name": "krd_main", "statement": "theorem krd_main (c : ℝ) : KRD c = c",
+             "proof": "krd_leaf c"},
+    "leaves": [{"name": "krd_leaf", "statement": "theorem krd_leaf (c : ℝ) : KRD c = c",
+                "pointers": ["MathFin/FixedIncome/ZCB.lean"]}],
+}
+
+
+def _targeted_dag():
+    from decompose import parse_dag, with_target
+    return with_target(parse_dag(TARGET_DAG), TARGET_STUB)
+
+
+def test_leaf_stub_carries_the_targets_definitions(tmp_path):
+    """A leaf statement refers to what the TARGET defines. Without it the stub vibe_prove
+    receives cannot elaborate, and the leaf fails for a reason unrelated to its proof."""
+    from decompose import build_leaf_manifest
+    man = build_leaf_manifest(PACK, _targeted_dag(), {"id": "t"}, str(tmp_path))
+    stub = (tmp_path / man["targets"][0]["file"]).read_text(encoding="utf-8")
+    assert "noncomputable def KRD" in stub
+    assert "MathFin.FixedIncome.ZCB" in stub
+    assert stub.count(":= by sorry") == 1     # still a single-sorry target
+
+
+def test_the_recomposed_candidate_carries_the_targets_definitions():
+    """recompose's output IS the PR candidate. A module that uses `KRD` without defining
+    it is not a module — this would fail the full gate on every decompose pass."""
+    from decompose import recompose
+    seen = {}
+
+    def check_fn(module):
+        seen["module"] = module
+        return {"passed": True}
+
+    r = recompose(PACK, _targeted_dag(),
+                  {"krd_leaf": TARGET_STUB.replace("krd_target (c : ℝ) : KRD c = c := by sorry",
+                                                   "krd_leaf (c : ℝ) : KRD c = c := by rfl")},
+                  check_fn=check_fn)
+    assert r["ok"], r
+    assert "noncomputable def KRD" in seen["module"]
+
+
+def test_the_target_context_survives_the_dag_roundtrip():
+    """draft and recompose are SEPARATE processes: the DAG goes to dag.json and comes
+    back. Target context that does not survive that is target context recompose lacks."""
+    from decompose import dag_to_dict, parse_dag
+    back = parse_dag(dag_to_dict(_targeted_dag()))
+    assert "noncomputable def KRD" in back.preamble
+    assert "MathFin/FixedIncome/ZCB.lean" in back.target_pointers
+
+
+def test_a_dag_without_a_target_is_unchanged(tmp_path):
+    from decompose import assemble_skeleton, parse_dag
+    lean = assemble_skeleton(PACK, parse_dag(TARGET_DAG))
+    assert "noncomputable def KRD" not in lean

@@ -46,6 +46,13 @@ class Node:
 class Dag:
     main: Node
     leaves: list[Node]
+    #: the target stub's own `def`s/`abbrev`s and its imports. Every module the decompose
+    #: path assembles — the skeleton, each leaf stub, the recomposed candidate — needs
+    #: them, because a target INTRODUCES definitions its leaf statements then refer to.
+    #: Carried on the Dag rather than passed per call because draft and recompose are
+    #: SEPARATE processes: this survives the dag.json roundtrip between them.
+    preamble: str = ""
+    target_pointers: list[str] = field(default_factory=list)
 
     @property
     def nodes(self) -> list[Node]:
@@ -104,7 +111,12 @@ def parse_dag(spec, *, max_leaves: int | None = None) -> Dag:
     main = Node(name=m["name"], statement=m["statement"], is_main=True,
                 proof=m.get("proof", ""),
                 depends_on=[leaf.name for leaf in leaves])
-    dag = Dag(main=main, leaves=leaves)
+    # `target` is written by `dag_to_dict` from the target FILE, never by the model —
+    # it is how the draft process hands the stub's context to the recompose process.
+    tgt = spec.get("target") if isinstance(spec.get("target"), dict) else {}
+    dag = Dag(main=main, leaves=leaves,
+              preamble=str(tgt.get("preamble") or ""),
+              target_pointers=list(tgt.get("pointers") or []))
     topo_order(dag)   # raises DagError on a cycle
     _check_leaf_reachability(main, leaves)   # raises DagError on a dead (orphan) leaf
     return dag
@@ -216,6 +228,18 @@ def _extract_json_object(text: str | None):
     return None
 
 
+def with_target(dag: Dag, target_text: str) -> Dag:
+    """`dag` with the target stub's definitions and imports attached. Called once, at
+    draft time, so every later stage assembles modules against the same context the
+    skeleton gate validated."""
+    dag.preamble = target_preamble(target_text)
+    dag.target_pointers = [m.replace(".", "/") + ".lean"
+                           for m in re.findall(r"^\s*(?:public\s+)?import\s+([A-Za-z0-9_.]+)",
+                                               target_text, re.M)
+                           if m.split(".")[0] != "Mathlib"]
+    return dag
+
+
 def dag_to_dict(dag: Dag) -> dict:
     """Serialize a `Dag` back to the decomposer's JSON shape (inverse of `parse_dag`), so
     a run can persist the DAG and reparse it in the recompose step."""
@@ -226,6 +250,8 @@ def dag_to_dict(dag: Dag) -> dict:
                     "pointers": leaf.pointers, "depends_on": leaf.depends_on,
                     "applied_to": leaf.applied_to}
                    for leaf in dag.leaves],
+        # set by the tick from the target file, never by the model
+        "target": {"preamble": dag.preamble, "pointers": dag.target_pointers},
     }
 
 
@@ -321,8 +347,20 @@ def target_preamble(target_text: str) -> str:
     return "\n".join(out).strip()
 
 
-def assemble_skeleton(pack: DomainPack, dag: Dag, meta: dict | None = None,
-                      target_text: str = "") -> str:
+def _decompose_module(pack: DomainPack, dag: Dag, blocks: list[str]) -> str:
+    """A module assembled from DAG pieces, carrying the target's own context.
+
+    The single place that knows what a decompose-path module needs, because all three
+    assemblies need the same thing and all three were missing it: the skeleton the gate
+    elaborates, each leaf stub the prover receives, and the recomposed candidate that
+    becomes the PR. A target INTRODUCES definitions — its leaf statements then refer to
+    them — and its imports are the ones the splitter did not think to declare."""
+    body = ([dag.preamble] if dag.preamble else []) + blocks
+    pointers = list(dag.target_pointers) + [p for leaf in dag.leaves for p in leaf.pointers]
+    return _module_text(pack, pointers, "\n\n".join(body))
+
+
+def assemble_skeleton(pack: DomainPack, dag: Dag, meta: dict | None = None) -> str:
     """The skeleton module: every leaf `<statement> := by sorry`, the main theorem
     `<statement> := <main.proof>` (its proof applying the leaves, NOT sorry). If a
     good decomposition, this elaborates with exactly `len(leaves)` sorries — that is
@@ -338,21 +376,9 @@ def assemble_skeleton(pack: DomainPack, dag: Dag, meta: dict | None = None,
     Imports likewise come from the target as well as the leaves: the splitter declares
     the pointers it happens to notice (on `cal-bk-69`, one of the target's three), and
     trusting only those drops the rest."""
-    blocks = [f"{n.statement} := {n.proof or 'by sorry'}" if n.is_main
-              else f"{n.statement} := by sorry"
-              for n in topo_order(dag)]
-    preamble = target_preamble(target_text) if target_text else ""
-    if preamble:
-        blocks.insert(0, preamble)
-    # `_module_text` keys on `.lean` PATHS, so the target's `import A.B.C` lines are
-    # converted to paths rather than the pointers to modules. Mathlib is dropped: the
-    # pack emits it unconditionally.
-    pointers = [p for leaf in dag.leaves for p in leaf.pointers]
-    for mod in (re.findall(r"^\s*(?:public\s+)?import\s+([A-Za-z0-9_.]+)",
-                           target_text, re.M) if target_text else []):
-        if mod.split(".")[0] != "Mathlib":
-            pointers.append(mod.replace(".", "/") + ".lean")
-    return _module_text(pack, pointers, "\n\n".join(blocks))
+    return _decompose_module(pack, dag, [
+        f"{n.statement} := {n.proof or 'by sorry'}" if n.is_main
+        else f"{n.statement} := by sorry" for n in topo_order(dag)])
 
 
 # --- leaf routing: DAG leaves as ordinary single-sorry prove targets (2.4) ----
@@ -361,17 +387,16 @@ def _leaf_filename(parent_id: str, name: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]", "_", f"leaf-{parent_id}-{name}") + ".lean"
 
 
-def _leaf_stub(pack: DomainPack, leaf: Node, proved: dict) -> str:
+def _leaf_stub(pack: DomainPack, dag: Dag, leaf: Node, proved: dict) -> str:
     """A single-sorry stub module for one leaf: any already-proved dependency decls
     (no sorry) inlined ABOVE `<leaf.statement> := by sorry`, so a dependent leaf's
     proof can consume them while the stub stays a single-sorry target."""
     deps = [proved[d] for d in leaf.depends_on if proved.get(d)]
-    pointers = list(leaf.pointers)
     # a proving hint the vibe agent reads: the lemmas the decomposer expects this leaf to
     # consume (a Lean line comment — no sorry, no effect on elaboration; sliced off by
     # `extract_leaf_decl` at recompose since it starts at the `theorem` keyword)
     hint = f"-- apply: {', '.join(leaf.applied_to)}\n" if leaf.applied_to else ""
-    return _module_text(pack, pointers, "\n\n".join([*deps, f"{hint}{leaf.statement} := by sorry"]))
+    return _decompose_module(pack, dag, [*deps, f"{hint}{leaf.statement} := by sorry"])
 
 
 def build_leaf_manifest(pack: DomainPack, dag: Dag, meta: dict, out_dir: str, *,
@@ -390,7 +415,7 @@ def build_leaf_manifest(pack: DomainPack, dag: Dag, meta: dict, out_dir: str, *,
     leaves = [n for n in topo_order(dag) if not n.is_main]   # dependencies first
     targets = []
     for i, leaf in enumerate(leaves):
-        stub = _leaf_stub(pack, leaf, proved)
+        stub = _leaf_stub(pack, dag, leaf, proved)
         fname = _leaf_filename(parent_id, leaf.name)
         with open(os.path.join(out_dir, fname), "w", encoding="utf-8") as f:
             f.write(stub)
@@ -450,8 +475,7 @@ def recompose(pack: DomainPack, dag: Dag, proved_leaves: dict, *, check_fn,
                 "deferred": True, "reason": f"leaves not proved: {', '.join(remainder)}"}
     body = [decls[leaf.name] for leaf in topo_order(dag) if not leaf.is_main]
     body.append(f"{dag.main.statement} := {dag.main.proof}")
-    module = _module_text(pack, [p for leaf in dag.leaves for p in leaf.pointers],
-                          "\n\n".join(body))
+    module = _decompose_module(pack, dag, body)
     g = check_fn(module)
     if g.get("passed"):
         return {"ok": True, "partial": False, "module": module, "banked": banked,
