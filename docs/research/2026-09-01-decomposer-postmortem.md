@@ -25,6 +25,21 @@ since**.
    a leaf.** `leaves_total=0` on all seven invocations, 2026-07-27 to 2026-08-31. No
    `*.dag.json` and no leaf manifest has ever been written to `runs/`.
 
+> **Superseded 2026-09-09.** True when written; false since 2026-09-03. Three CI ticks
+> this checkout had not fetched show the decomposer routing splits: `cal-bk-71`
+> (2 leaves, 09-03) and `cal-bk-82` (3 leaves, 09-07), both with a persisted
+> `*.dag.json` and a leaf manifest on disk. `cal-bk-80` (09-05) still failed its
+> skeleton gate, for the missing-opens reason `c7e9294` has since fixed.
+>
+> **Their `leaves_closed=0` is not evidence about the prover.** Those leaf stubs predate
+> `f8ff98e`, so they carried none of the target's own definitions — the
+> `lifeAnnuityDue_nonneg` stub references a `lifeAnnuityDue` that is defined in the
+> target and exists in no importable module. The stub does not elaborate, so no prover
+> could have closed it. Five leaf attempts across two targets, none of them a fair test.
+> Read as a capability measurement, that zero would have driven an architecture decision
+> off an instrument defect — the fifth time in two days that this failure shape nearly
+> landed as a finding.
+
 ## Where the decomposer fails
 
 Isolated 2026-09-01 by running the stages separately against `cal-bk-69`, the target that

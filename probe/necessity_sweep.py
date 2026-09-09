@@ -381,11 +381,20 @@ def sweep_entry(entry: "Entry", *, check_fn, prove_fn, regate_fn,
     import time
     from strengthen import necessity_probe
 
-    def rec(binder, verdict, proves, tactic, elapsed):
+    def rec(binder, verdict, proves, tactic, elapsed, reduced=""):
         return {"arm": entry.arm, "entry_id": entry.entry_id, "domain": entry.domain,
                 "thm": entry.thm, "status": entry.status, "provenance": entry.provenance,
                 "binder": binder, "verdict": verdict, "sweep_proves_original": proves,
-                "closing_tactic": tactic, "elapsed_s": round(elapsed, 3)}
+                "closing_tactic": tactic, "elapsed_s": round(elapsed, 3),
+                # The statement the sweep actually attempted, empty when no probe was
+                # built. `not_shown_unnecessary` is this instrument's most common and
+                # least informative verdict — it fails closed, so it cannot separate
+                # "the binder is load-bearing" from "the eight fixed tactics could not
+                # reach this". Anything that wants to triage that difference needs the
+                # statement, and re-deriving it later means re-running an expensive
+                # sweep. A certified positive carries it too, so the paper's claims are
+                # reproducible from the record alone.
+                "reduced_statement": reduced}
 
     t0 = time.monotonic()
     proves_original = sweep_can_prove(entry.code, entry.thm, prove_fn=prove_fn)
@@ -413,29 +422,29 @@ def sweep_entry(entry: "Entry", *, check_fn, prove_fn, regate_fn,
         res = check_fn(probe)
         if res.get("error"):
             out.append(rec(nm, "daemon_error", proves_original, None,
-                           time.monotonic() - t1))
+                           time.monotonic() - t1, probe))
             continue
         if res.get("errors"):
             out.append(rec(nm, "free_filter_rejected", proves_original, None,
-                           time.monotonic() - t1))
+                           time.monotonic() - t1, probe))
             continue
         try:
             attempt = prove_fn(probe)
         except Exception:
             out.append(rec(nm, "daemon_error", proves_original, None,
-                           time.monotonic() - t1))
+                           time.monotonic() - t1, probe))
             continue
         proved = (attempt or {}).get("lean_text") or ""
         if not proved or "sorry" in proved:
             out.append(rec(nm, "not_shown_unnecessary", proves_original, None,
-                           time.monotonic() - t1))
+                           time.monotonic() - t1, probe))
             continue
         if not regate_fn(proved).get("passed"):
             out.append(rec(nm, "not_shown_unnecessary", proves_original, None,
-                           time.monotonic() - t1))
+                           time.monotonic() - t1, probe))
             continue
         out.append(rec(nm, "certified_unnecessary", proves_original,
-                       _closing_tactic(probe, proved), time.monotonic() - t1))
+                       _closing_tactic(probe, proved), time.monotonic() - t1, probe))
     return out
 
 

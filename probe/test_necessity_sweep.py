@@ -768,3 +768,43 @@ def test_every_emitted_entry_is_locatable_by_the_shared_parser(tmp_path):
     from autoformalize import _locate_named
     for e in ns.load_library_entries(PACK, _traps(tmp_path)):
         _locate_named(e.code, e.thm)      # raises if the loader emitted a dud
+
+
+def test_a_negative_records_the_reduced_statement_it_could_not_close():
+    """`not_shown_unnecessary` is the sweep's most common verdict and its least
+    informative: the prober fails closed, so it cannot distinguish "the binder is
+    load-bearing" from "the eight-tactic sweep could not reach the reduced statement".
+    Those negatives are the input to any downstream triage, and the probe text is
+    already built — recording it costs nothing at run time and the run is expensive."""
+    check_fn, prove_fn = _fakes(set())          # closes nothing that was reduced
+    e = ns.Entry("catalogue", "e1", "d", "gainToPain_nonneg_of_denom_pos", "full",
+                 "human", GUARDED)
+    rec = [r for r in ns.sweep_entry(e, check_fn=check_fn, prove_fn=prove_fn,
+                                     regate_fn=lambda c: {"passed": True})
+           if r["binder"] == "h"][0]
+    assert rec["verdict"] == "not_shown_unnecessary"
+    assert "sorry" in rec["reduced_statement"]
+    assert "(h :" not in rec["reduced_statement"]      # the binder really is dropped
+
+
+def test_a_certified_positive_records_its_reduced_statement_too():
+    """A positive is the paper's kernel-certified claim; it has to be reproducible from
+    the record without re-running the sweep."""
+    check_fn, prove_fn = _fakes({"h"})
+    e = ns.Entry("catalogue", "e1", "d", "gainToPain_nonneg_of_denom_pos", "full",
+                 "human", GUARDED)
+    rec = [r for r in ns.sweep_entry(e, check_fn=check_fn, prove_fn=prove_fn,
+                                     regate_fn=lambda c: {"passed": True})
+           if r["binder"] == "h"][0]
+    assert rec["verdict"] == "certified_unnecessary"
+    assert "sorry" in rec["reduced_statement"]
+
+
+def test_records_with_no_probe_carry_an_empty_reduced_statement():
+    """power_control, and a blind entry's short-circuited binders, never built one."""
+    check_fn, prove_fn = _blind_fakes()
+    e = ns.Entry("catalogue", "e1", "d", "gainToPain_nonneg_of_denom_pos", "full",
+                 "human", GUARDED)
+    for r in ns.sweep_entry(e, check_fn=check_fn, prove_fn=prove_fn,
+                            regate_fn=lambda c: {"passed": True}):
+        assert r["reduced_statement"] == ""

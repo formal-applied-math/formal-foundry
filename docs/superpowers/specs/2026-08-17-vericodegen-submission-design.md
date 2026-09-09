@@ -227,6 +227,17 @@ never attempted, and the difference belongs in the text.
   the finding is *weaker* and we say so.
 - **The two populations measure different things** (§2.1) and the paper says so in the
   results section, not only in limitations.
+- **The instrument was fitted on part of the evidence it is measured against.** Two of
+  `SWEEP_TACTICS`' eight slots exist because of #162: `cd68669` added the algebra slot
+  carrying `← Finset.mul_sum` and `mul_div_assoc`, and its own commit message identifies
+  those as the rewrites the merged `upCapture_smul` proof uses. The `unfold; positivity`
+  slot is there for #161 for the same reason. So the sweep's demonstrated catch of the
+  class-B pair is not independent evidence about the sweep — it is evaluation on the
+  fitting set, and the paper must not present it as validation. What the pair legitimately
+  supports is the *existence* claim of §1 (this defect class reaches merge past every
+  gate); the *rate* in §2 is measured on a corpus the tactic set was not fitted to, which
+  is where the instrument's generality is actually tested. Raised by a peer session
+  2026-09-09 while scoring an independent auditor against the same four theorems.
 - **Lower bound, per §2.**
 - **The pipeline's own numbers are small**: 40 refill rows, 22 live obstructions, 16
   stored drafts. These support the supporting sections, not the headline.
