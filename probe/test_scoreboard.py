@@ -100,3 +100,43 @@ def test_a_row_without_a_note_renders_an_empty_cell():
     from scoreboard import ab_row, render_scoreboard
     md = render_scoreboard([ab_row(target="t", arm="cron", outcome="pass", ts="x")])
     assert md.rstrip().endswith("|")
+
+
+def test_the_engine_is_recorded_beside_the_arm():
+    """`arm` says WHICH PATH ran (direct vs decomposed); it was also carrying WHICH
+    MODEL proved, implicitly, because there was only ever one. A frontier prover makes
+    those two different questions, and a scoreboard that cannot express "same path,
+    different engine" cannot record the comparison at all."""
+    from scoreboard import ab_row
+    r = ab_row(target="t", arm="cron", engine="claude", outcome="pass", ts="x")
+    assert r["arm"] == "cron" and r["engine"] == "claude"
+
+
+def test_the_engine_defaults_to_the_incumbent_so_old_rows_read_unchanged():
+    from scoreboard import ab_row
+    assert ab_row(target="t", arm="cron", outcome="pass", ts="x")["engine"] == "leanstral"
+
+
+def test_an_unknown_engine_is_rejected():
+    """Same discipline the arm guard had: a typo must not silently become a new column
+    in the A/B."""
+    import pytest
+    from scoreboard import ab_row
+    with pytest.raises(ValueError):
+        ab_row(target="t", arm="cron", engine="gpt-9", outcome="pass", ts="x")
+
+
+def test_an_unknown_arm_is_still_rejected():
+    import pytest
+    from scoreboard import ab_row
+    with pytest.raises(ValueError):
+        ab_row(target="t", arm="nonsense", outcome="pass", ts="x")
+
+
+def test_a_legacy_row_without_an_engine_renders_as_the_incumbent():
+    """Every row on disk predates this field; none of them may render blank, or the
+    table would imply the engine was unknown when it is the only one that ever ran."""
+    from scoreboard import render_scoreboard
+    md = render_scoreboard([{"target": "t", "arm": "decompose", "outcome": "max_rounds",
+                             "ts": "2026-08-31T14:03:08", "tokens": 0}])
+    assert "leanstral" in md

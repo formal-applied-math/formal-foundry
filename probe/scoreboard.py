@@ -16,20 +16,34 @@ import os
 import provenance
 from probe_lib import append_jsonl
 
+#: which PATH ran — direct prove vs the lemma-DAG loop.
 ARMS = ("cron", "decompose")
+
+#: which MODEL proved. `arm` used to carry this implicitly because there was only ever
+#: one, and `ab_row` rejected a claude arm outright ("production is Mistral-only",
+#: R 2026-07-18) — which meant the scoreboard could not express the one comparison the
+#: 2026-09-30 engine decision needs. Path and engine are separate questions; a row now
+#: says both. Default is the incumbent, so every row already on disk reads unchanged.
+ENGINES = ("leanstral", "claude")
+DEFAULT_ENGINE = "leanstral"
 _START, _END = "<!-- SCOREBOARD:START -->", "<!-- SCOREBOARD:END -->"
 
 
 def ab_row(*, target: str, arm: str, outcome: str, ts: str, leaves_total: int = 0,
            leaves_closed: int = 0, tokens: int = 0, refinery_minutes=None,
-           note: str = "") -> dict:
-    """One scoreboard row. `arm` must be `cron` or `decompose` (Mistral-only — a `claude`
-    arm is rejected). `refinery_minutes` stays None until a human fills it at merge."""
+           note: str = "", engine: str = DEFAULT_ENGINE) -> dict:
+    """One scoreboard row. `arm` is the path (`cron`/`decompose`), `engine` the prover
+    (`leanstral`/`claude`). `refinery_minutes` stays None until a human fills it at
+    merge. Both fields are guarded, so a typo cannot quietly open a new column in the
+    A/B."""
     if arm not in ARMS:
         raise ValueError(f"arm must be one of {ARMS}, got {arm!r}")
+    if engine not in ENGINES:
+        raise ValueError(f"engine must be one of {ENGINES}, got {engine!r}")
     return {"target": target, "arm": arm, "outcome": outcome, "ts": ts,
             "leaves_total": leaves_total, "leaves_closed": leaves_closed,
-            "tokens": tokens, "refinery_minutes": refinery_minutes, "note": note}
+            "tokens": tokens, "refinery_minutes": refinery_minutes, "note": note,
+            "engine": engine}
 
 
 def append_ab_row(runs_dir: str, row: dict) -> dict:
@@ -57,10 +71,13 @@ def _note_cell(r: dict) -> str:
 def render_scoreboard(rows) -> str:
     """A markdown table (newest first) of the ab rows — leaves shown only for the
     decompose arm; a blank refinery cell = not yet reviewed/merged."""
-    head = ("| ts | target | arm | outcome | leaves | tokens | refinery min | note |\n"
-            "|----|--------|-----|---------|--------|--------|--------------|------|")
+    head = ("| ts | target | arm | engine | outcome | leaves | tokens | refinery min "
+            "| note |\n"
+            "|----|--------|-----|--------|---------|--------|--------|--------------"
+            "|------|")
     lines = [
         f"| {r.get('ts', '')} | {r.get('target', '')} | {r.get('arm', '')} | "
+        f"{r.get('engine') or DEFAULT_ENGINE} | "
         f"{r.get('outcome', '')} | {_leaves_cell(r)} | {r.get('tokens', 0)} | "
         f"{'' if r.get('refinery_minutes') is None else r['refinery_minutes']} | "
         f"{_note_cell(r)} |"

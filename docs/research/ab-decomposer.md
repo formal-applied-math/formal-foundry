@@ -36,17 +36,17 @@ bottleneck: it is **filled by hand at merge**, not by the machine.
 ## Scoreboard
 
 <!-- SCOREBOARD:START -->
-| ts | target | arm | outcome | leaves | tokens | refinery min | note |
-|----|--------|-----|---------|--------|--------|--------------|------|
-| 2026-09-08T22:33:05 | cal-bk-80 | decompose | max_rounds | 0/0 | 0 |  | ENVIRONMENT ARTIFACT, not a split verdict — the REPL lost its Mathlib environment mid-run (container died 2 min later);… |
-| 2026-09-07T12:47:22 | cal-bk-82 | decompose | max_rounds | 0/3 | 0 |  | remainder: ['lifeAnnuityDue_antitone', 'lifeAnnuityDue_nonneg', 'lifeAnnuityDue_eq_certain_annuity'] |
-| 2026-09-05T10:51:17 | cal-bk-80 | decompose | max_rounds | 0/0 | 0 |  | skeleton does not elaborate: line 34:33: Unknown identifier `Measure`  Note: It is not possible to treat `Measure` as a… |
-| 2026-09-03T11:36:58 | cal-bk-71 | decompose | max_rounds | 0/2 | 0 |  | remainder: ['apt_zero_beta_return_constant', 'apt_factor_insertion_step'] |
-| 2026-08-31T14:03:08 | cal-bk-69 | decompose | max_rounds | 0/0 | 0 |  |  |
-| 2026-08-27T18:25:22 | cal-bk-57 | decompose | max_rounds | 0/0 | 0 |  |  |
-| 2026-08-25T07:52:28 | cal-bk-57 | decompose | error | 0/0 | 0 |  |  |
-| 2026-08-23T07:18:32 | cal-bk-56 | decompose | max_rounds | 0/0 | 0 |  |  |
-| 2026-08-19T12:59:08 | cal-bk-129 | decompose | max_rounds | 0/0 | 0 |  |  |
-| 2026-07-28T05:50:52 | cal-bk-144 | decompose | max_rounds | 0/0 | 0 |  |  |
-| 2026-07-27T01:50:16 | cal-bk-144 | decompose | error | 0/0 | 0 |  |  |
+| ts | target | arm | engine | outcome | leaves | tokens | refinery min | note |
+|----|--------|-----|--------|---------|--------|--------|--------------|------|
+| 2026-09-08T22:33:05 | cal-bk-80 | decompose | leanstral | max_rounds | 0/0 | 0 |  | ENVIRONMENT ARTIFACT, not a split verdict — the REPL lost its Mathlib environment mid-run (container died 2 min later);… |
+| 2026-09-07T12:47:22 | cal-bk-82 | decompose | leanstral | max_rounds | 0/3 | 0 |  | remainder: ['lifeAnnuityDue_antitone', 'lifeAnnuityDue_nonneg', 'lifeAnnuityDue_eq_certain_annuity'] |
+| 2026-09-05T10:51:17 | cal-bk-80 | decompose | leanstral | max_rounds | 0/0 | 0 |  | skeleton does not elaborate: line 34:33: Unknown identifier `Measure`  Note: It is not possible to treat `Measure` as a… |
+| 2026-09-03T11:36:58 | cal-bk-71 | decompose | leanstral | max_rounds | 0/2 | 0 |  | remainder: ['apt_zero_beta_return_constant', 'apt_factor_insertion_step'] |
+| 2026-08-31T14:03:08 | cal-bk-69 | decompose | leanstral | max_rounds | 0/0 | 0 |  |  |
+| 2026-08-27T18:25:22 | cal-bk-57 | decompose | leanstral | max_rounds | 0/0 | 0 |  |  |
+| 2026-08-25T07:52:28 | cal-bk-57 | decompose | leanstral | error | 0/0 | 0 |  |  |
+| 2026-08-23T07:18:32 | cal-bk-56 | decompose | leanstral | max_rounds | 0/0 | 0 |  |  |
+| 2026-08-19T12:59:08 | cal-bk-129 | decompose | leanstral | max_rounds | 0/0 | 0 |  |  |
+| 2026-07-28T05:50:52 | cal-bk-144 | decompose | leanstral | max_rounds | 0/0 | 0 |  |  |
+| 2026-07-27T01:50:16 | cal-bk-144 | decompose | leanstral | error | 0/0 | 0 |  |  |
 <!-- SCOREBOARD:END -->
