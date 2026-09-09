@@ -1,0 +1,35 @@
+{
+  "main": {
+    "name": "apt_exact_factor_pricing",
+    "statement": "theorem apt_exact_factor_pricing {\u03b9 \u03ba : Type*} (s : Finset \u03b9) (t : Finset \u03ba)\n    (a : \u03b9 \u2192 \u211d) (\u03b2 : \u03b9 \u2192 \u03ba \u2192 \u211d)\n    (h_no_arb : \u2200 w : \u03b9 \u2192 \u211d,\n      portfolioReturn s w (fun _ \u21a6 (1 : \u211d)) = 0 \u2192\n      (\u2200 k \u2208 t, portfolioReturn s w (fun i \u21a6 \u03b2 i k) = 0) \u2192\n      portfolioReturn s w a = 0) :\n    \u2203 (lam0 : \u211d) (lam : \u03ba \u2192 \u211d), \u2200 i \u2208 s, a i = lam0 + \u2211 k \u2208 t, \u03b2 i k * lam k",
+    "proof": "by\n  have main : \u2200 t : Finset \u03ba, \u2200 a : \u03b9 \u2192 \u211d,\n      (\u2200 w : \u03b9 \u2192 \u211d, portfolioReturn s w (fun _ \u21a6 (1 : \u211d)) = 0 \u2192\n        (\u2200 k \u2208 t, portfolioReturn s w (fun i \u21a6 \u03b2 i k) = 0) \u2192\n        portfolioReturn s w a = 0) \u2192\n      \u2203 (lam0 : \u211d) (lam : \u03ba \u2192 \u211d), \u2200 i \u2208 s, a i = lam0 + \u2211 k \u2208 t, \u03b2 i k * lam k := by\n    intro t\n    induction t using Finset.cons_induction with\n    | empty =>\n        intro a h_no_arb\n        obtain \u27e8lam0, hlam0\u27e9 := apt_zero_beta_return_constant s a\n          (fun w hw => h_no_arb w hw (by simp))\n        exact \u27e8lam0, fun _ => (0 : \u211d), fun i hi => by simpa using hlam0 i hi\u27e9\n    | cons k\u2080 t' hk\u2080 ih =>\n        intro a h_no_arb\n        exact apt_factor_insertion_step s t' k\u2080 hk\u2080 a \u03b2 h_no_arb ih\n  exact main t a h_no_arb"
+  },
+  "leaves": [
+    {
+      "name": "apt_zero_beta_return_constant",
+      "statement": "theorem apt_zero_beta_return_constant {\u03b9 : Type*} (s : Finset \u03b9) (a : \u03b9 \u2192 \u211d)\n    (h : \u2200 w : \u03b9 \u2192 \u211d, portfolioReturn s w (fun _ \u21a6 (1 : \u211d)) = 0 \u2192 portfolioReturn s w a = 0) :\n    \u2203 lam0 : \u211d, \u2200 i \u2208 s, a i = lam0",
+      "pointers": [
+        "MathFin/Portfolio/CAPMEquilibrium.lean"
+      ],
+      "depends_on": [],
+      "applied_to": [
+        "portfolioReturn",
+        "Finset.sum_congr",
+        "Finset.sum_smul"
+      ]
+    },
+    {
+      "name": "apt_factor_insertion_step",
+      "statement": "theorem apt_factor_insertion_step {\u03b9 \u03ba : Type*} (s : Finset \u03b9) (t : Finset \u03ba) (k\u2080 : \u03ba)\n    (hk\u2080 : k\u2080 \u2209 t) (a : \u03b9 \u2192 \u211d) (\u03b2 : \u03b9 \u2192 \u03ba \u2192 \u211d)\n    (h_no_arb : \u2200 w : \u03b9 \u2192 \u211d,\n      portfolioReturn s w (fun _ \u21a6 (1 : \u211d)) = 0 \u2192\n      (\u2200 k \u2208 Finset.cons k\u2080 t hk\u2080, portfolioReturn s w (fun i \u21a6 \u03b2 i k) = 0) \u2192\n      portfolioReturn s w a = 0)\n    (ih : \u2200 a' : \u03b9 \u2192 \u211d,\n      (\u2200 w : \u03b9 \u2192 \u211d, portfolioReturn s w (fun _ \u21a6 (1 : \u211d)) = 0 \u2192\n        (\u2200 k \u2208 t, portfolioReturn s w (fun i \u21a6 \u03b2 i k) = 0) \u2192\n        portfolioReturn s w a' = 0) \u2192\n      \u2203 (lam0 : \u211d) (lam : \u03ba \u2192 \u211d), \u2200 i \u2208 s, a' i = lam0 + \u2211 k \u2208 t, \u03b2 i k * lam k) :\n    \u2203 (lam0 : \u211d) (lam : \u03ba \u2192 \u211d), \u2200 i \u2208 s, a i = lam0 + \u2211 k \u2208 Finset.cons k\u2080 t hk\u2080, \u03b2 i k * lam k",
+      "pointers": [
+        "MathFin/Portfolio/CAPMEquilibrium.lean"
+      ],
+      "depends_on": [],
+      "applied_to": [
+        "Finset.sum_cons",
+        "Finset.cons_induction",
+        "portfolioReturn"
+      ]
+    }
+  ]
+}

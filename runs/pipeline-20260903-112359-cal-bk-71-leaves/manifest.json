@@ -1,0 +1,33 @@
+{
+  "toolchain": "leanprover/lean4:v4.32.0",
+  "main_commit": "",
+  "decompose_parent": "cal-bk-71",
+  "targets": [
+    {
+      "id": "cal-bk-71__apt_zero_beta_return_constant",
+      "kind": "prove",
+      "file": "leaf-cal-bk-71-apt_zero_beta_return_constant.lean",
+      "sorry_name": "apt_zero_beta_return_constant",
+      "pointers": [
+        "MathFin/Portfolio/CAPMEquilibrium.lean"
+      ],
+      "parent": "apt_exact_factor_pricing",
+      "parent_id": "cal-bk-71",
+      "dag_order": 0,
+      "input_hash": "34a60832e8600318044bfba36f87db2c45b7a0a1f7cf66b366c3c97d56cc8246"
+    },
+    {
+      "id": "cal-bk-71__apt_factor_insertion_step",
+      "kind": "prove",
+      "file": "leaf-cal-bk-71-apt_factor_insertion_step.lean",
+      "sorry_name": "apt_factor_insertion_step",
+      "pointers": [
+        "MathFin/Portfolio/CAPMEquilibrium.lean"
+      ],
+      "parent": "apt_exact_factor_pricing",
+      "parent_id": "cal-bk-71",
+      "dag_order": 1,
+      "input_hash": "e8a9dfe9a1ae9fd8eff8c37c4b5dea3d4538229af21828deff2f03bbc7585a2b"
+    }
+  ]
+}
