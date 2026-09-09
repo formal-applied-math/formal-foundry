@@ -159,3 +159,48 @@ catalogue arm looked affordable. It is not optional now.
 For contrast, attempt 2 on a freshly created container measured a 35.7 s median for the
 same call. The instrument does not need the box to be fast; it needs the REPL to survive
 long enough to answer twice in a row.
+
+
+## 2026-09-09 — the ceiling is a hard OOM kill, and the fix is two lines
+
+Every earlier entry here described the symptom: calls that should take 5–30 s taking
+150–200, a REPL that "respawns cold". The mechanism is now confirmed, twice, from
+`docker inspect`:
+
+```
+OOMKilled: true
+exit    : 137
+```
+
+Not slow, not wedged — **killed**. The container hits `mem_limit: 6g` on a heavy
+elaboration and dies mid-reply.
+
+**What that looks like from the client, and why it has been poisoning verdicts.** The
+socket closes early, so `_parse_daemon_response` gets an empty or truncated payload. It
+used to return that as `errors` with **no `error` sentinel** and `sorry_count: 0` — which
+is indistinguishable from a well-formed rejection carrying real messages. Every caller
+that keys on `error` to return INDETERMINATE therefore scored an OOM kill as a judgement
+about the Lean it had submitted. Fixed 2026-09-09: a malformed reply now carries the
+sentinel, because it is infrastructure and never a verdict about the code.
+
+This is almost certainly the mechanism behind the 2026-09-08 22:33 cal-bk-80 row —
+`unknown namespace MeasureTheory` is what a REPL says after respawning without its
+Mathlib heap, and the container died two minutes later. That row is annotated in
+`runs/ab-decomposer.jsonl` as an environment artifact; the mechanism now has a name.
+
+**The headroom is real and unused.** Windows host 15.7 GB; `.wslconfig` caps WSL at
+`memory=10GB`; the container caps at `mem_limit: 6g`. So roughly **5.7 GB of the machine
+sits idle while the verifier is being killed at 6.**
+
+**The fix, which needs R and only R:**
+
+1. `/mnt/c/Users/rapha/.wslconfig` — `memory=10GB` → `13GB`
+2. `formal-mathfin/docker/docker-compose.yml`, `lean-repl` and `lean-lsp` — `mem_limit: 6g` → `9g`
+3. `wsl --shutdown` from Windows, then restart the daemon
+
+Step 3 terminates every session on this box, so it must be R's call and R's timing — no
+agent should run it unilaterally.
+
+**What it unblocks.** The necessity sweep's measurement arm is blocked on precisely this
+and has been since 2026-08-17. It is no longer a vague "the box is slow": it is a
+diagnosed hard kill with a specific two-line remedy and 5.7 GB of unused RAM behind it.

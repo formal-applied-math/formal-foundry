@@ -124,8 +124,17 @@ def _parse_daemon_response(raw: bytes) -> dict:
     try:
         return json.loads(raw.decode("utf-8"))
     except (ValueError, UnicodeDecodeError) as e:
-        return {"success": False, "sorry_count": 0,
-                "errors": [f"daemon returned an empty or malformed response: {e}"]}
+        # A malformed/empty payload is INFRASTRUCTURE, not a verdict about the code, so
+        # it carries the `error` sentinel exactly like a socket failure does. This is
+        # what an OOM kill looks like from the client: the container dies mid-reply
+        # (exit 137, `OOMKilled: true` — observed twice 2026-09-09 on the ~6 GiB cap)
+        # and the socket closes early. Without the sentinel this came back as `errors`
+        # alone with `sorry_count: 0`, i.e. indistinguishable from a well-formed
+        # rejection with real-looking messages — so every caller keying on `error` to
+        # return INDETERMINATE instead scored a kill as a judgement on the submitted
+        # Lean. `errors` is kept so the repair loop still treats it as a failed check.
+        msg = f"daemon returned an empty or malformed response: {e}"
+        return {"success": False, "sorry_count": 0, "error": msg, "errors": [msg]}
 
 
 def daemon_check(code: str, *, host="127.0.0.1", port=7878, timeout=300) -> dict:

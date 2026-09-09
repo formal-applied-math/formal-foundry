@@ -208,3 +208,25 @@ def test_fanout_repairs_best_failure_across_rounds():
     assert out["rounds"] == 2
     # the repair round's prompt was built from the FEWEST-error candidate ("ALPHA")
     assert "ALPHA" in chat.calls[2][-1]["content"]
+
+
+def test_a_malformed_daemon_reply_is_flagged_as_infrastructure():
+    """An OOM kill (exit 137) makes the daemon return an empty/malformed payload. That
+    used to come back with `errors` but NO `error`, so it presented as a well-formed
+    elaboration failure with real-looking messages — and `sorry_count: 0` failed any
+    leaf-count check too. Callers keying on the `error` sentinel to return INDETERMINATE
+    therefore scored an OOM as a verdict about the Lean they submitted.
+
+    Confirmed twice on 2026-09-09 (`OOMKilled: true`, exit 137). A malformed reply is
+    never a verdict about the code."""
+    r = _parse_daemon_response(b"")
+    assert r["error"], "a malformed reply must carry the infra sentinel"
+    assert r["errors"], "and stay a failed check for the repair loop"
+    assert "malformed" in r["error"]
+
+
+def test_a_well_formed_reply_carries_no_infra_sentinel():
+    import json as _j
+    r = _parse_daemon_response(_j.dumps({"success": True, "sorry_count": 0,
+                                           "errors": []}).encode())
+    assert not r.get("error") and r["success"] is True
