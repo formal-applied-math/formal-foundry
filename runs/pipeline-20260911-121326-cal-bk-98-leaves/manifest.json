@@ -1,0 +1,31 @@
+{
+  "toolchain": "leanprover/lean4:v4.33.0-rc1",
+  "main_commit": "",
+  "decompose_parent": "cal-bk-98",
+  "targets": [
+    {
+      "id": "cal-bk-98__hazardSurvival_const_eq_exp",
+      "kind": "prove",
+      "file": "leaf-cal-bk-98-hazardSurvival_const_eq_exp.lean",
+      "sorry_name": "hazardSurvival_const_eq_exp",
+      "pointers": [
+        "MathFin/FixedIncome/HazardCurve.lean"
+      ],
+      "parent": "cva_const_const",
+      "parent_id": "cal-bk-98",
+      "dag_order": 0,
+      "input_hash": "ca4e045b434c78869005bc4b66d841c209ebb7ff510682d737e71e5b699f86f3"
+    },
+    {
+      "id": "cal-bk-98__integral_cva_integrand_const",
+      "kind": "prove",
+      "file": "leaf-cal-bk-98-integral_cva_integrand_const.lean",
+      "sorry_name": "integral_cva_integrand_const",
+      "pointers": [],
+      "parent": "cva_const_const",
+      "parent_id": "cal-bk-98",
+      "dag_order": 1,
+      "input_hash": "4534ddc7ac55bc168106feaa47a4b625eee84fc0ea1b326c056b6c7815f95242"
+    }
+  ]
+}

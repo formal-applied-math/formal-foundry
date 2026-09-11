@@ -1,0 +1,45 @@
+{
+  "main": {
+    "name": "cva_const_const",
+    "statement": "theorem cva_const_const {E\u2080 R r h\u2080 T : \u211d} (hrh : r + h\u2080 \u2260 0) : cva (fun _ => E\u2080) R r (fun _ => h\u2080) T = (1 - R) * E\u2080 * (h\u2080 / (r + h\u2080)) * (1 - Real.exp (-(r + h\u2080) * T))",
+    "proof": "by\n  unfold cva\n  simp_rw [hazardSurvival_const_eq_exp]\n  rw [integral_cva_integrand_const E\u2080 h\u2080 r T hrh]\n  ring"
+  },
+  "leaves": [
+    {
+      "name": "hazardSurvival_const_eq_exp",
+      "statement": "theorem hazardSurvival_const_eq_exp (h\u2080 u : \u211d) : hazardSurvival (fun _ : \u211d => h\u2080) u = Real.exp (-(h\u2080 * u))",
+      "pointers": [
+        "MathFin/FixedIncome/HazardCurve.lean"
+      ],
+      "depends_on": [],
+      "applied_to": [
+        "MathFin.hazardSurvival",
+        "MathFin.cumHazard_const",
+        "MathFin.cumHazard.eq_1",
+        "MathFin.hazardSurvival.eq_1",
+        "MathFin.survivalFromIntensity.eq_1"
+      ]
+    },
+    {
+      "name": "integral_cva_integrand_const",
+      "statement": "theorem integral_cva_integrand_const (E\u2080 h\u2080 r T : \u211d) (hrh : r + h\u2080 \u2260 0) : \u222b u in (0:\u211d)..T, E\u2080 * Real.exp (-(r * u)) * h\u2080 * Real.exp (-(h\u2080 * u)) = E\u2080 * (h\u2080 / (r + h\u2080)) * (1 - Real.exp (-(r + h\u2080) * T))",
+      "pointers": [],
+      "depends_on": [],
+      "applied_to": [
+        "Real.exp_add",
+        "intervalIntegral.integral_congr",
+        "intervalIntegral.integral_const_mul",
+        "integral_exp",
+        "intervalIntegral.integral_comp_mul_left"
+      ]
+    }
+  ],
+  "target": {
+    "preamble": "-- pointers: MathFin/FixedIncome/HazardCurve.lean, MathFin/FixedIncome/Credit.lean, MathFin/FixedIncome/CDSTimeVarying.lean\n-- main-module: MathFin/FixedIncome/CVA.lean\n-- benchmark: benchmarks/mathematical_finance.json\n-- benchmark-id: mf-credit-cva-unilateral\n-- source-issue: 98\n-- new-defs: {'name': 'cva', 'signature': '(EE : \u211d \u2192 \u211d) \u2192 (R r : \u211d) \u2192 (h : \u211d \u2192 \u211d) \u2192 (T : \u211d) \u2192 \u211d', 'meaning': 'Unilateral CVA: (1-R) times the integral over [0,T] of expected exposure times discount times default density h(u)\u00b7S(u).', 'built_from': ['MathFin.hazardSurvival', 'Real.exp', 'intervalIntegral notation \u222b u in a..b, f u']}\n\n\n\n\n\n\n/-- **Unilateral CVA**: `(1 - R)` times the integral over `[0, T]` of expected\nexposure `EE u`, discounted at rate `r`, weighted by the risk-neutral\ndefault-time density `h(u) \u00b7 S(u)` (the same credit-triangle marginal used by\n`cdsFairSpread`), where `S = hazardSurvival h` is the deterministic-hazard\nsurvival curve. -/\nnoncomputable def cva (EE : \u211d \u2192 \u211d) (R r : \u211d) (h : \u211d \u2192 \u211d) (T : \u211d) : \u211d :=\n  (1 - R) * \u222b u in (0:\u211d)..T, EE u * Real.exp (-(r * u)) * h u * hazardSurvival h u\n\nexample : cva (fun _ => (0:\u211d)) (0:\u211d) (0:\u211d) (fun _ => (0:\u211d)) (0:\u211d) = 0 := by\n  unfold cva\n  norm_num\n\nexample : cva (fun _ => (1:\u211d)) (0:\u211d) (0:\u211d) (fun _ => (0:\u211d)) (0:\u211d) = 0 := by\n  unfold cva\n  norm_num\n\n/-- **Closed-form unilateral CVA under constant exposure and constant hazard**:\nwith hazard survival `hazardSurvival (fun _ => h\u2080) u = exp(-h\u2080 u)`, the CVA\nintegrand collapses to `E\u2080 \u00b7 h\u2080 \u00b7 exp(-(r + h\u2080) u)`, whose antiderivative on\n`[0, T]` gives `(1 - R) \u00b7 E\u2080 \u00b7 (h\u2080 / (r + h\u2080)) \u00b7 (1 - exp(-(r + h\u2080) T))`. The\nhypothesis `r + h\u2080 \u2260 0` avoids the `0/0` degeneracy of `h\u2080 / (r + h\u2080)` under\nLean's division convention; at `r + h\u2080 = 0` the true integral value is\n`E\u2080 \u00b7 h\u2080 \u00b7 T`. -/",
+    "pointers": [
+      "MathFin/FixedIncome/HazardCurve.lean",
+      "MathFin/FixedIncome/Credit.lean",
+      "MathFin/FixedIncome/CDSTimeVarying.lean"
+    ]
+  }
+}

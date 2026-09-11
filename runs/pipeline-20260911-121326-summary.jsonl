@@ -1,0 +1,4 @@
+{"target": "cal-bk-98", "stream": "backlog", "ts": "2026-09-11T12:14:39", "harness": "vibe", "arm": "cron", "tokens": 0, "outcome": "max_rounds", "experience_attempts": 1}
+{"target": "cal-bk-98__hazardSurvival_const_eq_exp", "stream": "", "ts": "2026-09-11T12:19:54", "harness": "vibe", "arm": "decompose", "tokens": 0, "outcome": "max_rounds", "experience_attempts": 1}
+{"target": "cal-bk-98__integral_cva_integrand_const", "stream": "", "ts": "2026-09-11T12:19:54", "harness": "vibe", "arm": "decompose", "tokens": 0, "outcome": "max_rounds", "experience_attempts": 1}
+{"target": "cal-bk-98", "harness": "decompose", "arm": "decompose", "outcome": "max_rounds", "tokens": 0, "ts": "2026-09-11T12:19:58", "leaves_total": 2, "leaves_closed": 0, "reason": "remainder: ['hazardSurvival_const_eq_exp', 'integral_cva_integrand_const']"}
