@@ -38,6 +38,7 @@ bottleneck: it is **filled by hand at merge**, not by the machine.
 <!-- SCOREBOARD:START -->
 | ts | target | arm | engine | outcome | leaves | tokens | refinery min | note |
 |----|--------|-----|--------|---------|--------|--------|--------------|------|
+| 2026-09-15T12:53:57 | cal-bk-75 | decompose | leanstral | max_rounds | 0/0 | 0 |  | skeleton does not elaborate: line 19:5: unknown namespace `MeasureTheory`; line 20:12: unknown namespace `NNReal` |
 | 2026-09-11T12:19:58 | cal-bk-98 | decompose | leanstral | max_rounds | 0/2 | 0 |  | remainder: ['hazardSurvival_const_eq_exp', 'integral_cva_integrand_const'] |
 | 2026-09-09T12:24:57 | cal-bk-93 | decompose | leanstral | max_rounds | 0/2 | 0 |  | remainder: ['binomialPrice_put_deep_itm_lt', 'le_strike_of_deep_itm'] |
 | 2026-09-08T22:33:05 | cal-bk-80 | decompose | leanstral | max_rounds | 0/0 | 0 |  | ENVIRONMENT ARTIFACT, not a split verdict — the REPL lost its Mathlib environment mid-run (container died 2 min later);… |

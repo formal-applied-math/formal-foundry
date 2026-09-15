@@ -1,0 +1,26 @@
+{
+  "id": "mf-riskmeasures-distortion-wang",
+  "name": "Distortion risk measure ρ_g(X)=∫g(S_X) on finite Ω, with the Wang transform g(u)=Φ(Φ⁻¹(u)+λ)",
+  "description": "Finite-Ω distortion risk measure: spectral representation, translation invariance, positive homogeneity, monotonicity, and a Wang-transform distortion instance valid for all λ and concave for λ ≥ 0.",
+  "domain": "mathematical_finance",
+  "code": {
+    "lean": "import MathFin.RiskMeasures.Distortion\n\nopen MathFin\n\n/-- Finite-Ω distortion risk measure: spectral representation, translation invariance, positive homogeneity, monotonicity, and a Wang-transform distortion instance valid for all λ and concave for λ ≥ 0. -/\ntheorem mf_riskmeasures_distortion_wang  :\n    (∀ (n : ℕ) (p : Fin n → ℝ), (∀ i, 0 ≤ p i) → ∑ i, p i = 1 →\n        ∀ (g : ℝ → ℝ), IsDistortion g → ∀ (Q : Fin n → ℝ),\n          distortionRiskFinite g p Q =\n            MathFin.spectralRiskFinite Finset.univ\n              (fun i => g (survivalProb p i) - g (survivalNext p i)) Q)\n    ∧ (∀ (n : ℕ) (p : Fin n → ℝ), (∀ i, 0 ≤ p i) → ∑ i, p i = 1 →\n        ∀ (g : ℝ → ℝ), IsDistortion g → ∀ (Q : Fin n → ℝ) (c : ℝ),\n          distortionRiskFinite g p (fun i => Q i + c) = distortionRiskFinite g p Q + c)\n    ∧ (∀ (n : ℕ) (p : Fin n → ℝ), (∀ i, 0 ≤ p i) → ∑ i, p i = 1 →\n        ∀ (g : ℝ → ℝ), IsDistortion g → ∀ (Q : Fin n → ℝ) (c : ℝ), 0 ≤ c →\n          distortionRiskFinite g p (fun i => c * Q i) = c * distortionRiskFinite g p Q)\n    ∧ (∀ (n : ℕ) (p : Fin n → ℝ), (∀ i, 0 ≤ p i) → ∑ i, p i = 1 →\n        ∀ (g : ℝ → ℝ), IsDistortion g → ∀ (Q Q' : Fin n → ℝ), (∀ i, Q i ≤ Q' i) →\n          distortionRiskFinite g p Q ≤ distortionRiskFinite g p Q')\n    ∧ (∀ lam : ℝ, IsDistortion (wangTransform lam) ∧\n        (0 ≤ lam → ConcaveOn ℝ (Set.Icc (0 : ℝ) 1) (wangTransform lam)))\n    ∧ (∀ (n : ℕ) (z : Fin n → ℝ), Monotone z → ∀ (μ σ : ℝ), 0 ≤ σ →\n        Monotone (fun i => MathFin.gaussianVaR μ σ (z i)) ∧\n        ∀ (p : Fin n → ℝ), (∀ i, 0 ≤ p i) → ∑ i, p i = 1 → ∀ lam : ℝ,\n          distortionRiskFinite (wangTransform lam) p (fun i => MathFin.gaussianVaR μ σ (z i)) =\n            MathFin.spectralRiskFinite Finset.univ\n              (fun i => wangTransform lam (survivalProb p i) - wangTransform lam (survivalNext p i))\n              (fun i => MathFin.gaussianVaR μ σ (z i))) :=\n  MathFin.distortionRiskFinite_spectral_translation_homogeneity_monotone_wang_gaussianVaR\n"
+  },
+  "metadata": {
+    "chapter": 0,
+    "reference": "Distortion risk measure ρ_g(X)=∫g(S_X) on finite Ω, with the Wang transform g(u)=Φ(Φ⁻¹(u)+λ)",
+    "difficulty": "medium",
+    "formalization_status": "full",
+    "formalization_scope": "Full formal proof in MathFin/RiskMeasures/Distortion.lean (autoformalized statement, leanstral proof). Re-export from MathFin. Axioms-clean. Faithful SUBSET of issue #75; deferred to follow-up issues: concave g ⇒ subadditivity (hence coherence) of distortionRiskFinite for general, non-comonotonic loss vectors.",
+    "provenance": {
+      "statement_source": "autoform",
+      "statement_model": "autoform",
+      "source": "leanstral-autoform",
+      "model": "labs-leanstral-1-5",
+      "issue": 75,
+      "deferred": [
+        "concave g ⇒ subadditivity (hence coherence) of distortionRiskFinite for general, non-comonotonic loss vectors"
+      ]
+    }
+  }
+}

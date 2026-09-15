@@ -1,0 +1,2 @@
+{"target": "cal-bk-75", "stream": "backlog", "ts": "2026-09-15T12:40:19", "harness": "vibe", "arm": "cron", "tokens": 0, "outcome": "max_rounds", "experience_attempts": 1}
+{"target": "cal-bk-75", "harness": "decompose", "arm": "decompose", "outcome": "max_rounds", "tokens": 0, "ts": "2026-09-15T12:53:57", "leaves_total": 0, "leaves_closed": 0, "reason": "skeleton does not elaborate: line 19:5: unknown namespace `MeasureTheory`; line 20:12: unknown namespace `NNReal`"}

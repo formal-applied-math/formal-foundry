@@ -1,6 +1,6 @@
 {
-  "toolchain": "leanprover/lean4:v4.32.0",
-  "main_commit": "c419f0f09fd69f7a912b356171e87a111e9cc2d6",
+  "toolchain": "leanprover/lean4:v4.33.0-rc1",
+  "main_commit": "fee10f632016a2d72db0d7d68afcd52448205056",
   "targets": [
     {
       "id": "cal-bk-129",
@@ -11,7 +11,7 @@
       "pointers": [
         "MathFin/BlackScholes/MertonJumpDiffusion.lean"
       ],
-      "input_hash": "04cf5f0d7a9df47d94aa54e5911d91aa3634d19a1f3c7ea18136abb48bccc261",
+      "input_hash": "2453463eebe0904edc7b062ad1613849eddd6f385064b2db80370e5af27cf220",
       "main_module": "MathFin/BlackScholes/MertonJumpDiffusionDelta.lean",
       "benchmark": "benchmarks/mathematical_finance.json",
       "benchmark_id": "mf-merton-jd-delta",
@@ -57,7 +57,7 @@
       "pointers": [
         "MathFin/Foundations/WienerIntegralL2.lean"
       ],
-      "input_hash": "2d1a595bbd5ec24091ef7ef10b2436a2f0cd3fbecc8169cc7555e4801575dd21",
+      "input_hash": "c9d56bcd347dfbac39164f53032ec8580be652f3d1376bfd2bdef5eb2c063ce7",
       "main_module": "MathFin/FixedIncome/WienerFubiniDeterministic.lean",
       "benchmark": "benchmarks/mathematical_finance.json",
       "benchmark_id": "mf-foundations-wiener-fubini-deterministic",
@@ -107,7 +107,7 @@
         "MathFin/BlackScholes/Call.lean",
         "MathFin/BlackScholes/Dividends.lean"
       ],
-      "input_hash": "0c2419b2e12e96410ccede09b5a1a22e70b76d8790684fb6683681f475c6749b",
+      "input_hash": "a06b5eb711e36b559042af47ab782fb37e9eec17096ee46fe9e1724cd17cd70d",
       "main_module": "MathFin/BlackScholes/ForwardStartCall.lean",
       "benchmark": "benchmarks/mathematical_finance.json",
       "benchmark_id": "mf-blackscholes-forward-start-call",
@@ -147,7 +147,7 @@
         "MathFin/BlackScholes/MargrabeGrounding.lean",
         "MathFin/Foundations/BivariateGaussian.lean"
       ],
-      "input_hash": "3767650c58ad5687f1ce04223f9986c510f046c24763020586946815ec9261e3",
+      "input_hash": "11514342d6a2faa28e0fe276ec376652369d50daeace19a3776ce463aa7c44cb",
       "main_module": "MathFin/BlackScholes/BetterOfTwoOption.lean",
       "benchmark": "benchmarks/mathematical_finance.json",
       "benchmark_id": "mf-blackscholes-better-of-two",
@@ -187,7 +187,7 @@
         "MathFin/FixedIncome/YieldCurve.lean",
         "MathFin/Futures/Black76.lean"
       ],
-      "input_hash": "e3572a5fac671c3df93427d7f46af65193ca0d3be1ec72f894c880c976bf4936",
+      "input_hash": "d4a13013b5be5cdf13e8f5681cdf89f2c43ce28111ff6185ec76eea159b66fa2",
       "main_module": "MathFin/FixedIncome/InterestRateSwap.lean",
       "benchmark": "benchmarks/mathematical_finance.json",
       "benchmark_id": "mf-fixedincome-swap",
@@ -232,7 +232,7 @@
         "MathFin/FixedIncome/ZCB.lean",
         "MathFin/FixedIncome/Immunization.lean"
       ],
-      "input_hash": "cec3b2414c0e3c1d8e7b21b4584e4085872cd28282816ccf4c1e63c147e3cc78",
+      "input_hash": "812ec13be57c1e719b9e10bded12c6d4dff63f485605b842e94d9ba080775523",
       "main_module": "MathFin/FixedIncome/KeyRateDuration.lean",
       "benchmark": "benchmarks/mathematical_finance.json",
       "benchmark_id": "mf-fixedincome-key-rate-duration",
@@ -271,7 +271,7 @@
         "MathFin/Portfolio/CAPMEquilibrium.lean",
         "MathFin/Portfolio/CAPM.lean"
       ],
-      "input_hash": "2c3d5b070bfe17a408e02a0c643f28d75128c74a023653aa19e5b2c4d705dba8",
+      "input_hash": "736bd49f3e5ed780a70e2474b1defa506b5803227bff00d2fd4541ad429b7783",
       "main_module": "MathFin/Portfolio/ArbitragePricingTheory.lean",
       "benchmark": "benchmarks/mathematical_finance.json",
       "benchmark_id": "mf-portfolio-apt-exact-factor-pricing",
@@ -301,6 +301,51 @@
       }
     },
     {
+      "id": "cal-bk-75",
+      "stream": "backlog",
+      "kind": "prove",
+      "sorry_name": "distortionRiskFinite_spectral_translation_homogeneity_monotone_wang_gaussianVaR",
+      "file": "cal-bk-75.lean",
+      "pointers": [
+        "MathFin/RiskMeasures/Spectral.lean",
+        "MathFin/RiskMeasures/Gaussian.lean"
+      ],
+      "input_hash": "5a54d05cdc32f30a12803b60358059ba473c1cebe683109533d7045305a46298",
+      "main_module": "MathFin/RiskMeasures/Distortion.lean",
+      "benchmark": "benchmarks/mathematical_finance.json",
+      "benchmark_id": "mf-riskmeasures-distortion-wang",
+      "source_issue": 75,
+      "deferred": [
+        "concave g \u21d2 subadditivity (hence coherence) of distortionRiskFinite for general, non-comonotonic loss vectors"
+      ],
+      "benchmark_entry": {
+        "id": "mf-riskmeasures-distortion-wang",
+        "name": "Distortion risk measure \u03c1_g(X)=\u222bg(S_X) on finite \u03a9, with the Wang transform g(u)=\u03a6(\u03a6\u207b\u00b9(u)+\u03bb)",
+        "description": "Finite-\u03a9 distortion risk measure: spectral representation, translation invariance, positive homogeneity, monotonicity, and a Wang-transform distortion instance valid for all \u03bb and concave for \u03bb \u2265 0.",
+        "domain": "mathematical_finance",
+        "code": {
+          "lean": "import MathFin.RiskMeasures.Distortion\n\nopen MathFin\n\n/-- Finite-\u03a9 distortion risk measure: spectral representation, translation invariance, positive homogeneity, monotonicity, and a Wang-transform distortion instance valid for all \u03bb and concave for \u03bb \u2265 0. -/\ntheorem mf_riskmeasures_distortion_wang  :\n    (\u2200 (n : \u2115) (p : Fin n \u2192 \u211d), (\u2200 i, 0 \u2264 p i) \u2192 \u2211 i, p i = 1 \u2192\n        \u2200 (g : \u211d \u2192 \u211d), IsDistortion g \u2192 \u2200 (Q : Fin n \u2192 \u211d),\n          distortionRiskFinite g p Q =\n            MathFin.spectralRiskFinite Finset.univ\n              (fun i => g (survivalProb p i) - g (survivalNext p i)) Q)\n    \u2227 (\u2200 (n : \u2115) (p : Fin n \u2192 \u211d), (\u2200 i, 0 \u2264 p i) \u2192 \u2211 i, p i = 1 \u2192\n        \u2200 (g : \u211d \u2192 \u211d), IsDistortion g \u2192 \u2200 (Q : Fin n \u2192 \u211d) (c : \u211d),\n          distortionRiskFinite g p (fun i => Q i + c) = distortionRiskFinite g p Q + c)\n    \u2227 (\u2200 (n : \u2115) (p : Fin n \u2192 \u211d), (\u2200 i, 0 \u2264 p i) \u2192 \u2211 i, p i = 1 \u2192\n        \u2200 (g : \u211d \u2192 \u211d), IsDistortion g \u2192 \u2200 (Q : Fin n \u2192 \u211d) (c : \u211d), 0 \u2264 c \u2192\n          distortionRiskFinite g p (fun i => c * Q i) = c * distortionRiskFinite g p Q)\n    \u2227 (\u2200 (n : \u2115) (p : Fin n \u2192 \u211d), (\u2200 i, 0 \u2264 p i) \u2192 \u2211 i, p i = 1 \u2192\n        \u2200 (g : \u211d \u2192 \u211d), IsDistortion g \u2192 \u2200 (Q Q' : Fin n \u2192 \u211d), (\u2200 i, Q i \u2264 Q' i) \u2192\n          distortionRiskFinite g p Q \u2264 distortionRiskFinite g p Q')\n    \u2227 (\u2200 lam : \u211d, IsDistortion (wangTransform lam) \u2227\n        (0 \u2264 lam \u2192 ConcaveOn \u211d (Set.Icc (0 : \u211d) 1) (wangTransform lam)))\n    \u2227 (\u2200 (n : \u2115) (z : Fin n \u2192 \u211d), Monotone z \u2192 \u2200 (\u03bc \u03c3 : \u211d), 0 \u2264 \u03c3 \u2192\n        Monotone (fun i => MathFin.gaussianVaR \u03bc \u03c3 (z i)) \u2227\n        \u2200 (p : Fin n \u2192 \u211d), (\u2200 i, 0 \u2264 p i) \u2192 \u2211 i, p i = 1 \u2192 \u2200 lam : \u211d,\n          distortionRiskFinite (wangTransform lam) p (fun i => MathFin.gaussianVaR \u03bc \u03c3 (z i)) =\n            MathFin.spectralRiskFinite Finset.univ\n              (fun i => wangTransform lam (survivalProb p i) - wangTransform lam (survivalNext p i))\n              (fun i => MathFin.gaussianVaR \u03bc \u03c3 (z i))) :=\n  MathFin.distortionRiskFinite_spectral_translation_homogeneity_monotone_wang_gaussianVaR\n"
+        },
+        "metadata": {
+          "chapter": 0,
+          "reference": "Distortion risk measure \u03c1_g(X)=\u222bg(S_X) on finite \u03a9, with the Wang transform g(u)=\u03a6(\u03a6\u207b\u00b9(u)+\u03bb)",
+          "difficulty": "medium",
+          "formalization_status": "full",
+          "formalization_scope": "Full formal proof in MathFin/RiskMeasures/Distortion.lean (autoformalized statement, leanstral proof). Re-export from MathFin. Axioms-clean. Faithful SUBSET of issue #75; deferred to follow-up issues: concave g \u21d2 subadditivity (hence coherence) of distortionRiskFinite for general, non-comonotonic loss vectors.",
+          "provenance": {
+            "statement_source": "autoform",
+            "statement_model": "autoform",
+            "source": "leanstral-autoform",
+            "model": "labs-leanstral-1-5",
+            "issue": 75,
+            "deferred": [
+              "concave g \u21d2 subadditivity (hence coherence) of distortionRiskFinite for general, non-comonotonic loss vectors"
+            ]
+          }
+        }
+      }
+    },
+    {
       "id": "cal-bk-80",
       "stream": "backlog",
       "kind": "prove",
@@ -310,7 +355,7 @@
         "MathFin/RiskMeasures/UtilityDerivation.lean",
         "MathFin/RiskMeasures/Gaussian.lean"
       ],
-      "input_hash": "a036d6fb51a42e5dbd12f792f8ebd97e78703dea33af038568000a1eda82a2cb",
+      "input_hash": "3be07106ed5134f9ccab6edcf0506d50c21a1d4c29edcb661562918816647148",
       "main_module": "MathFin/RiskMeasures/CertaintyEquivalent.lean",
       "benchmark": "benchmarks/mathematical_finance.json",
       "benchmark_id": "mf-riskmeasures-certainty-equivalent-cara-gaussian",
@@ -355,7 +400,7 @@
         "MathFin/Actuarial/Insurance.lean",
         "MathFin/Actuarial/Mortality.lean"
       ],
-      "input_hash": "09141255ce79b33b19406bc6580f4e47f1ecc82f0b1aee06faa67a78995eed00",
+      "input_hash": "12b654b9914dc69d4dbc914fd0ff6c19fe134fb1a63be2a7ae41fb29adc0c11d",
       "main_module": "MathFin/Actuarial/LifeAnnuityDue.lean",
       "benchmark": "benchmarks/mathematical_finance.json",
       "benchmark_id": "mf-actuarial-life-annuity-due",
@@ -395,7 +440,7 @@
         "MathFin/Binomial/MertonAmericanCallTree.lean",
         "MathFin/Binomial/Model.lean"
       ],
-      "input_hash": "6d322cbe5144eae18464b359c2b752f2e846010e72a1099831d0d69bc76824bc",
+      "input_hash": "1aa42ab57390b3cd8e3bf4b04e9cef7e7454bc9de99dda11004b4a942e8d5d02",
       "main_module": "MathFin/Binomial/AmericanPutEarlyExercisePremium.lean",
       "benchmark": "benchmarks/mathematical_finance.json",
       "benchmark_id": "mf-binomial-put-early-exercise-premium",
@@ -435,7 +480,7 @@
         "MathFin/FixedIncome/Credit.lean",
         "MathFin/FixedIncome/CDSTimeVarying.lean"
       ],
-      "input_hash": "d603f3b91c8591f40c1b68e581af51a316e0523599fa3eb1469c877f5795f62e",
+      "input_hash": "d25b296250e1ae040d9a807f9dc4100592f8438d362910641f400ea2650917c7",
       "main_module": "MathFin/FixedIncome/CVA.lean",
       "benchmark": "benchmarks/mathematical_finance.json",
       "benchmark_id": "mf-credit-cva-unilateral",
