@@ -301,6 +301,50 @@
       }
     },
     {
+      "id": "cal-bk-74",
+      "stream": "backlog",
+      "kind": "prove",
+      "sorry_name": "entropicRisk_properties",
+      "file": "cal-bk-74.lean",
+      "pointers": [
+        "MathFin/RiskMeasures/CoherentAxioms.lean",
+        "MathFin/RiskMeasures/Spectral.lean",
+        "MathFin/RiskMeasures/Gaussian.lean"
+      ],
+      "input_hash": "673efdd9e4987fdfddf5239b001858b5ec38517a1aecef2f068ac0a6ec705fcd",
+      "main_module": "MathFin/RiskMeasures/Entropic.lean",
+      "benchmark": "benchmarks/mathematical_finance.json",
+      "benchmark_id": "mf-riskmeasures-entropic",
+      "source_issue": 74,
+      "benchmark_entry": {
+        "id": "mf-riskmeasures-entropic",
+        "name": "Entropic risk measure \u03c1_\u03b8(X)=(1/\u03b8)log E[e^{\u2212\u03b8X}]: convexity, cash-invariance, Gaussian form \u2212\u03bc+(\u03b8/2)\u03c3\u00b2",
+        "description": "Entropic risk measure \u03c1_\u03b8(X) = \u03b8\u207b\u00b9 log E[e^{-\u03b8X}]: cash-invariance, convexity, monotonicity, and the Gaussian closed form -\u03bc + (\u03b8/2)\u03c3\u00b2.",
+        "domain": "mathematical_finance",
+        "code": {
+          "lean": "import MathFin.RiskMeasures.Entropic\n\nopen MathFin\n\n/-- Entropic risk measure \u03c1_\u03b8(X) = \u03b8\u207b\u00b9 log E[e^{-\u03b8X}]: cash-invariance, convexity, monotonicity, and the Gaussian closed form -\u03bc + (\u03b8/2)\u03c3\u00b2. -/\ntheorem mf_riskmeasures_entropic {\u03a9 : Type*} [MeasurableSpace \u03a9] (P : Measure \u03a9) [IsProbabilityMeasure P]\n    {\u03b8 : \u211d} (h\u03b8 : 0 < \u03b8) {X Y : \u03a9 \u2192 \u211d}\n    (hX : Integrable (fun \u03c9 => Real.exp (-\u03b8 * X \u03c9)) P)\n    (hY : Integrable (fun \u03c9 => Real.exp (-\u03b8 * Y \u03c9)) P) :\n    (\u2200 c : \u211d, entropicRisk \u03b8 (fun \u03c9 => X \u03c9 + c) P = entropicRisk \u03b8 X P - c) \u2227\n    (\u2200 l : \u211d, l \u2208 Set.Icc (0 : \u211d) 1 \u2192\n      entropicRisk \u03b8 (fun \u03c9 => l * X \u03c9 + (1 - l) * Y \u03c9) P \u2264\n        l * entropicRisk \u03b8 X P + (1 - l) * entropicRisk \u03b8 Y P) \u2227\n    (X \u2264\u1d50[P] Y \u2192 entropicRisk \u03b8 Y P \u2264 entropicRisk \u03b8 X P) \u2227\n    (\u2200 (\u03bc \u03c3 : \u211d), 0 \u2264 \u03c3 \u2192 \u2200 v : \u211d\u22650, (v : \u211d) = \u03c3 ^ 2 \u2192\n      Measure.map X P = gaussianReal \u03bc v \u2192\n      entropicRisk \u03b8 X P = entropicRiskGaussian \u03bc \u03c3 \u03b8) :=\n  MathFin.entropicRisk_properties P h\u03b8 hX hY\n"
+        },
+        "metadata": {
+          "chapter": 0,
+          "reference": "Entropic risk measure \u03c1_\u03b8(X)=(1/\u03b8)log E[e^{\u2212\u03b8X}]: convexity, cash-invariance, Gaussian form \u2212\u03bc+(\u03b8/2)\u03c3\u00b2",
+          "difficulty": "medium",
+          "formalization_status": "full",
+          "formalization_scope": "Full formal proof in MathFin/RiskMeasures/Entropic.lean (autoformalized statement, leanstral proof). Re-export from MathFin. Axioms-clean. Introduces definitions: {'name': 'entropicRisk', 'signature': '{\u03a9 : Type*} \u2192 [MeasurableSpace \u03a9] \u2192 (\u03b8 : \u211d) \u2192 (X : \u03a9 \u2192 \u211d) \u2192 (P : MeasureTheory.Measure \u03a9) \u2192 \u211d', 'meaning': '\u03b8\u207b\u00b9 * Real.log (ProbabilityTheory.mgf X P (-\u03b8)), the entropic risk measure of X at risk-aversion \u03b8', 'built_from': ['ProbabilityTheory.mgf', 'Real.log', 'Inv.inv']}, {'name': 'entropicRiskGaussian', 'signature': '(\u03bc \u03c3 \u03b8 : \u211d) \u2192 \u211d', 'meaning': '-\u03bc + (\u03b8/2) * \u03c3^2, the closed-form entropic risk value for X ~ N(\u03bc, \u03c3\u00b2)', 'built_from': ['Neg.neg', 'HAdd.hAdd', 'HMul.hMul', 'HPow.hPow']} (new-defs review class).",
+          "provenance": {
+            "statement_source": "autoform",
+            "statement_model": "autoform",
+            "source": "leanstral-autoform",
+            "model": "labs-leanstral-1-5",
+            "issue": 74,
+            "new_defs": [
+              "{'name': 'entropicRisk', 'signature': '{\u03a9 : Type*} \u2192 [MeasurableSpace \u03a9] \u2192 (\u03b8 : \u211d) \u2192 (X : \u03a9 \u2192 \u211d) \u2192 (P : MeasureTheory.Measure \u03a9) \u2192 \u211d', 'meaning': '\u03b8\u207b\u00b9 * Real.log (ProbabilityTheory.mgf X P (-\u03b8)), the entropic risk measure of X at risk-aversion \u03b8', 'built_from': ['ProbabilityTheory.mgf', 'Real.log', 'Inv.inv']}",
+              "{'name': 'entropicRiskGaussian', 'signature': '(\u03bc \u03c3 \u03b8 : \u211d) \u2192 \u211d', 'meaning': '-\u03bc + (\u03b8/2) * \u03c3^2, the closed-form entropic risk value for X ~ N(\u03bc, \u03c3\u00b2)', 'built_from': ['Neg.neg', 'HAdd.hAdd', 'HMul.hMul', 'HPow.hPow']}"
+            ]
+          }
+        }
+      }
+    },
+    {
       "id": "cal-bk-75",
       "stream": "backlog",
       "kind": "prove",

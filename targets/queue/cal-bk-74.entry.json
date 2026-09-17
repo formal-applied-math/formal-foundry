@@ -1,0 +1,27 @@
+{
+  "id": "mf-riskmeasures-entropic",
+  "name": "Entropic risk measure ρ_θ(X)=(1/θ)log E[e^{−θX}]: convexity, cash-invariance, Gaussian form −μ+(θ/2)σ²",
+  "description": "Entropic risk measure ρ_θ(X) = θ⁻¹ log E[e^{-θX}]: cash-invariance, convexity, monotonicity, and the Gaussian closed form -μ + (θ/2)σ².",
+  "domain": "mathematical_finance",
+  "code": {
+    "lean": "import MathFin.RiskMeasures.Entropic\n\nopen MathFin\n\n/-- Entropic risk measure ρ_θ(X) = θ⁻¹ log E[e^{-θX}]: cash-invariance, convexity, monotonicity, and the Gaussian closed form -μ + (θ/2)σ². -/\ntheorem mf_riskmeasures_entropic {Ω : Type*} [MeasurableSpace Ω] (P : Measure Ω) [IsProbabilityMeasure P]\n    {θ : ℝ} (hθ : 0 < θ) {X Y : Ω → ℝ}\n    (hX : Integrable (fun ω => Real.exp (-θ * X ω)) P)\n    (hY : Integrable (fun ω => Real.exp (-θ * Y ω)) P) :\n    (∀ c : ℝ, entropicRisk θ (fun ω => X ω + c) P = entropicRisk θ X P - c) ∧\n    (∀ l : ℝ, l ∈ Set.Icc (0 : ℝ) 1 →\n      entropicRisk θ (fun ω => l * X ω + (1 - l) * Y ω) P ≤\n        l * entropicRisk θ X P + (1 - l) * entropicRisk θ Y P) ∧\n    (X ≤ᵐ[P] Y → entropicRisk θ Y P ≤ entropicRisk θ X P) ∧\n    (∀ (μ σ : ℝ), 0 ≤ σ → ∀ v : ℝ≥0, (v : ℝ) = σ ^ 2 →\n      Measure.map X P = gaussianReal μ v →\n      entropicRisk θ X P = entropicRiskGaussian μ σ θ) :=\n  MathFin.entropicRisk_properties P hθ hX hY\n"
+  },
+  "metadata": {
+    "chapter": 0,
+    "reference": "Entropic risk measure ρ_θ(X)=(1/θ)log E[e^{−θX}]: convexity, cash-invariance, Gaussian form −μ+(θ/2)σ²",
+    "difficulty": "medium",
+    "formalization_status": "full",
+    "formalization_scope": "Full formal proof in MathFin/RiskMeasures/Entropic.lean (autoformalized statement, leanstral proof). Re-export from MathFin. Axioms-clean. Introduces definitions: {'name': 'entropicRisk', 'signature': '{Ω : Type*} → [MeasurableSpace Ω] → (θ : ℝ) → (X : Ω → ℝ) → (P : MeasureTheory.Measure Ω) → ℝ', 'meaning': 'θ⁻¹ * Real.log (ProbabilityTheory.mgf X P (-θ)), the entropic risk measure of X at risk-aversion θ', 'built_from': ['ProbabilityTheory.mgf', 'Real.log', 'Inv.inv']}, {'name': 'entropicRiskGaussian', 'signature': '(μ σ θ : ℝ) → ℝ', 'meaning': '-μ + (θ/2) * σ^2, the closed-form entropic risk value for X ~ N(μ, σ²)', 'built_from': ['Neg.neg', 'HAdd.hAdd', 'HMul.hMul', 'HPow.hPow']} (new-defs review class).",
+    "provenance": {
+      "statement_source": "autoform",
+      "statement_model": "autoform",
+      "source": "leanstral-autoform",
+      "model": "labs-leanstral-1-5",
+      "issue": 74,
+      "new_defs": [
+        "{'name': 'entropicRisk', 'signature': '{Ω : Type*} → [MeasurableSpace Ω] → (θ : ℝ) → (X : Ω → ℝ) → (P : MeasureTheory.Measure Ω) → ℝ', 'meaning': 'θ⁻¹ * Real.log (ProbabilityTheory.mgf X P (-θ)), the entropic risk measure of X at risk-aversion θ', 'built_from': ['ProbabilityTheory.mgf', 'Real.log', 'Inv.inv']}",
+        "{'name': 'entropicRiskGaussian', 'signature': '(μ σ θ : ℝ) → ℝ', 'meaning': '-μ + (θ/2) * σ^2, the closed-form entropic risk value for X ~ N(μ, σ²)', 'built_from': ['Neg.neg', 'HAdd.hAdd', 'HMul.hMul', 'HPow.hPow']}"
+      ]
+    }
+  }
+}

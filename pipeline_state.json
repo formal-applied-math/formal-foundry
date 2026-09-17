@@ -14,7 +14,8 @@
     "cal-bk-82",
     "cal-bk-93",
     "cal-bk-98",
-    "cal-bk-75"
+    "cal-bk-75",
+    "cal-bk-74"
   ],
   "history": [
     {
@@ -106,9 +107,15 @@
       "id": "cal-bk-75",
       "outcome": "max_rounds",
       "tokens": 0
+    },
+    {
+      "epoch": 1789648570,
+      "id": "cal-bk-74",
+      "outcome": "max_rounds",
+      "tokens": 0
     }
   ],
-  "last_tick_epoch": 1789476837,
+  "last_tick_epoch": 1789648570,
   "month": "2026-09",
   "tokens_spent_this_month": 0
 }
