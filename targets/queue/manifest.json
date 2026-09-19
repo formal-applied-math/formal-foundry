@@ -1,6 +1,6 @@
 {
   "toolchain": "leanprover/lean4:v4.33.0-rc1",
-  "main_commit": "fee10f632016a2d72db0d7d68afcd52448205056",
+  "main_commit": "333ffdbb4cc46d1e03fbc8980eda5245078c7408",
   "targets": [
     {
       "id": "cal-bk-129",
@@ -469,6 +469,44 @@
             "source": "leanstral-autoform",
             "model": "labs-leanstral-1-5",
             "issue": 82
+          }
+        }
+      }
+    },
+    {
+      "id": "cal-bk-90",
+      "stream": "backlog",
+      "kind": "prove",
+      "sorry_name": "defi_impermanent_loss_formula",
+      "file": "cal-bk-90.lean",
+      "pointers": [
+        "MathFin/DeFi/ConstantProductAMM.lean"
+      ],
+      "input_hash": "18df49c77507d9f7dab1662c6d6a04bab591a9c784c7c1df6176625ca24409b2",
+      "main_module": "MathFin/DeFi/ImpermanentLoss.lean",
+      "benchmark": "benchmarks/mathematical_finance.json",
+      "benchmark_id": "mf-defi-impermanent-loss",
+      "source_issue": 90,
+      "benchmark_entry": {
+        "id": "mf-defi-impermanent-loss",
+        "name": "Add the constant-product impermanent-loss formula IL(r) = 2\u221ar/(1+r) \u2212 1",
+        "description": "Impermanent loss IL(r) = 2\u221ar/(1+r) \u2212 1 for constant-product AMM LPs, with IL(r) \u2264 0 and equality iff r = 1.",
+        "domain": "mathematical_finance",
+        "code": {
+          "lean": "import MathFin.DeFi.ImpermanentLoss\n\nopen MathFin\n\n/-- Impermanent loss IL(r) = 2\u221ar/(1+r) \u2212 1 for constant-product AMM LPs, with IL(r) \u2264 0 and equality iff r = 1. -/\ntheorem mf_defi_impermanent_loss (x\u2080 y\u2080 : \u211d) (hx\u2080 : 0 < x\u2080) (hy\u2080 : 0 < y\u2080) (r : \u211d) (hr : 0 < r) :\n    DeFi.newReserveX x\u2080 r * DeFi.newReserveY y\u2080 r = x\u2080 * y\u2080 \u2227\n      DeFi.internalPrice (DeFi.newReserveX x\u2080 r) (DeFi.newReserveY y\u2080 r)\n        = r * DeFi.internalPrice x\u2080 y\u2080 \u2227\n      0 < DeFi.newReserveX x\u2080 r \u2227 0 < DeFi.newReserveY y\u2080 r \u2227\n      DeFi.impermanentLoss x\u2080 y\u2080 r = 2 * Real.sqrt r / (1 + r) - 1 \u2227\n      DeFi.impermanentLoss x\u2080 y\u2080 r \u2264 0 \u2227\n      (DeFi.impermanentLoss x\u2080 y\u2080 r = 0 \u2194 r = 1) :=\n  MathFin.defi_impermanent_loss_formula x\u2080 y\u2080 hx\u2080 hy\u2080 r hr\n"
+        },
+        "metadata": {
+          "chapter": 0,
+          "reference": "Add the constant-product impermanent-loss formula IL(r) = 2\u221ar/(1+r) \u2212 1",
+          "difficulty": "medium",
+          "formalization_status": "full",
+          "formalization_scope": "Full formal proof in MathFin/DeFi/ImpermanentLoss.lean (autoformalized statement, leanstral proof). Re-export from MathFin. Axioms-clean.",
+          "provenance": {
+            "statement_source": "autoform",
+            "statement_model": "autoform",
+            "source": "leanstral-autoform",
+            "model": "labs-leanstral-1-5",
+            "issue": 90
           }
         }
       }
