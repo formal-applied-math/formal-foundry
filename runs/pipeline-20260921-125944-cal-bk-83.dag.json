@@ -1,0 +1,41 @@
+{
+  "main": {
+    "name": "insuranceEPV_eq_one_sub_d_mul_annuityDueEPV",
+    "statement": "theorem insuranceEPV_eq_one_sub_d_mul_annuityDueEPV (v : \u211d) (S q : \u2115 \u2192 \u211d) (h : isLifeTable S q) (\u03c9 : \u2115) (h\u03c9 : S \u03c9 = 0) : insuranceEPV v q S \u03c9 = 1 - (1 - v) * annuityDueEPV v S \u03c9",
+    "proof": "by\n  have htel : \u2200 n : \u2115, insuranceEPV v q S n = 1 - v ^ n * S n - (1 - v) * annuityDueEPV v S n := by\n    intro n\n    induction n with\n    | zero => exact insuranceEPV_telescoping_base v S q h\n    | succ k ih => exact insuranceEPV_telescoping_step v S q h k ih\n  have h\u03c9' := htel \u03c9\n  rw [h\u03c9, mul_zero, sub_zero] at h\u03c9'\n  exact h\u03c9'"
+  },
+  "leaves": [
+    {
+      "name": "insuranceEPV_telescoping_step",
+      "statement": "theorem insuranceEPV_telescoping_step (v : \u211d) (S q : \u2115 \u2192 \u211d) (h : isLifeTable S q) (k : \u2115) (ih : insuranceEPV v q S k = 1 - v ^ k * S k - (1 - v) * annuityDueEPV v S k) : insuranceEPV v q S (k + 1) = 1 - v ^ (k + 1) * S (k + 1) - (1 - v) * annuityDueEPV v S (k + 1)",
+      "pointers": [
+        "MathFin/Actuarial/Insurance.lean",
+        "MathFin/Actuarial/Mortality.lean"
+      ],
+      "depends_on": [],
+      "applied_to": [
+        "Finset.sum_range_succ",
+        "isLifeTable"
+      ]
+    },
+    {
+      "name": "insuranceEPV_telescoping_base",
+      "statement": "theorem insuranceEPV_telescoping_base (v : \u211d) (S q : \u2115 \u2192 \u211d) (h : isLifeTable S q) : insuranceEPV v q S 0 = 1 - v ^ 0 * S 0 - (1 - v) * annuityDueEPV v S 0",
+      "pointers": [
+        "MathFin/Actuarial/Insurance.lean",
+        "MathFin/Actuarial/Mortality.lean"
+      ],
+      "depends_on": [],
+      "applied_to": [
+        "isLifeTable"
+      ]
+    }
+  ],
+  "target": {
+    "preamble": "-- pointers: MathFin/Actuarial/Insurance.lean, MathFin/Actuarial/Mortality.lean\n-- main-module: MathFin/Actuarial/WholeLifeInsuranceEPV.lean\n-- benchmark: benchmarks/mathematical_finance.json\n-- benchmark-id: mf-actuarial-whole-life-insurance-epv\n-- source-issue: 83\n-- deferred: infinite-series (tsum) formulation of A_x for survival functions with no finite terminal age; n-year pure endowment and endowment insurance EPV as separately named objects\n-- new-defs: {'name': 'annuityDueEPV', 'signature': '\u211d \u2192 (\u2115 \u2192 \u211d) \u2192 \u2115 \u2192 \u211d', 'meaning': 'The n-year life annuity-due EPV \u00e4_x = \u2211_{k=0}^{n-1} v^k \u00b7 \u2096p\u2093 for discount factor v and survival sequence S (S k = \u2096p\u2093).', 'built_from': ['Finset.range', 'Finset.sum', 'HPow.hPow', 'HMul.hMul']}, {'name': 'insuranceEPV', 'signature': '\u211d \u2192 (\u2115 \u2192 \u211d) \u2192 (\u2115 \u2192 \u211d) \u2192 \u2115 \u2192 \u211d', 'meaning': 'The n-year term life insurance EPV A_x = \u2211_{k=0}^{n-1} v^{k+1} \u00b7 \u2096p\u2093 \u00b7 q_{x+k} for discount factor v, mortality sequence q and survival sequence S.', 'built_from': ['Finset.range', 'Finset.sum', 'HPow.hPow', 'HMul.hMul']}, {'name': 'isLifeTable', 'signature': '(\u2115 \u2192 \u211d) \u2192 (\u2115 \u2192 \u211d) \u2192 Prop', 'meaning': 'S and q form a consistent discrete life table: S 0 = 1 and S (k+1) = S k * (1 - q k) for every k.', 'built_from': ['Eq', 'And', 'HMul.hMul', 'HSub.hSub']}\n\n\n\n\n\n\n/-- `S` and `q` form a consistent discrete life table: certain survival at\nissue (`S 0 = 1`) and the standard recursion `\u2096\u208a\u2081p\u2093 = \u2096p\u2093 \u00b7 (1 - q_{x+k})`. -/\nnoncomputable def isLifeTable (S q : \u2115 \u2192 \u211d) : Prop :=\n  S 0 = 1 \u2227 \u2200 k : \u2115, S (k + 1) = S k * (1 - q k)\n\n/-- The `n`-year life annuity-due EPV `\u00e4_x = \u2211_{k=0}^{n-1} v^k \u00b7 \u2096p\u2093`. -/\nnoncomputable def annuityDueEPV (v : \u211d) (S : \u2115 \u2192 \u211d) (n : \u2115) : \u211d :=\n  \u2211 k \u2208 Finset.range n, v ^ k * S k\n\n/-- The `n`-year term life insurance EPV `A_x = \u2211_{k=0}^{n-1} v^{k+1} \u00b7 \u2096p\u2093 \u00b7 q_{x+k}`. -/\nnoncomputable def insuranceEPV (v : \u211d) (q S : \u2115 \u2192 \u211d) (n : \u2115) : \u211d :=\n  \u2211 k \u2208 Finset.range n, v ^ (k + 1) * S k * q k\n\nexample : isLifeTable (fun _ : \u2115 => (1 : \u211d)) (fun _ : \u2115 => 0) :=\n  \u27e8by norm_num, fun k => by norm_num\u27e9\n\nexample : annuityDueEPV 1 (fun _ : \u2115 => (1 : \u211d)) 3 = 3 := by\n  norm_num [annuityDueEPV, Finset.sum_range_succ]\n\nexample : insuranceEPV 1 (fun _ : \u2115 => (0.1 : \u211d)) (fun _ : \u2115 => 1) 2 = 0.2 := by\n  norm_num [insuranceEPV, Finset.sum_range_succ]\n\n/-- **Fundamental identity of life contingencies**: for a discrete life table\n`S, q` with terminal age `\u03c9` (survival to `\u03c9` is impossible, `S \u03c9 = 0`), the\nwhole-life term insurance EPV satisfies `A_x = 1 - d \u00b7 \u00e4_x`, where\n`d = 1 - v` is the discount rate. This is the `n = \u03c9` case of the general\ntelescoping identity `insuranceEPV v q S n = 1 - v^n * S n - d * annuityDueEPV v S n`,\nsimplified by `v^\u03c9 * S \u03c9 = v^\u03c9 * 0 = 0`. -/",
+    "pointers": [
+      "MathFin/Actuarial/Insurance.lean",
+      "MathFin/Actuarial/Mortality.lean"
+    ]
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "toolchain": "leanprover/lean4:v4.33.0-rc1",
+  "main_commit": "",
+  "decompose_parent": "cal-bk-83",
+  "targets": [
+    {
+      "id": "cal-bk-83__insuranceEPV_telescoping_step",
+      "kind": "prove",
+      "file": "leaf-cal-bk-83-insuranceEPV_telescoping_step.lean",
+      "sorry_name": "insuranceEPV_telescoping_step",
+      "pointers": [
+        "MathFin/Actuarial/Insurance.lean",
+        "MathFin/Actuarial/Mortality.lean"
+      ],
+      "parent": "insuranceEPV_eq_one_sub_d_mul_annuityDueEPV",
+      "parent_id": "cal-bk-83",
+      "dag_order": 0,
+      "input_hash": "2a89cefb8dfcb9f2a75333ea52f8fcad4ad5e50b499f350ebad04a9e2a99f550"
+    },
+    {
+      "id": "cal-bk-83__insuranceEPV_telescoping_base",
+      "kind": "prove",
+      "file": "leaf-cal-bk-83-insuranceEPV_telescoping_base.lean",
+      "sorry_name": "insuranceEPV_telescoping_base",
+      "pointers": [
+        "MathFin/Actuarial/Insurance.lean",
+        "MathFin/Actuarial/Mortality.lean"
+      ],
+      "parent": "insuranceEPV_eq_one_sub_d_mul_annuityDueEPV",
+      "parent_id": "cal-bk-83",
+      "dag_order": 1,
+      "input_hash": "29d9e342b37870dc2d27bd7c59651ad3f70a986f94a75ee9d32adb67b4406d7f"
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "id": "mf-actuarial-whole-life-insurance-epv",
+  "name": "Add life insurance EPV A_x and the fundamental identity A_x = 1 − d·ä_x",
+  "description": "Defines the term/whole-life insurance EPV A_x and proves the fundamental identity A_x = 1 - d·ä_x via telescoping.",
+  "domain": "mathematical_finance",
+  "code": {
+    "lean": "import MathFin.Actuarial.WholeLifeInsuranceEPV\n\nopen MathFin\n\n/-- Defines the term/whole-life insurance EPV A_x and proves the fundamental identity A_x = 1 - d·ä_x via telescoping. -/\ntheorem mf_actuarial_whole_life_insurance_epv (v : ℝ) (S q : ℕ → ℝ) (h : isLifeTable S q) (ω : ℕ) (hω : S ω = 0) :\n    insuranceEPV v q S ω = 1 - (1 - v) * annuityDueEPV v S ω :=\n  MathFin.insuranceEPV_eq_one_sub_d_mul_annuityDueEPV v S q h ω hω\n"
+  },
+  "metadata": {
+    "chapter": 0,
+    "reference": "Add life insurance EPV A_x and the fundamental identity A_x = 1 − d·ä_x",
+    "difficulty": "medium",
+    "formalization_status": "full",
+    "formalization_scope": "Full formal proof in MathFin/Actuarial/WholeLifeInsuranceEPV.lean (autoformalized statement, leanstral proof). Re-export from MathFin. Axioms-clean. Faithful SUBSET of issue #83; deferred to follow-up issues: infinite-series (tsum) formulation of A_x for survival functions with no finite terminal age; n-year pure endowment and endowment insurance EPV as separately named objects. Introduces definitions: {'name': 'annuityDueEPV', 'signature': 'ℝ → (ℕ → ℝ) → ℕ → ℝ', 'meaning': 'The n-year life annuity-due EPV ä_x = ∑_{k=0}^{n-1} v^k · ₖpₓ for discount factor v and survival sequence S (S k = ₖpₓ).', 'built_from': ['Finset.range', 'Finset.sum', 'HPow.hPow', 'HMul.hMul']}, {'name': 'insuranceEPV', 'signature': 'ℝ → (ℕ → ℝ) → (ℕ → ℝ) → ℕ → ℝ', 'meaning': 'The n-year term life insurance EPV A_x = ∑_{k=0}^{n-1} v^{k+1} · ₖpₓ · q_{x+k} for discount factor v, mortality sequence q and survival sequence S.', 'built_from': ['Finset.range', 'Finset.sum', 'HPow.hPow', 'HMul.hMul']}, {'name': 'isLifeTable', 'signature': '(ℕ → ℝ) → (ℕ → ℝ) → Prop', 'meaning': 'S and q form a consistent discrete life table: S 0 = 1 and S (k+1) = S k * (1 - q k) for every k.', 'built_from': ['Eq', 'And', 'HMul.hMul', 'HSub.hSub']} (new-defs review class).",
+    "provenance": {
+      "statement_source": "autoform",
+      "statement_model": "autoform",
+      "source": "leanstral-autoform",
+      "model": "labs-leanstral-1-5",
+      "issue": 83,
+      "deferred": [
+        "infinite-series (tsum) formulation of A_x for survival functions with no finite terminal age",
+        "n-year pure endowment and endowment insurance EPV as separately named objects"
+      ],
+      "new_defs": [
+        "{'name': 'annuityDueEPV', 'signature': 'ℝ → (ℕ → ℝ) → ℕ → ℝ', 'meaning': 'The n-year life annuity-due EPV ä_x = ∑_{k=0}^{n-1} v^k · ₖpₓ for discount factor v and survival sequence S (S k = ₖpₓ).', 'built_from': ['Finset.range', 'Finset.sum', 'HPow.hPow', 'HMul.hMul']}",
+        "{'name': 'insuranceEPV', 'signature': 'ℝ → (ℕ → ℝ) → (ℕ → ℝ) → ℕ → ℝ', 'meaning': 'The n-year term life insurance EPV A_x = ∑_{k=0}^{n-1} v^{k+1} · ₖpₓ · q_{x+k} for discount factor v, mortality sequence q and survival sequence S.', 'built_from': ['Finset.range', 'Finset.sum', 'HPow.hPow', 'HMul.hMul']}",
+        "{'name': 'isLifeTable', 'signature': '(ℕ → ℝ) → (ℕ → ℝ) → Prop', 'meaning': 'S and q form a consistent discrete life table: S 0 = 1 and S (k+1) = S k * (1 - q k) for every k.', 'built_from': ['Eq', 'And', 'HMul.hMul', 'HSub.hSub']}"
+      ]
+    }
+  }
+}

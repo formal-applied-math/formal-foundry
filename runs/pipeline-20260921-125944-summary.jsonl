@@ -1,0 +1,4 @@
+{"target": "cal-bk-83", "stream": "backlog", "ts": "2026-09-21T13:16:50", "harness": "vibe", "arm": "cron", "tokens": 0, "outcome": "max_rounds", "experience_attempts": 1}
+{"target": "cal-bk-83__insuranceEPV_telescoping_step", "stream": "", "ts": "2026-09-21T13:23:18", "harness": "vibe", "arm": "decompose", "tokens": 0, "outcome": "max_rounds", "experience_attempts": 1}
+{"target": "cal-bk-83__insuranceEPV_telescoping_base", "stream": "", "ts": "2026-09-21T13:23:19", "harness": "vibe", "arm": "decompose", "tokens": 0, "outcome": "max_rounds", "experience_attempts": 1}
+{"target": "cal-bk-83", "harness": "decompose", "arm": "decompose", "outcome": "max_rounds", "tokens": 0, "ts": "2026-09-21T13:23:20", "leaves_total": 2, "leaves_closed": 0, "reason": "remainder: ['insuranceEPV_telescoping_step', 'insuranceEPV_telescoping_base']"}

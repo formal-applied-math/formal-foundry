@@ -474,6 +474,58 @@
       }
     },
     {
+      "id": "cal-bk-83",
+      "stream": "backlog",
+      "kind": "prove",
+      "sorry_name": "insuranceEPV_eq_one_sub_d_mul_annuityDueEPV",
+      "file": "cal-bk-83.lean",
+      "pointers": [
+        "MathFin/Actuarial/Insurance.lean",
+        "MathFin/Actuarial/Mortality.lean"
+      ],
+      "input_hash": "4769757520f0ef1fe9e2dffd424515e66cdacb7b0cc419b1b0181f1aefe95c70",
+      "main_module": "MathFin/Actuarial/WholeLifeInsuranceEPV.lean",
+      "benchmark": "benchmarks/mathematical_finance.json",
+      "benchmark_id": "mf-actuarial-whole-life-insurance-epv",
+      "source_issue": 83,
+      "deferred": [
+        "infinite-series (tsum) formulation of A_x for survival functions with no finite terminal age",
+        "n-year pure endowment and endowment insurance EPV as separately named objects"
+      ],
+      "benchmark_entry": {
+        "id": "mf-actuarial-whole-life-insurance-epv",
+        "name": "Add life insurance EPV A_x and the fundamental identity A_x = 1 \u2212 d\u00b7\u00e4_x",
+        "description": "Defines the term/whole-life insurance EPV A_x and proves the fundamental identity A_x = 1 - d\u00b7\u00e4_x via telescoping.",
+        "domain": "mathematical_finance",
+        "code": {
+          "lean": "import MathFin.Actuarial.WholeLifeInsuranceEPV\n\nopen MathFin\n\n/-- Defines the term/whole-life insurance EPV A_x and proves the fundamental identity A_x = 1 - d\u00b7\u00e4_x via telescoping. -/\ntheorem mf_actuarial_whole_life_insurance_epv (v : \u211d) (S q : \u2115 \u2192 \u211d) (h : isLifeTable S q) (\u03c9 : \u2115) (h\u03c9 : S \u03c9 = 0) :\n    insuranceEPV v q S \u03c9 = 1 - (1 - v) * annuityDueEPV v S \u03c9 :=\n  MathFin.insuranceEPV_eq_one_sub_d_mul_annuityDueEPV v S q h \u03c9 h\u03c9\n"
+        },
+        "metadata": {
+          "chapter": 0,
+          "reference": "Add life insurance EPV A_x and the fundamental identity A_x = 1 \u2212 d\u00b7\u00e4_x",
+          "difficulty": "medium",
+          "formalization_status": "full",
+          "formalization_scope": "Full formal proof in MathFin/Actuarial/WholeLifeInsuranceEPV.lean (autoformalized statement, leanstral proof). Re-export from MathFin. Axioms-clean. Faithful SUBSET of issue #83; deferred to follow-up issues: infinite-series (tsum) formulation of A_x for survival functions with no finite terminal age; n-year pure endowment and endowment insurance EPV as separately named objects. Introduces definitions: {'name': 'annuityDueEPV', 'signature': '\u211d \u2192 (\u2115 \u2192 \u211d) \u2192 \u2115 \u2192 \u211d', 'meaning': 'The n-year life annuity-due EPV \u00e4_x = \u2211_{k=0}^{n-1} v^k \u00b7 \u2096p\u2093 for discount factor v and survival sequence S (S k = \u2096p\u2093).', 'built_from': ['Finset.range', 'Finset.sum', 'HPow.hPow', 'HMul.hMul']}, {'name': 'insuranceEPV', 'signature': '\u211d \u2192 (\u2115 \u2192 \u211d) \u2192 (\u2115 \u2192 \u211d) \u2192 \u2115 \u2192 \u211d', 'meaning': 'The n-year term life insurance EPV A_x = \u2211_{k=0}^{n-1} v^{k+1} \u00b7 \u2096p\u2093 \u00b7 q_{x+k} for discount factor v, mortality sequence q and survival sequence S.', 'built_from': ['Finset.range', 'Finset.sum', 'HPow.hPow', 'HMul.hMul']}, {'name': 'isLifeTable', 'signature': '(\u2115 \u2192 \u211d) \u2192 (\u2115 \u2192 \u211d) \u2192 Prop', 'meaning': 'S and q form a consistent discrete life table: S 0 = 1 and S (k+1) = S k * (1 - q k) for every k.', 'built_from': ['Eq', 'And', 'HMul.hMul', 'HSub.hSub']} (new-defs review class).",
+          "provenance": {
+            "statement_source": "autoform",
+            "statement_model": "autoform",
+            "source": "leanstral-autoform",
+            "model": "labs-leanstral-1-5",
+            "issue": 83,
+            "deferred": [
+              "infinite-series (tsum) formulation of A_x for survival functions with no finite terminal age",
+              "n-year pure endowment and endowment insurance EPV as separately named objects"
+            ],
+            "new_defs": [
+              "{'name': 'annuityDueEPV', 'signature': '\u211d \u2192 (\u2115 \u2192 \u211d) \u2192 \u2115 \u2192 \u211d', 'meaning': 'The n-year life annuity-due EPV \u00e4_x = \u2211_{k=0}^{n-1} v^k \u00b7 \u2096p\u2093 for discount factor v and survival sequence S (S k = \u2096p\u2093).', 'built_from': ['Finset.range', 'Finset.sum', 'HPow.hPow', 'HMul.hMul']}",
+              "{'name': 'insuranceEPV', 'signature': '\u211d \u2192 (\u2115 \u2192 \u211d) \u2192 (\u2115 \u2192 \u211d) \u2192 \u2115 \u2192 \u211d', 'meaning': 'The n-year term life insurance EPV A_x = \u2211_{k=0}^{n-1} v^{k+1} \u00b7 \u2096p\u2093 \u00b7 q_{x+k} for discount factor v, mortality sequence q and survival sequence S.', 'built_from': ['Finset.range', 'Finset.sum', 'HPow.hPow', 'HMul.hMul']}",
+              "{'name': 'isLifeTable', 'signature': '(\u2115 \u2192 \u211d) \u2192 (\u2115 \u2192 \u211d) \u2192 Prop', 'meaning': 'S and q form a consistent discrete life table: S 0 = 1 and S (k+1) = S k * (1 - q k) for every k.', 'built_from': ['Eq', 'And', 'HMul.hMul', 'HSub.hSub']}"
+            ]
+          }
+        }
+      }
+    },
+    {
       "id": "cal-bk-90",
       "stream": "backlog",
       "kind": "prove",
