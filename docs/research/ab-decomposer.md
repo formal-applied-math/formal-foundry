@@ -38,6 +38,7 @@ bottleneck: it is **filled by hand at merge**, not by the machine.
 <!-- SCOREBOARD:START -->
 | ts | target | arm | engine | outcome | leaves | tokens | refinery min | note |
 |----|--------|-----|--------|---------|--------|--------|--------------|------|
+| 2026-09-23T12:12:27 | cal-bk-91 | decompose | leanstral | max_rounds | 0/0 | 0 |  | skeleton does not elaborate: line 18:5: unknown namespace `MeasureTheory`; line 19:12: unknown namespace `NNReal` |
 | 2026-09-21T13:23:20 | cal-bk-83 | decompose | leanstral | max_rounds | 0/2 | 0 |  | remainder: ['insuranceEPV_telescoping_step', 'insuranceEPV_telescoping_base'] |
 | 2026-09-19T12:16:10 | cal-bk-90 | decompose | leanstral | max_rounds | 0/0 | 0 |  | skeleton does not elaborate: line 18:5: unknown namespace `MeasureTheory`; line 19:12: unknown namespace `NNReal` |
 | 2026-09-17T12:36:10 | cal-bk-74 | decompose | leanstral | max_rounds | 0/0 | 0 |  | skeleton does not elaborate: line 20:5: unknown namespace `MeasureTheory`; line 21:12: unknown namespace `NNReal` |

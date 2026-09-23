@@ -564,6 +564,44 @@
       }
     },
     {
+      "id": "cal-bk-91",
+      "stream": "backlog",
+      "kind": "prove",
+      "sorry_name": "constantMean_spotPrice_eq_marginalRate_and_reducesToConstantProduct",
+      "file": "cal-bk-91.lean",
+      "pointers": [
+        "MathFin/DeFi/ConstantProductAMM.lean"
+      ],
+      "input_hash": "8ae2e4cbd1c4a0f677956af72928137186bc8f9982745c1fa0b39da53643ba15",
+      "main_module": "MathFin/DeFi/ConstantMeanAMM.lean",
+      "benchmark": "benchmarks/mathematical_finance.json",
+      "benchmark_id": "mf-defi-constant-mean-invariant",
+      "source_issue": 91,
+      "benchmark_entry": {
+        "id": "mf-defi-constant-mean-invariant",
+        "name": "Add the constant-mean (Balancer) AMM invariant \u220f B\u1d62^{w\u1d62} and spot price",
+        "description": "Defines the Balancer constant-mean invariant and spot price, derives the spot price as the invariant surface's marginal rate of substitution, and reduces both to the two-token constant-product AMM at equal weights.",
+        "domain": "mathematical_finance",
+        "code": {
+          "lean": "import MathFin.DeFi.ConstantMeanAMM\n\nopen MathFin\n\n/-- Defines the Balancer constant-mean invariant and spot price, derives the spot price as the invariant surface's marginal rate of substitution, and reduces both to the two-token constant-product AMM at equal weights. -/\ntheorem mf_defi_constant_mean_invariant {\u03b9 : Type*} [Fintype \u03b9] [DecidableEq \u03b9] (w B : \u03b9 \u2192 \u211d)\n    (hB : \u2200 i, 0 < B i) (hw : \u2200 i, 0 < w i) (hw1 : \u2211 i, w i = 1)\n    {i j : \u03b9} (hij : i \u2260 j) (x y : \u211d) (hx : 0 < x) (hy : 0 < y) :\n    deriv (fun t => constantMeanInvariant w (Function.update B i t)) (B i)\n        = w i * constantMeanInvariant w B / B i \u2227\n    deriv (fun t => constantMeanInvariant w (Function.update B j t)) (B j)\n        = w j * constantMeanInvariant w B / B j \u2227\n    deriv (fun t => constantMeanInvariant w (Function.update B i t)) (B i) /\n        deriv (fun t => constantMeanInvariant w (Function.update B j t)) (B j)\n        = constantMeanSpotPrice w B i j \u2227\n    (constantMeanInvariant (\u03b9 := Fin 2) ![(1 : \u211d) / 2, 1 / 2] ![x, y]) ^ 2 = x * y \u2227\n    constantMeanSpotPrice (\u03b9 := Fin 2) ![(1 : \u211d) / 2, 1 / 2] ![x, y] 0 1\n        = MathFin.DeFi.internalPrice x y :=\n  MathFin.constantMean_spotPrice_eq_marginalRate_and_reducesToConstantProduct w B hB hw hw1 hij x y hx hy\n"
+        },
+        "metadata": {
+          "chapter": 0,
+          "reference": "Add the constant-mean (Balancer) AMM invariant \u220f B\u1d62^{w\u1d62} and spot price",
+          "difficulty": "medium",
+          "formalization_status": "full",
+          "formalization_scope": "Full formal proof in MathFin/DeFi/ConstantMeanAMM.lean (autoformalized statement, leanstral proof). Re-export from MathFin. Axioms-clean.",
+          "provenance": {
+            "statement_source": "autoform",
+            "statement_model": "autoform",
+            "source": "leanstral-autoform",
+            "model": "labs-leanstral-1-5",
+            "issue": 91
+          }
+        }
+      }
+    },
+    {
       "id": "cal-bk-93",
       "stream": "backlog",
       "kind": "prove",
