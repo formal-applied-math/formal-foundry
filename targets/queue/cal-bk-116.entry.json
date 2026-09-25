@@ -1,0 +1,23 @@
+{
+  "id": "mf-actuarial-survival-force-bridge",
+  "name": "Wire the force-of-mortality calculus to the probabilistic survival model",
+  "description": "Bridges Ito's probabilistic survival ccdf `survive` on a `Survival_Model` to the analytic `survivalFromForce`, and instantiates the bridge at the Gompertz force of mortality.",
+  "domain": "mathematical_finance",
+  "code": {
+    "lean": "import MathFin.Actuarial.SurvivalModel\n\nopen MathFin\n\n/-- Bridges Ito's probabilistic survival ccdf `survive` on a `Survival_Model` to the analytic `survivalFromForce`, and instantiates the bridge at the Gompertz force of mortality. -/\ntheorem mf_actuarial_survival_force_bridge (hX : Measurable X) [IsProbabilityMeasure P] (x : ℝ)\n    (hx : P (SurvivalModel.alive X x) ≠ 0) (μ : ℝ → ℝ) (hμ : Continuous μ)\n    (hderiv : ∀ t, 0 ≤ t →\n      HasDerivAt (fun s ↦ -Real.log (SurvivalModel.survive P X s x)) (μ t) t) :\n    ∀ t, 0 ≤ t → SurvivalModel.survive P X t x = survivalFromForce μ t :=\n  MathFin.survive_eq_survivalFromForce_of_force hX x hx μ hμ hderiv\n"
+  },
+  "metadata": {
+    "chapter": 0,
+    "reference": "Wire the force-of-mortality calculus to the probabilistic survival model",
+    "difficulty": "medium",
+    "formalization_status": "full",
+    "formalization_scope": "Full formal proof in MathFin/Actuarial/SurvivalModel.lean (autoformalized statement, leanstral proof). Re-export from MathFin. Axioms-clean.",
+    "provenance": {
+      "statement_source": "autoform",
+      "statement_model": "autoform",
+      "source": "leanstral-autoform",
+      "model": "labs-leanstral-1-5",
+      "issue": 116
+    }
+  }
+}
