@@ -1,0 +1,23 @@
+{
+  "id": "mf-riskmeasures-arrow-pratt-risk-aversion",
+  "name": "Arrow–Pratt risk-aversion coefficients A(x)=−u''/u', R(x)=−xu''/u'; CARA⇔constant A, CRRA⇔constant R",
+  "description": "Arrow-Pratt absolute/relative risk-aversion coefficients A and R; CARA/CRRA/log constancy; links to acceptance-set translation and Kelly log-growth.",
+  "domain": "mathematical_finance",
+  "code": {
+    "lean": "import MathFin.RiskMeasures.RiskAversion\n\nopen MathFin\n\n/-- Arrow-Pratt absolute/relative risk-aversion coefficients A and R; CARA/CRRA/log constancy; links to acceptance-set translation and Kelly log-growth. -/\ntheorem mf_riskmeasures_arrow_pratt_risk_aversion  :\n    (∀ (a : ℝ), 0 < a → ∀ (x : ℝ),\n        absoluteRiskAversion (fun x => - Real.exp (-(a * x))) x = a) ∧\n    (∀ (γ : ℝ), 0 < γ → γ ≠ 1 → ∀ (x : ℝ), 0 < x →\n        relativeRiskAversion (fun x => Real.rpow x (1 - γ) / (1 - γ)) x = γ) ∧\n    (∀ (x : ℝ), 0 < x → relativeRiskAversion Real.log x = 1) ∧\n    (∀ (a : ℝ), 0 < a →\n        Monotone (fun x => - Real.exp (-(a * x))) ∧\n        ∀ {ι : Type*} (s : Finset ι) (p : ι → ℝ), (∀ i ∈ s, 0 ≤ p i) →\n          ∀ (W : ℝ) (X : ι → ℝ) (c : ℝ), 0 ≤ c →\n            acceptableUnderUtility s p (fun x => - Real.exp (-(a * x))) W X →\n            acceptableUnderUtility s p (fun x => - Real.exp (-(a * x))) W (fun i => X i + c)) ∧\n    (∀ (p : ℝ), 0 ≤ p → p ≤ 1 → ∀ (b f : ℝ),\n        kellyGrowth p b f = ∫ x, Real.log x ∂(kellyReturnMeasure p b f)) :=\n  MathFin._agentic_placeholder\n"
+  },
+  "metadata": {
+    "chapter": 0,
+    "reference": "Arrow–Pratt risk-aversion coefficients A(x)=−u''/u', R(x)=−xu''/u'; CARA⇔constant A, CRRA⇔constant R",
+    "difficulty": "medium",
+    "formalization_status": "full",
+    "formalization_scope": "Full formal proof in MathFin/RiskMeasures/RiskAversion.lean (autoformalized statement, leanstral proof). Re-export from MathFin. Axioms-clean.",
+    "provenance": {
+      "statement_source": "autoform",
+      "statement_model": "autoform",
+      "source": "leanstral-autoform",
+      "model": "labs-leanstral-1-5",
+      "issue": 79
+    }
+  }
+}
