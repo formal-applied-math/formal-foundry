@@ -725,3 +725,23 @@ def test_a_canary_that_cannot_be_reached_counts_as_unhealthy():
     assert environment_canary(PACK, lambda c: {"error": "connection reset"}) is False
     assert environment_canary(PACK, lambda c: {"errors": ["boom"]}) is False
     assert environment_canary(PACK, lambda c: {"errors": [], "sorry_count": 0}) is True
+
+
+# --- a leaf pointer to a module that does not exist empties the environment ----
+
+def test_leaf_pointers_to_missing_modules_are_dropped(tmp_path):
+    """cal-bk-75/74/90/91: the splitter pointed a leaf at the target's own main module,
+    which does not exist until the target is proved. The skeleton imported it, Lean's
+    environment came up empty, and the gate reported `unknown namespace MeasureTheory`."""
+    from decompose import Dag, Node, drop_unresolvable_pointers
+    (tmp_path / "MathFin" / "RiskMeasures").mkdir(parents=True)
+    (tmp_path / "MathFin" / "RiskMeasures" / "Spectral.lean").write_text("")
+    leaf = Node(name="l1", statement="theorem l1 : True := by sorry",
+                pointers=["MathFin/RiskMeasures/Spectral.lean",
+                          "MathFin/RiskMeasures/Distortion.lean"])
+    dag = Dag(main=Node(name="m", statement="theorem m : True := by sorry", is_main=True),
+              leaves=[leaf])
+    logged = []
+    drop_unresolvable_pointers(dag, str(tmp_path), log=logged.append)
+    assert leaf.pointers == ["MathFin/RiskMeasures/Spectral.lean"]
+    assert logged and "Distortion.lean" in logged[0]
