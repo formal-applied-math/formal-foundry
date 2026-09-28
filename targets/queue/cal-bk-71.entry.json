@@ -4,7 +4,7 @@
   "description": "No-arbitrage in an exact multi-factor model forces asset intercepts to be affine in the factor loadings.",
   "domain": "mathematical_finance",
   "code": {
-    "lean": "import MathFin.Portfolio.ArbitragePricingTheory\n\nopen MathFin\n\n/-- No-arbitrage in an exact multi-factor model forces asset intercepts to be affine in the factor loadings. -/\ntheorem mf_portfolio_apt_exact_factor_pricing {ι κ : Type*} (s : Finset ι) (t : Finset κ)\n    (a : ι → ℝ) (β : ι → κ → ℝ)\n    (h_no_arb : ∀ w : ι → ℝ,\n      portfolioReturn s w (fun _ ↦ (1 : ℝ)) = 0 →\n      (∀ k ∈ t, portfolioReturn s w (fun i ↦ β i k) = 0) →\n      portfolioReturn s w a = 0) :\n    ∃ (lam0 : ℝ) (lam : κ → ℝ), ∀ i ∈ s, a i = lam0 + ∑ k ∈ t, β i k * lam k :=\n  MathFin.apt_exact_factor_pricing s t a β h_no_arb\n"
+    "lean": "import MathFin.Portfolio.ArbitragePricingTheory\n\nopen MathFin\nopen MeasureTheory ProbabilityTheory\nopen scoped NNReal ENNReal\n\n/-- No-arbitrage in an exact multi-factor model forces asset intercepts to be affine in the factor loadings. -/\ntheorem mf_portfolio_apt_exact_factor_pricing {ι κ : Type*} (s : Finset ι) (t : Finset κ)\n    (a : ι → ℝ) (β : ι → κ → ℝ)\n    (h_no_arb : ∀ w : ι → ℝ,\n      portfolioReturn s w (fun _ ↦ (1 : ℝ)) = 0 →\n      (∀ k ∈ t, portfolioReturn s w (fun i ↦ β i k) = 0) →\n      portfolioReturn s w a = 0) :\n    ∃ (lam0 : ℝ) (lam : κ → ℝ), ∀ i ∈ s, a i = lam0 + ∑ k ∈ t, β i k * lam k :=\n  MathFin.apt_exact_factor_pricing s t a β h_no_arb\n"
   },
   "metadata": {
     "chapter": 0,

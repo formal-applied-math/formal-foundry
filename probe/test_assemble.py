@@ -107,3 +107,24 @@ def test_ensure_umbrella_import_handles_no_trailing_newline():
         ensure_umbrella_import(main, "MathFin/C.lean", PACK.namespace + ".lean")
         text = open(os.path.join(main, "MathFin.lean")).read()
         assert text == "import MathFin.A\nimport MathFin.C\n"
+
+
+# --- the prover is stamped from the session that ran, not assumed ----------------
+
+def test_stamp_prover_names_the_model_that_proved_the_candidate():
+    from assemble import stamp_prover
+    seed = {"metadata": {
+        "formalization_scope": "Full formal proof in M.lean (autoformalized statement, "
+                               "leanstral proof). Re-export from MathFin. Axioms-clean.",
+        "provenance": {"source": "leanstral-autoform", "model": "labs-leanstral-1-5",
+                       "issue": 129}}}
+    out, changed = stamp_prover(seed, model="claude-sonnet-5")
+    prov = out["metadata"]["provenance"]
+    assert prov["model"] == "claude-sonnet-5"
+    assert prov["source"] == "leanstral-autoform"          # the pipeline's counting marker
+    assert "(autoformalized statement, claude-sonnet-5 proof)" in out["metadata"]["formalization_scope"]
+    assert set(changed) == {"model", "formalization_scope"}
+    assert seed["metadata"]["provenance"]["model"] == "labs-leanstral-1-5"   # copied, not mutated
+    # a Leanstral proof leaves a Leanstral entry exactly as it was
+    same, changed2 = stamp_prover(seed, model="labs-leanstral-1-5")
+    assert changed2 == [] and same == seed

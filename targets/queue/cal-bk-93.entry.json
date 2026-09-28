@@ -4,7 +4,7 @@
   "description": "Deep in-the-money American put price strictly exceeds the European binomial put price when r > 0.",
   "domain": "mathematical_finance",
   "code": {
-    "lean": "import MathFin.Binomial.AmericanPutEarlyExercisePremium\n\nopen MathFin\n\n/-- Deep in-the-money American put price strictly exceeds the European binomial put price when r > 0. -/\ntheorem mf_binomial_put_early_exercise_premium {u d r K S : ℝ} {n : ℕ} (hn : 1 ≤ n) (h : BinomialNoArb u d r)\n    (hr : 0 < r) (hK : 0 < K) (hS : 0 < S) (hdeep : S * u ^ n ≤ K) :\n    binomialPrice u d r (fun S' => max (K - S') 0) n S <\n      americanPrice u d r (fun S' => max (K - S') 0) n S :=\n  MathFin.binomialPrice_lt_americanPrice_put_deep_itm hn h hr hK hS hdeep\n"
+    "lean": "import MathFin.Binomial.AmericanPutEarlyExercisePremium\n\nopen MathFin\nopen MeasureTheory ProbabilityTheory\nopen scoped NNReal ENNReal\n\n/-- Deep in-the-money American put price strictly exceeds the European binomial put price when r > 0. -/\ntheorem mf_binomial_put_early_exercise_premium {u d r K S : ℝ} {n : ℕ} (hn : 1 ≤ n) (h : BinomialNoArb u d r)\n    (hr : 0 < r) (hK : 0 < K) (hS : 0 < S) (hdeep : S * u ^ n ≤ K) :\n    binomialPrice u d r (fun S' => max (K - S') 0) n S <\n      americanPrice u d r (fun S' => max (K - S') 0) n S :=\n  MathFin.binomialPrice_lt_americanPrice_put_deep_itm hn h hr hK hS hdeep\n"
   },
   "metadata": {
     "chapter": 0,

@@ -4,7 +4,7 @@
   "description": "Unilateral CVA as a recovery-adjusted exposure integral against the hazard default density, with closed form for constant exposure and hazard.",
   "domain": "mathematical_finance",
   "code": {
-    "lean": "import MathFin.FixedIncome.CVA\n\nopen MathFin\n\n/-- Unilateral CVA as a recovery-adjusted exposure integral against the hazard default density, with closed form for constant exposure and hazard. -/\ntheorem mf_credit_cva_unilateral {E₀ R r h₀ T : ℝ} (hrh : r + h₀ ≠ 0) :\n    cva (fun _ => E₀) R r (fun _ => h₀) T =\n      (1 - R) * E₀ * (h₀ / (r + h₀)) * (1 - Real.exp (-(r + h₀) * T)) :=\n  MathFin.cva_const_const hrh\n"
+    "lean": "import MathFin.FixedIncome.CVA\n\nopen MathFin\nopen MeasureTheory ProbabilityTheory\nopen scoped NNReal ENNReal\n\n/-- Unilateral CVA as a recovery-adjusted exposure integral against the hazard default density, with closed form for constant exposure and hazard. -/\ntheorem mf_credit_cva_unilateral {E₀ R r h₀ T : ℝ} (hrh : r + h₀ ≠ 0) :\n    cva (fun _ => E₀) R r (fun _ => h₀) T =\n      (1 - R) * E₀ * (h₀ / (r + h₀)) * (1 - Real.exp (-(r + h₀) * T)) :=\n  MathFin.cva_const_const hrh\n"
   },
   "metadata": {
     "chapter": 0,

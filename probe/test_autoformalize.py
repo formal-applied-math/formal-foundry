@@ -798,6 +798,10 @@ def test_emit_entry_reexport_and_provenance():
     assert "theorem mf_fi_fra" in code                  # dashes -> underscores
     assert "MathFin.fra_value hP₂ hδ" in code           # applies the module lemma, explicit args only
     assert "sorry" not in code                          # a re-export, not a proof
+    # the statement is copied verbatim, so the entry needs the module's house opens:
+    # without them cal-bk-129's `(Λ : ℝ≥0)` parsed as the Prop `ℝ ≥ 0` at the ledger
+    for line in PACK.opens:
+        assert line in code
 
 
 def test_emit_placement_dict():

@@ -90,16 +90,30 @@ else
   CLOSE_KW="closes"; CLOSE_LINE="closes #$ISSUE"; TITLE_SUFFIX="(closes #$ISSUE)"
 fi
 
-# Author (leanstral) provenance strings for the commit + PR body. (The autop
-# scout path — draft PRs, `.scout` sidecars, `refs`-not-`closes` — was removed
-# with autop itself; every candidate now comes from the vibe ⇄ lean-lsp-mcp
-# author prover and is axiom-guarded by the gate.)
-MODEL="${MODEL:-labs-leanstral-1-5}"   # the prover, for attribution + the PR body
+# The prover, READ from the session that ran — never assumed. This block used to say
+# "Proved by Leanstral" for every candidate; from 2026-09-28 the prover is whatever
+# `[prover] engine` selected (Claude by default), and cal-bk-129 — the first proof in two
+# months — was claude-sonnet-5's. The commit and PR body name the real prover, and so does
+# the entry's provenance (`stamp_prover`, below). Attribution rule: the prover is NAMED;
+# only a Leanstral proof keeps the `Co-Authored-By` trailer, Claude is never a co-author.
+# (The autop scout path — draft PRs, `.scout` sidecars, `refs`-not-`closes` — was removed
+# with autop itself; every candidate is axiom-guarded by the gate.)
+PROVER_JSON="$(cd "$FOUNDRY/probe" && python3 vibe_prove.py prover-of --run-tag "$TAG" \
+  --id "$ID" --config "$FOUNDRY/pipeline.toml")"
+PROVER_ENGINE="$(printf '%s' "$PROVER_JSON" | python3 -c 'import sys,json;print(json.load(sys.stdin)["engine"])')"
+MODEL="${MODEL:-$(printf '%s' "$PROVER_JSON" | python3 -c 'import sys,json;print(json.load(sys.stdin)["model"])')}"
 PR_FLAGS=()
-PROVER_DESC="Proved by Leanstral (${MODEL}) via the formal-foundry autoform pipeline; human-reviewed before merge."
-COMMIT_TRAILER=(-m "Co-Authored-By: Leanstral <${MODEL}@users.noreply.mistral.ai>")
-PROVENANCE_DESC="leanstral"
-BODY_INTRO="this pr was produced by the autoform pipeline (leanstral $MODEL), then assembled and validated green in ci."
+COMMIT_TRAILER=()
+case "$PROVER_ENGINE" in
+  leanstral)
+    PROVER_NAME="Leanstral (${MODEL})"
+    COMMIT_TRAILER=(-m "Co-Authored-By: Leanstral <${MODEL}@users.noreply.mistral.ai>") ;;
+  claude) PROVER_NAME="Claude (${MODEL})" ;;
+  *)      PROVER_NAME="${MODEL}" ;;
+esac
+PROVER_DESC="Proved by ${PROVER_NAME} via the formal-foundry autoform pipeline; human-reviewed before merge."
+PROVENANCE_DESC="$PROVER_ENGINE"
+BODY_INTRO="this pr was produced by the autoform pipeline (prover: ${PROVER_NAME}), then assembled and validated green in ci."
 PROOF_BULLET="- \`$MODULE\` — the proof (axioms-clean; the probe's axiom guard passed)."
 
 FOUNDRY_SLUG="${FOUNDRY_REPO:-formal-applied-math/formal-foundry}"
@@ -127,12 +141,12 @@ transient() {  # infra/transient failure (network, gh, docker pull): no issue, n
 cd "$MAIN"
 BRANCH="autoform/$ID-$TAG"
 git checkout -B "$BRANCH"
-python3 - "$CAND" "$QUEUE" "$ID" "$MAIN" "$FOUNDRY/probe" "$FOUNDRY/runs/$TAG-$ID.entry.json" "$DOMAIN_NAME" <<'PY' || exit 1
+python3 - "$CAND" "$QUEUE" "$ID" "$MAIN" "$FOUNDRY/probe" "$FOUNDRY/runs/$TAG-$ID.entry.json" "$DOMAIN_NAME" "$MODEL" <<'PY' || exit 1
 import json, os, sys
-cand_path, queue_path, tid, main, probe_dir, entry_override, domain_name = sys.argv[1:8]
+cand_path, queue_path, tid, main, probe_dir, entry_override, domain_name, prover_model = sys.argv[1:9]
 sys.path.insert(0, probe_dir)
 import domain_pack
-from assemble import apply_contribution, ensure_umbrella_import
+from assemble import apply_contribution, ensure_umbrella_import, stamp_prover
 # the pack is passed DOWN (2026-08-16 refactor); this heredoc was missed by it, so the
 # first real pass after that date would have crashed here and — treated as transient —
 # been re-proved every tick without ever opening a PR.
@@ -146,6 +160,9 @@ if os.path.exists(entry_override):
     print("[open-pr] using strengthened entry (unused hypotheses stripped)", file=sys.stderr)
 else:
     entry = target["benchmark_entry"]  # authored in the seed manifest
+entry, stamped = stamp_prover(entry, model=prover_model)
+if stamped:
+    print(f"[open-pr] provenance: prover is {prover_model} ({stamped})", file=sys.stderr)
 code = open(cand_path, encoding="utf-8").read()
 written = apply_contribution(pack, code, target, entry, main)
 written += ensure_umbrella_import(main, target["main_module"], f"{pack.namespace}.lean")
