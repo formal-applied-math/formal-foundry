@@ -4,21 +4,7 @@
     "cal-bk-85",
     "cal-bk-161",
     "cal-bk-162",
-    "cal-bk-144",
-    "cal-bk-129",
-    "cal-bk-56",
-    "cal-bk-57",
-    "cal-bk-69",
-    "cal-bk-71",
-    "cal-bk-80",
-    "cal-bk-82",
-    "cal-bk-93",
-    "cal-bk-98",
-    "cal-bk-75",
-    "cal-bk-74",
-    "cal-bk-90",
-    "cal-bk-83",
-    "cal-bk-91"
+    "cal-bk-144"
   ],
   "history": [
     {
@@ -50,93 +36,109 @@
       "id": "cal-bk-144",
       "outcome": "max_rounds",
       "tokens": 0
-    },
+    }
+  ],
+  "last_tick_epoch": 1790165547,
+  "month": "2026-09",
+  "tokens_spent_this_month": 0,
+  "voided": [
     {
       "epoch": 1787144348,
       "id": "cal-bk-129",
       "outcome": "max_rounds",
-      "tokens": 0
+      "tokens": 0,
+      "voided": "prover never started: scripts/leanstral-vibe.sh raised TypeError (build_system_prompt() missing 'pack', from 071a849, 2026-08-16) before vibe ran; check=False discarded the exit code and the untouched stub was scored max_rounds. Voided 2026-09-27 \u2014 see docs/research/2026-09-27-prover-outage-postmortem.md"
     },
     {
       "epoch": 1787469512,
       "id": "cal-bk-56",
       "outcome": "max_rounds",
-      "tokens": 0
+      "tokens": 0,
+      "voided": "prover never started: scripts/leanstral-vibe.sh raised TypeError (build_system_prompt() missing 'pack', from 071a849, 2026-08-16) before vibe ran; check=False discarded the exit code and the untouched stub was scored max_rounds. Voided 2026-09-27 \u2014 see docs/research/2026-09-27-prover-outage-postmortem.md"
     },
     {
       "epoch": 1787855122,
       "id": "cal-bk-57",
       "outcome": "max_rounds",
-      "tokens": 0
+      "tokens": 0,
+      "voided": "prover never started: scripts/leanstral-vibe.sh raised TypeError (build_system_prompt() missing 'pack', from 071a849, 2026-08-16) before vibe ran; check=False discarded the exit code and the untouched stub was scored max_rounds. Voided 2026-09-27 \u2014 see docs/research/2026-09-27-prover-outage-postmortem.md"
     },
     {
       "epoch": 1788184988,
       "id": "cal-bk-69",
       "outcome": "max_rounds",
-      "tokens": 0
+      "tokens": 0,
+      "voided": "prover never started: scripts/leanstral-vibe.sh raised TypeError (build_system_prompt() missing 'pack', from 071a849, 2026-08-16) before vibe ran; check=False discarded the exit code and the untouched stub was scored max_rounds. Voided 2026-09-27 \u2014 see docs/research/2026-09-27-prover-outage-postmortem.md"
     },
     {
       "epoch": 1788435418,
       "id": "cal-bk-71",
       "outcome": "max_rounds",
-      "tokens": 0
+      "tokens": 0,
+      "voided": "prover never started: scripts/leanstral-vibe.sh raised TypeError (build_system_prompt() missing 'pack', from 071a849, 2026-08-16) before vibe ran; check=False discarded the exit code and the untouched stub was scored max_rounds. Voided 2026-09-27 \u2014 see docs/research/2026-09-27-prover-outage-postmortem.md"
     },
     {
       "epoch": 1788605477,
       "id": "cal-bk-80",
       "outcome": "max_rounds",
-      "tokens": 0
+      "tokens": 0,
+      "voided": "prover never started: scripts/leanstral-vibe.sh raised TypeError (build_system_prompt() missing 'pack', from 071a849, 2026-08-16) before vibe ran; check=False discarded the exit code and the untouched stub was scored max_rounds. Voided 2026-09-27 \u2014 see docs/research/2026-09-27-prover-outage-postmortem.md"
     },
     {
       "epoch": 1788785242,
       "id": "cal-bk-82",
       "outcome": "max_rounds",
-      "tokens": 0
+      "tokens": 0,
+      "voided": "prover never started: scripts/leanstral-vibe.sh raised TypeError (build_system_prompt() missing 'pack', from 071a849, 2026-08-16) before vibe ran; check=False discarded the exit code and the untouched stub was scored max_rounds. Voided 2026-09-27 \u2014 see docs/research/2026-09-27-prover-outage-postmortem.md"
     },
     {
       "epoch": 1788956697,
       "id": "cal-bk-93",
       "outcome": "max_rounds",
-      "tokens": 0
+      "tokens": 0,
+      "voided": "prover never started: scripts/leanstral-vibe.sh raised TypeError (build_system_prompt() missing 'pack', from 071a849, 2026-08-16) before vibe ran; check=False discarded the exit code and the untouched stub was scored max_rounds. Voided 2026-09-27 \u2014 see docs/research/2026-09-27-prover-outage-postmortem.md"
     },
     {
       "epoch": 1789129198,
       "id": "cal-bk-98",
       "outcome": "max_rounds",
-      "tokens": 0
+      "tokens": 0,
+      "voided": "prover never started: scripts/leanstral-vibe.sh raised TypeError (build_system_prompt() missing 'pack', from 071a849, 2026-08-16) before vibe ran; check=False discarded the exit code and the untouched stub was scored max_rounds. Voided 2026-09-27 \u2014 see docs/research/2026-09-27-prover-outage-postmortem.md"
     },
     {
       "epoch": 1789476837,
       "id": "cal-bk-75",
       "outcome": "max_rounds",
-      "tokens": 0
+      "tokens": 0,
+      "voided": "prover never started: scripts/leanstral-vibe.sh raised TypeError (build_system_prompt() missing 'pack', from 071a849, 2026-08-16) before vibe ran; check=False discarded the exit code and the untouched stub was scored max_rounds. Voided 2026-09-27 \u2014 see docs/research/2026-09-27-prover-outage-postmortem.md"
     },
     {
       "epoch": 1789648570,
       "id": "cal-bk-74",
       "outcome": "max_rounds",
-      "tokens": 0
+      "tokens": 0,
+      "voided": "prover never started: scripts/leanstral-vibe.sh raised TypeError (build_system_prompt() missing 'pack', from 071a849, 2026-08-16) before vibe ran; check=False discarded the exit code and the untouched stub was scored max_rounds. Voided 2026-09-27 \u2014 see docs/research/2026-09-27-prover-outage-postmortem.md"
     },
     {
       "epoch": 1789820170,
       "id": "cal-bk-90",
       "outcome": "max_rounds",
-      "tokens": 0
+      "tokens": 0,
+      "voided": "prover never started: scripts/leanstral-vibe.sh raised TypeError (build_system_prompt() missing 'pack', from 071a849, 2026-08-16) before vibe ran; check=False discarded the exit code and the untouched stub was scored max_rounds. Voided 2026-09-27 \u2014 see docs/research/2026-09-27-prover-outage-postmortem.md"
     },
     {
       "epoch": 1789997000,
       "id": "cal-bk-83",
       "outcome": "max_rounds",
-      "tokens": 0
+      "tokens": 0,
+      "voided": "prover never started: scripts/leanstral-vibe.sh raised TypeError (build_system_prompt() missing 'pack', from 071a849, 2026-08-16) before vibe ran; check=False discarded the exit code and the untouched stub was scored max_rounds. Voided 2026-09-27 \u2014 see docs/research/2026-09-27-prover-outage-postmortem.md"
     },
     {
       "epoch": 1790165547,
       "id": "cal-bk-91",
       "outcome": "max_rounds",
-      "tokens": 0
+      "tokens": 0,
+      "voided": "prover never started: scripts/leanstral-vibe.sh raised TypeError (build_system_prompt() missing 'pack', from 071a849, 2026-08-16) before vibe ran; check=False discarded the exit code and the untouched stub was scored max_rounds. Voided 2026-09-27 \u2014 see docs/research/2026-09-27-prover-outage-postmortem.md"
     }
-  ],
-  "last_tick_epoch": 1790165547,
-  "month": "2026-09",
-  "tokens_spent_this_month": 0
+  ]
 }

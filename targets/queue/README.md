@@ -88,6 +88,22 @@ Retired on this bar:
   The non-vacuous version of #128 needs jumps as actual random variables rather than
   `mertonSpot`'s abstract `k`, which is a corpus development, not a stub.
 
+- **#116** (Ito's `Survival_Model` force-of-mortality bridge, retired 2026-09-27). The stub
+  never elaborated — it used `SurvivalModel.alive`/`survive` without importing
+  `MathFin/Actuarial/SurvivalModel.lean` — and blocked the whole queue from 2026-09-25.
+  It also named that EXISTING module as its `main-module` (open-pr would have overwritten
+  it), carried two theorems, and a two-sided `HasDerivAt` at `t = 0` that forces
+  `μ 0 = 0` (which makes the Gompertz corollary's hypotheses unsatisfiable). The drafter
+  now elaborates what it stages, keeps imports of existing modules, and refuses an
+  existing main module, so the issue is re-drafted rather than repaired by hand.
+
+Flagged, not retired:
+
+- **#144** (`wienerFubini_deterministic`, attempted 2026-07-28). The only real prover
+  attempts since July stop at exactly the step the statement makes underivable: `hg`
+  pins `g` through pointwise values of choice-selected `Lp` representatives, against the
+  house rule to state `Lp`-class facts in `=ᵐ` form. Restate before retrying.
+
 Removed as COMPLETED (a different thing from retired on the bar above):
 
 - **#161 / #162** (`gain-to-pain`, `upside-capture`, removed 2026-08-18). Both were
@@ -98,6 +114,9 @@ Removed as COMPLETED (a different thing from retired on the bar above):
   targets were failing activation for every live one. That is how a freshly seeded
   `cal-bk-71` sat unactivatable behind work that had already shipped
   (run 32094892342).
+
+- **#66** (interest-rate swap par identity, removed 2026-09-27): merged as formal-mathfin
+  `a056ac5` on 2026-07-18; its stub had stayed in the queue since.
 
   The queue holds work to do, not history: provenance for a merged target lives in
   the corpus, in `pipeline_state.json`'s history, and on the PR. Delete the pair

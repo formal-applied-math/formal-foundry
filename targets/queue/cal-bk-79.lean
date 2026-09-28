@@ -48,7 +48,7 @@ example (x : ℝ) : relativeRiskAversion (fun x : ℝ => x) x = 0 := by
 and for CRRA/log (relative), plus the two corollaries linking risk aversion to
 acceptance-set translation invariance (via `acceptableUnderUtility_monotone_translation`)
 and to the Kelly log-growth objective (via `integral_log_kellyReturnMeasure`). -/
-theorem _agentic_placeholder :
+theorem arrow_pratt_risk_aversion_constancy_and_links :
     (∀ (a : ℝ), 0 < a → ∀ (x : ℝ),
         absoluteRiskAversion (fun x => - Real.exp (-(a * x))) x = a) ∧
     (∀ (γ : ℝ), 0 < γ → γ ≠ 1 → ∀ (x : ℝ), 0 < x →
