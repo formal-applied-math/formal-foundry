@@ -119,3 +119,12 @@ def test_census_ignores_the_ab_arm_log(tmp_path):
     sub = census(str(tmp_path))
     assert sub == bucket_obstructions(*load_rows(str(tmp_path)))
     assert "cal-bk-77" not in {i for f in sub.values() for i in f["issues"]}
+
+
+def test_a_prover_that_never_ran_is_counted_as_infrastructure():
+    """40 crashed attempts (2026-08-19..09-23) used to read `prover-max-rounds 43,
+    infra-indeterminate 0`; recorded as `error`, they must still show up somewhere."""
+    b = bucket_obstructions([], [{"target": "cal-bk-83", "outcome": "error"},
+                                 {"target": "cal-bk-91", "outcome": "max_rounds"}])
+    assert b["infra-indeterminate"]["count"] == 1
+    assert b["prover-max-rounds"]["count"] == 1

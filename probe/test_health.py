@@ -46,3 +46,50 @@ def test_render_names_the_streak_and_the_last_success():
     text = health.render(health.assess(_state("pass", "max_rounds", "max_rounds",
                                               "max_rounds")))
     assert "3" in text and "t0" in text
+
+
+# --- every tick, not just the recorded ones --------------------------------------
+
+def _tick(action, reason=None, outcome=None, infra=False):
+    return {"action": action, "reason": reason, "outcome": outcome, "infra_failure": infra}
+
+
+def test_the_ticks_that_recorded_nothing_are_counted():
+    """2026-07-29..08-18 and 09-25..27: a blocked manifest skipped every tick, and the
+    history check could not see a single one of them."""
+    rows = [_tick("run", outcome="pass")] + [_tick("skip", "no_unattempted_targets")] * 2
+    h = health.assess_ticks(rows)
+    assert h["idle_streak"] == 2 and h["idle_alarm"] is True
+
+
+def test_a_crashed_prover_is_idle_even_when_it_wrote_an_outcome():
+    rows = [_tick("run", outcome="error", infra=True), _tick("run", outcome="error", infra=True)]
+    assert health.assess_ticks(rows)["idle_alarm"] is True
+
+
+def test_a_real_verdict_resets_the_idle_streak_and_not_due_is_neutral():
+    rows = [_tick("skip", "no_unattempted_targets"), _tick("run", outcome="max_rounds"),
+            _tick("skip", "not_due")]
+    assert health.assess_ticks(rows)["idle_streak"] == 0
+
+
+def test_record_tick_round_trips_and_never_raises_on_shell_input(tmp_path):
+    path = str(tmp_path / "ticks.jsonl")
+    health.record_tick(path, tag="t1", action="run", target="cal-bk-83", outcome="",
+                       infra_failure="1", infra_reason="prover canary failed", exit_code="1")
+    health.record_tick(path, exit_code="not-a-number")
+    rows = health.load_ticks(path)
+    assert rows[0]["infra_failure"] is True and rows[0]["outcome"] is None
+    assert rows[1]["action"] == "aborted" and rows[1]["exit_code"] == -1
+
+
+def test_the_cli_fails_the_job_on_an_idle_alarm(tmp_path):
+    import json
+    state = tmp_path / "state.json"
+    state.write_text(json.dumps(_state("pass")))
+    ticks = tmp_path / "ticks.jsonl"
+    for _ in range(2):
+        health.main(["record-tick", "--ticks", str(ticks), "--action", "skip",
+                     "--reason", "no_unattempted_targets"])
+    assert health.main(["--state", str(state), "--ticks", str(ticks), "--fail-on-alarm"]) == 1
+    assert health.main(["--state", str(state), "--fail-on-alarm"]) == 0   # history alone: blind

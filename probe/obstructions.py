@@ -73,12 +73,19 @@ def _refill_family(row: dict) -> str | None:
 
 
 def _summary_family(row: dict) -> str | None:
-    """Obstruction family for a prover `*-summary.jsonl` row (None on a pass)."""
+    """Obstruction family for a prover `*-summary.jsonl` row (None on a pass).
+
+    `error` is an attempt the machinery could not make — the prover never started, the
+    daemon could not gate. It used to map to nothing, so the census that names "the fix
+    the pipeline needs next" could not see an outage: forty crashed attempts read as
+    `prover-max-rounds 43, infra-indeterminate 0`."""
     out = row.get("outcome", "")
     if out in ("max_rounds", "budget", "budget_exhausted"):
         return "prover-max-rounds"
     if out in ("fail_assembly",):
         return "gate-fail"
+    if out == "error":
+        return "infra-indeterminate"
     return None
 
 
