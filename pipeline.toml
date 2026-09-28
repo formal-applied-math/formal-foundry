@@ -5,14 +5,14 @@
 # the cap is charged whether or not the attempt spends it, so the allowance is a
 # hard ceiling on issues/month, not an estimate).
 #
-# Cadence: 1 issue / 2 days (2026-08-03, was 3). The binding constraint is the
-# 2000-min/month Actions quota, not tokens — ~15 ticks at 46-85 min each leaves
-# about half the quota for hands-on workflow_dispatch runs, which measured 85% of
-# the spend. Sizing: allowance 8M / cap 500k → ≤16 issues/month, just clear of the
-# ~15 the cadence can produce, so the ceiling stops a runaway without binding
-# normal cadence. NOTE it is inert in practice: the live vibe path reports
-# `"tokens": 0` (`vibe_prove.py`), so `record` charges 0 and `can_afford` never
-# trips — real token capture is harvest item T2.
+# Cadence: 1 issue / 2 days (2026-08-03, was 3). This was sized to the 2000-min/month
+# Actions quota of a PRIVATE repo; the foundry has been public since the mid-August
+# rename, where GitHub-hosted standard runners are not metered, so the quota no longer
+# binds and the cadence can be revisited once the loop is producing again.
+# Sizing: allowance 8M / cap 500k → ≤16 issues/month. Tokens are real now: with
+# `[prover] engine = "claude"` the prove session's transcript is parsed and its
+# uncached input + output tokens are charged (cache reads are not — see vibe_prove.py);
+# the dollar cost is recorded beside them in each summary row.
 # difficulty:hard issues escalate to escalate_hard_cap.
 
 # Which library the pipeline targets. The pack in `domains/<name>/` carries the
@@ -49,6 +49,21 @@ reasoning_effort = "high"
 # pool on a big box, so it is a CI-only experiment, not a local flip — see upgrade-backlog.)
 max_turns = 60
 
+# Which model proves. Both engines run the same contract: one headless agentic session per
+# target, the same lean-lsp MCP server, the same house doctrine; only the model differs.
+#   claude    — scripts/claude-prove.sh (`claude -p`, CLAUDE_CODE_OAUTH_TOKEN or an API key)
+#   leanstral — scripts/leanstral-vibe.sh (Mistral vibe + `labs-leanstral-1-5`, which
+#               Mistral retires 2026-09-30; keep only if a live endpoint replaces it)
+# The prover had not run since 2026-07-28 when this block was added: the launcher crashed
+# before starting on every tick from 2026-08-19 and each crash was scored `max_rounds`.
+# `canary` proves a trivial theorem through the real path first and turns the tick RED
+# when it does not come back proved, so that cannot happen silently again.
+[prover]
+engine = "claude"
+claude_model = "claude-sonnet-5"   # claude-opus-5-5 for hard targets (costs more of the plan's usage)
+canary = true
+canary_max_turns = 12
+
 # Issue -> stub autoformalizer (the self-feeding refill phase). When the queue has
 # no unattempted target, the tick drafts one from the next `status:ready`+`type:proof`
 # issue: claude drafts+judges+roundtrips a faithful stub, leanstral runs the
@@ -63,6 +78,11 @@ max_issues = 1
 max_attempt_issues = 3
 gate_budget = 20000
 prover_model = "labs-leanstral-1-5"   # leanstral: the kernel gate battery (vacuity / disproof)
+kernel_probes = false      # the vacuity (⊢ False) + disproof (⊢ ¬Concl) probes, run by
+                           # prover_model. OFF: 0 firings in 34+ drafts (all 54 cached verdicts
+                           # negative; the Claude judge caught both false drafts), and
+                           # prover_model retires 2026-09-30 — after which every probe call
+                           # raises and the refill could never stage a draft again.
 formalize_rounds = 3       # round-count cited in formalize-miss telemetry (agentic self-iterates)
 retrieval = true           # feed embedding-retrieved premises into the agentic drafter prompt
 depth_gate = true          # pointers-scoped depth gate: reject a true-but-shallow stub whose
@@ -134,9 +154,11 @@ max_leaves = 3             # tight splits first; a DAG wanting more is usually m
 leaf_max_turns = 40        # vibe turns per leaf (leaves are individually short by design)
 max_reask = 1              # bounded re-decompose rounds on a malformed DAG or a failed skeleton gate
 
-# the drafter: Claude drafts the intent, formalizes agentically (claude -p + lean-lsp,
-# self-validating to elaboration), and judges; Leanstral PROVES. No magistral, no completion
-# path. Needs CLAUDE_CODE_OAUTH_TOKEN (or ANTHROPIC_API_KEY / a local ~/.claude login); with
-# no auth the drafts defer. The only knob is which Claude model drafts.
+# the drafter: Claude drafts the intent, formalizes agentically (claude -p + lean-lsp),
+# and judges; `[prover]` picks who proves. No magistral, no completion path. Needs
+# CLAUDE_CODE_OAUTH_TOKEN (or ANTHROPIC_API_KEY / a local ~/.claude login); with no auth
+# the drafts defer. The only knob is which Claude model drafts. The staged text is now
+# elaborated by the daemon before any other gate (it never was: `check_fn=None`), which is
+# how stubs that did not compile reached the queue and blocked it.
 [drafter]
 claude_model = "claude-sonnet-5"

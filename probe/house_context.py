@@ -251,3 +251,41 @@ def extract_signatures(main_repo: str, modules: list[str], max_per_module: int =
         if pack:
             return pack
     return _regex_pack(main_repo, modules, max_per_module)
+
+
+# --- CLI: the shell launchers' only way in -------------------------------------
+# The prover launchers used to build the doctrine with an inline
+# `python3 -c "…print(build_system_prompt('$MAIN'))"`. The 2026-08-16 domain refactor
+# added `pack` to that signature, updated every Python caller and test, and could not see
+# the two callers living inside shell strings: from then on the launcher died with a
+# TypeError before the prover started, and the harness scored the untouched stub as a
+# failed proof for five weeks. A CLI keeps the signature on this side of the boundary.
+
+def main(argv=None) -> int:
+    import argparse
+    import sys
+
+    import domain_pack
+    ap = argparse.ArgumentParser(description="prover doctrine assembly (for the launchers)")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    d = sub.add_parser("doctrine", help="write the prover system prompt for a target repo")
+    d.add_argument("--main-repo", required=True)
+    d.add_argument("--domain", default=None, help="domain pack name (default: pipeline.toml)")
+    d.add_argument("--config", default=None, help="pipeline.toml, for `[domain] name`")
+    d.add_argument("--out", default=None, help="write to this file instead of stdout")
+    args = ap.parse_args(argv)
+    pack = domain_pack.load(args.domain or domain_pack.name_from_config(args.config or ""))
+    text = build_system_prompt(args.main_repo, pack)
+    if not text.strip():
+        print("[house_context] empty doctrine", file=sys.stderr)
+        return 1
+    if args.out:
+        with open(args.out, "w", encoding="utf-8") as f:
+            f.write(text)
+    else:
+        sys.stdout.write(text)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

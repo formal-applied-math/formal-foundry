@@ -239,3 +239,37 @@ def test_pr_claimed_reads_the_issue_number_off_the_target_id():
 
     assert P.pr_claimed({"id": "cal-bk-162"}, repo=PACK.slug, run_fn=fake) is True
     assert "--state" in seen["cmd"] and "open" in seen["cmd"]
+
+
+# --- quarantine is reported as such, not as a stale manifest -------------------
+
+def test_census_separates_quarantined_stubs_from_a_stale_manifest(tmp_path):
+    for n in (1, 2, 3):
+        (tmp_path / f"cal-bk-{n}.lean").write_text("x")
+    census = P.selection_census([{"id": "cal-bk-1"}], {"attempted_issues": []},
+                                queue_dir=str(tmp_path), quarantined=["cal-bk-2"])
+    assert census["quarantined"] == ["cal-bk-2"]
+    assert census["missing_from_candidates"] == ["cal-bk-3"]   # still flagged: truly stale
+
+
+# --- [prover]: who proves ------------------------------------------------------
+
+def test_prover_config_defaults_to_claude_with_a_canary():
+    cfg = P.ProverConfig.load(None)
+    assert cfg.engine == "claude" and cfg.launcher == "claude-prove.sh" and cfg.canary
+
+
+def test_prover_config_rejects_an_unknown_engine(tmp_path):
+    import pytest
+    toml = tmp_path / "p.toml"
+    toml.write_text('[prover]\nengine = "magistral"\n')
+    with pytest.raises(ValueError):
+        P.ProverConfig.load(str(toml))
+
+
+def test_the_live_config_proves_with_claude_and_skips_the_retired_kernel_probes():
+    import os
+    cfg = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       "pipeline.toml")
+    assert P.ProverConfig.load(cfg).engine == "claude"
+    assert P.AutoformalizeConfig.load(cfg).kernel_probes is False

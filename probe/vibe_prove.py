@@ -1,11 +1,17 @@
-"""Prove a queued target with the trained-for vibe ⇄ lean-lsp-mcp harness.
+"""Prove a queued target with one headless agentic session wired to lean-lsp-mcp.
 
 Replaces the text-loop probe on the cron path (see
-`docs/superpowers/specs/2026-07-17-leanstral-vibe-cron-harness-design.md`).
-Leanstral 1.5 was RL-trained to DRIVE lean-lsp-mcp tools (live `lean_goal`,
-`lean_multi_attempt`, on-demand search); here we run one deep headless vibe
-session per target instead of pasting compiler error strings into
-`/chat/completions`.
+`docs/superpowers/specs/2026-07-17-leanstral-vibe-cron-harness-design.md`). The
+model drives lean-lsp-mcp tools (live `lean_goal`, `lean_multi_attempt`, on-demand
+search) in one deep session per target instead of pasting compiler error strings
+into `/chat/completions`. `[prover] engine` picks the launcher: `claude-prove.sh`
+(`claude -p`) or `leanstral-vibe.sh` (Mistral vibe) — same contract, same tools.
+
+Every session leaves evidence — exit code, duration, the transcript, and for Claude
+the parsed turns / tool calls / tokens / cost — and `classify_session` decides from
+it whether the prover RAN. If it did not, the attempt is an infrastructure `error`,
+never a verdict about the target. A canary proves a trivial theorem through the same
+path before each run.
 
 Mechanics (W0-validated):
 - vibe edits files on the HOST from its CWD; the MCP reads goals from `/app` in
@@ -25,6 +31,18 @@ import json
 import os
 import re
 import subprocess
+import time
+
+from probe_lib import has_sorry
+
+#: Exit code of `run` when the canary did not come back proved: the prove path itself is
+#: broken (launcher, auth, MCP, Lean), so nothing it would produce is a verdict about the
+#: target. The tick turns red and records nothing.
+PROVER_CANARY_FAILED = 5
+
+#: The model string each engine proves with, for provenance (the Claude model comes from
+#: `[prover] claude_model`).
+LEANSTRAL_MODEL = "labs-leanstral-1-5"
 
 
 def sanitize_stem(target_id: str) -> str:
@@ -64,6 +82,9 @@ def build_vibe_task(stub_relpath: str, sorry_name: str, context_pack: str = "",
         "to find existing lemmas.",
         "Do NOT change the theorem statement, name, or binders. Consume existing results rather "
         "than reproving them. Stop once the file compiles clean.",
+        "You are working agentically: the file on disk is the only output that is read. Make "
+        "every change by editing it with your tools, and ignore any instruction elsewhere to "
+        "print the file in a ```lean code block.",
     ]
     if context_pack:
         parts.append("\n── EXISTING RESULTS TO CONSUME (do not reprove) ──\n" + context_pack)
@@ -109,31 +130,224 @@ def read_back(host_path: str) -> str | None:
         return None
 
 
-def run_vibe_target(pack, target: dict, *, main_repo: str, context_pack: str,
-                    max_turns: int,
-                    vibe_script: str, run_fn=subprocess.run, state_hints: str = "",
-                    experience: str = "") -> str | None:
-    """Materialize the stub → one headless vibe session (CWD=main_repo) → capture the
-    edited file → delete the scratch. Returns the captured file content (or None).
-    `run_fn` is injected (subprocess.run) so this is unit-testable without vibe/docker.
-    leanstral-vibe.sh brings the lean-lsp service up (daemon down) and injects the
-    house doctrine; the caller flips the Lean slot back to the daemon afterwards."""
+def _read_json(path: str) -> dict | None:
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+def _returncode(proc) -> int:
+    """The launcher's exit status from whatever `run_fn` returned (a CompletedProcess, or
+    an int from a test fake)."""
+    if isinstance(proc, int):
+        return proc
+    rc = getattr(proc, "returncode", 0)
+    return rc if isinstance(rc, int) else 0
+
+
+def run_prover_session(pack, target: dict, *, main_repo: str, context_pack: str,
+                       max_turns: int, launcher: str, run_fn=subprocess.run,
+                       state_hints: str = "", experience: str = "",
+                       log_prefix: str | None = None, env: dict | None = None) -> dict:
+    """Materialize the stub → one headless prover session (CWD=main_repo) → capture the
+    edited file → delete the scratch.
+
+    Returns `{content, rc, duration_s, transcript, launcher_log}`. The exit code and the
+    duration are the point: this used to run the launcher with `check=False`, discard
+    both, and read back the file — so a launcher that crashed before the prover started
+    returned the untouched stub, which was then scored as a failed proof. With
+    `log_prefix`, stdout (the session transcript) and stderr go to
+    `<log_prefix>.transcript.jsonl` / `.launcher.log` so every attempt leaves evidence.
+    `run_fn` is injected (subprocess.run) so this is unit-testable without docker."""
     host, rel = scratch_paths(pack, main_repo, target["id"])
     os.makedirs(os.path.dirname(host), exist_ok=True)
     with open(host, "w", encoding="utf-8") as f:
         f.write(target["statement"])
+    transcript = launcher_log = None
     try:
         task = build_vibe_task(rel, target["sorry_name"], context_pack, state_hints,
                                experience)
-        run_fn([vibe_script, "--agent", "lean", "--auto-approve",
-                "--max-turns", str(max_turns), "-p", task],
-               cwd=main_repo, check=False)
-        return read_back(host)
+        argv = [launcher, "--agent", "lean", "--auto-approve",
+                "--max-turns", str(max_turns), "-p", task]
+        kwargs = {"cwd": main_repo, "check": False}
+        if env is not None:
+            kwargs["env"] = env
+        t0 = time.monotonic()
+        if log_prefix:
+            transcript = log_prefix + ".transcript.jsonl"
+            launcher_log = log_prefix + ".launcher.log"
+            with open(transcript, "w", encoding="utf-8") as out, \
+                    open(launcher_log, "w", encoding="utf-8") as err:
+                try:
+                    proc = run_fn(argv, stdout=out, stderr=err, **kwargs)
+                except OSError as e:     # missing / non-executable launcher
+                    err.write(f"could not start {launcher}: {e}\n")
+                    proc = 127
+        else:
+            try:
+                proc = run_fn(argv, **kwargs)
+            except OSError:
+                proc = 127
+        duration = time.monotonic() - t0
+        return {"content": read_back(host), "rc": _returncode(proc),
+                "duration_s": round(duration, 1), "transcript": transcript,
+                "launcher_log": launcher_log}
     finally:
         try:
             os.remove(host)
         except OSError:
             pass
+
+
+def run_vibe_target(pack, target: dict, *, main_repo: str, context_pack: str,
+                    max_turns: int,
+                    vibe_script: str, run_fn=subprocess.run, state_hints: str = "",
+                    experience: str = "") -> str | None:
+    """The captured file content only — `run_prover_session` without the evidence."""
+    return run_prover_session(pack, target, main_repo=main_repo, context_pack=context_pack,
+                              max_turns=max_turns, launcher=vibe_script, run_fn=run_fn,
+                              state_hints=state_hints, experience=experience)["content"]
+
+
+def parse_claude_transcript(path: str | None) -> dict:
+    """Read a `claude -p --output-format stream-json` transcript into the facts that say
+    whether a session really ran: MCP server status at init, tool calls (and how many were
+    Lean tools), and the final `result` event (turns, error subtype, usage, cost).
+    Tolerant of junk lines — stderr noise, a truncated last line — because a partial
+    transcript is still evidence."""
+    out = {"events": 0, "mcp_servers": {}, "tool_calls": 0, "lean_tool_calls": 0,
+           "result": None, "last_text": ""}
+    if not path:
+        return out
+    try:
+        fh = open(path, encoding="utf-8", errors="replace")
+    except OSError:
+        return out
+    with fh:
+        for line in fh:
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                ev = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(ev, dict):
+                continue
+            out["events"] += 1
+            kind = ev.get("type")
+            if kind == "system" and ev.get("subtype") == "init":
+                for server in ev.get("mcp_servers") or []:
+                    if isinstance(server, dict):
+                        out["mcp_servers"][str(server.get("name"))] = server.get("status")
+            elif kind == "assistant":
+                for block in (ev.get("message") or {}).get("content") or []:
+                    if not isinstance(block, dict):
+                        continue
+                    if block.get("type") == "tool_use":
+                        out["tool_calls"] += 1
+                        if str(block.get("name", "")).startswith("mcp__lean-lsp"):
+                            out["lean_tool_calls"] += 1
+                    elif block.get("type") == "text" and block.get("text"):
+                        out["last_text"] = str(block["text"])[-600:]
+            elif kind == "result":
+                out["result"] = {k: ev.get(k) for k in
+                                 ("subtype", "is_error", "num_turns", "duration_ms",
+                                  "total_cost_usd", "usage")}
+    return out
+
+
+def session_tokens(parsed: dict) -> int:
+    """Tokens charged against the budget: uncached input + output. Cache reads are left
+    out on purpose — a long session re-reads its ~30k-token system prompt every turn, and
+    counting that would exhaust the monthly allowance in a handful of sessions. The full
+    usage and the dollar cost are recorded beside it."""
+    usage = ((parsed.get("result") or {}).get("usage")) or {}
+    try:
+        return int(usage.get("input_tokens", 0) or 0) + int(usage.get("output_tokens", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def session_record(target: dict, sess: dict, *, engine: str, model: str) -> dict:
+    """The persisted `<tag>-<id>.session.json`: what ran, and the evidence that it ran."""
+    rec = {"target": target["id"], "engine": engine, "model": model,
+           "rc": sess["rc"], "duration_s": sess["duration_s"],
+           "identical_to_stub": sess["content"] == target["statement"],
+           "captured_bytes": len(sess["content"] or ""),
+           "transcript": sess.get("transcript"), "launcher_log": sess.get("launcher_log")}
+    if engine == "claude":
+        parsed = parse_claude_transcript(sess.get("transcript"))
+        res = parsed["result"] or {}
+        rec.update(mcp_servers=parsed["mcp_servers"], tool_calls=parsed["tool_calls"],
+                   lean_tool_calls=parsed["lean_tool_calls"], result=parsed["result"],
+                   turns=res.get("num_turns"), cost_usd=res.get("total_cost_usd"),
+                   tokens=session_tokens(parsed), last_text=parsed["last_text"])
+    return rec
+
+
+def classify_session(session: dict | None) -> tuple[bool, str]:
+    """Did the prover actually run? `(True, "")`, or `(False, why)` — in which case the
+    attempt is an infrastructure `error` and never a verdict about the target.
+
+    Every "failure" from 2026-08-19 to 2026-09-23 would have been caught here: the
+    launcher exited 1 in under a second, with no transcript, having never started."""
+    if not session:
+        return False, "no session record: the run phase never reached this target"
+    rc = session.get("rc", 0)
+    if rc != 0:
+        return False, f"the launcher exited rc={rc} (see {session.get('launcher_log')})"
+    if session.get("engine") == "claude":
+        res = session.get("result")
+        if not res:
+            return False, "the transcript has no result event: the session never completed"
+        status = (session.get("mcp_servers") or {}).get("lean-lsp")
+        if not session.get("lean_tool_calls") and status != "connected":
+            return False, f"no Lean tool was available (lean-lsp MCP status: {status})"
+        if res.get("is_error") and res.get("subtype") != "error_max_turns":
+            return False, f"the session ended in error ({res.get('subtype')})"
+        if not session.get("tool_calls"):
+            return False, "the session made no tool calls"
+        return True, ""
+    # vibe/Leanstral writes no structured transcript. A session that ended within
+    # seconds without touching the file did not run.
+    if session.get("identical_to_stub") and (session.get("duration_s") or 0) < 30:
+        return False, "the session ended in under 30s without editing the file"
+    return True, ""
+
+
+# --- the canary --------------------------------------------------------------
+
+CANARY_ID = "foundry-canary"
+CANARY_THEOREM = "foundry_canary"
+
+
+def canary_target(pack) -> dict:
+    """A theorem any prover closes in one step, in exactly the shape of a real stub
+    (module header, `public import Mathlib`, public section, the pack's namespace), so
+    it exercises the same launcher, auth, MCP server and Mathlib environment."""
+    statement = ("module\n\npublic import Mathlib\n\n@[expose] public section\n\n"
+                 f"namespace {pack.namespace}\n\n"
+                 f"theorem {CANARY_THEOREM} (a b : ℕ) : a + b = b + a := by\n  sorry\n\n"
+                 f"end {pack.namespace}\n")
+    return {"id": CANARY_ID, "sorry_name": CANARY_THEOREM, "statement": statement}
+
+
+def judge_canary(target: dict, sess: dict, record: dict) -> tuple[bool, str]:
+    """The canary passed iff the session really ran AND came back with the trivial
+    theorem proved: statement intact, no `sorry` left."""
+    ran, why = classify_session(record)
+    if not ran:
+        return False, why
+    content = sess.get("content") or ""
+    if f"theorem {CANARY_THEOREM}" not in content:
+        return False, "the canary theorem is missing from the captured file"
+    if has_sorry(content):
+        return False, "the canary came back unproved (a one-step theorem)"
+    return True, ""
 
 
 # --- CLI: two phases around the tick's daemon↔lsp flip -----------------------
@@ -198,6 +412,52 @@ def _summarizer():
     return lambda msgs: mistral_chat(msgs, api_key=api_key, max_tokens=800, temperature=0.2)
 
 
+def _prover(args):
+    """(engine, launcher path, model, env for the launcher) from `[prover]`, with the
+    `--engine` flag as a one-shot override."""
+    from pipeline_lib import PROVER_LAUNCHERS, ProverConfig
+    foundry_root, _ = _run_dir()
+    cfg = ProverConfig.load(getattr(args, "config", None))
+    engine = getattr(args, "engine", None) or cfg.engine
+    launcher = os.path.join(foundry_root, "scripts", PROVER_LAUNCHERS[engine])
+    env = dict(os.environ)
+    if engine == "claude":
+        env["CLAUDE_PROVER_MODEL"] = cfg.claude_model
+        model = cfg.claude_model
+    else:
+        model = LEANSTRAL_MODEL
+    return engine, launcher, model, env, cfg
+
+
+def _write_json(path: str, obj: dict) -> None:
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(obj, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+
+
+def _tail(path: str | None, n: int = 25) -> str:
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            return "".join(f.readlines()[-n:])
+    except (OSError, TypeError):
+        return ""
+
+
+def run_canary(pack, *, main_repo: str, launcher: str, engine: str, model: str,
+               run_dir: str, tag: str, max_turns: int, env: dict | None,
+               run_fn=subprocess.run) -> tuple[bool, str]:
+    """Prove the canary through the production path; persist `<tag>-canary.json`."""
+    target = canary_target(pack)
+    prefix = os.path.join(run_dir, f"{tag}-{CANARY_ID}")
+    sess = run_prover_session(pack, target, main_repo=main_repo, context_pack="",
+                              max_turns=max_turns, launcher=launcher, run_fn=run_fn,
+                              log_prefix=prefix, env=env)
+    record = session_record(target, sess, engine=engine, model=model)
+    ok, why = judge_canary(target, sess, record)
+    _write_json(prefix + ".json", {**record, "canary_ok": ok, "canary_reason": why})
+    return ok, why
+
+
 def _cmd_run(args) -> int:
     import domain_pack
     from house_context import extract_signatures
@@ -205,7 +465,22 @@ def _cmd_run(args) -> int:
     pack = domain_pack.load(getattr(args, "domain", None)
                             or domain_pack.name_from_config(
                                 getattr(args, "config", None) or ""))
-    vibe_script = os.path.join(foundry_root, "scripts", "leanstral-vibe.sh")
+    engine, launcher, model, env, prover_cfg = _prover(args)
+    print(f"[vibe-run] prover: {engine} ({model}) via {os.path.basename(launcher)}",
+          flush=True)
+    if prover_cfg.canary and not getattr(args, "no_canary", False):
+        ok, why = run_canary(pack, main_repo=args.main_repo, launcher=launcher,
+                             engine=engine, model=model, run_dir=run_dir, tag=args.run_tag,
+                             max_turns=prover_cfg.canary_max_turns, env=env)
+        if not ok:
+            print(f"::error::[vibe-run] prover CANARY FAILED — {why}. The prove path is "
+                  "broken, so nothing it produced would be a verdict about a target. "
+                  "Nothing was attempted.", flush=True)
+            tail = _tail(os.path.join(run_dir, f"{args.run_tag}-{CANARY_ID}.launcher.log"))
+            if tail:
+                print("[vibe-run] launcher log (tail):\n" + tail, flush=True)
+            return PROVER_CANARY_FAILED
+        print("[vibe-run] canary proved — the prove path is live", flush=True)
     cache = _state_cache(run_dir, getattr(args, "config", None))
     memory = _experience_store(run_dir, getattr(args, "config", None))
     # Cross-target `goal -> tactic` pairs. Empty string until states have recurred, so
@@ -222,16 +497,28 @@ def _cmd_run(args) -> int:
         if notebook:
             print(f"[vibe-run] {target['id']}: carrying {memory.attempts(target['id'])} "
                   f"prior attempt(s) of experience", flush=True)
-        cand = run_vibe_target(pack, target, main_repo=args.main_repo,
-                               context_pack=context_pack,
-                               max_turns=args.max_turns, vibe_script=vibe_script,
-                               state_hints=state_hints, experience=notebook)
-        cand_path = os.path.join(run_dir, f"{args.run_tag}-{target['id']}.candidate")
-        with open(cand_path, "w", encoding="utf-8") as f:
+        prefix = os.path.join(run_dir, f"{args.run_tag}-{target['id']}")
+        sess = run_prover_session(pack, target, main_repo=args.main_repo,
+                                  context_pack=context_pack,
+                                  max_turns=args.max_turns, launcher=launcher,
+                                  state_hints=state_hints, experience=notebook,
+                                  log_prefix=prefix, env=env)
+        cand = sess["content"]
+        with open(prefix + ".candidate", "w", encoding="utf-8") as f:
             f.write(cand or "")
-        removed = bool(cand) and "sorry" not in cand
-        print(f"[vibe-run] {target['id']}: captured {len(cand or '')} bytes, "
-              f"sorry_removed={removed}", flush=True)
+        record = session_record(target, sess, engine=engine, model=model)
+        _write_json(prefix + ".session.json", record)
+        ran, why = classify_session(record)
+        removed = bool(cand) and not has_sorry(cand)
+        print(f"[vibe-run] {target['id']}: rc={record['rc']} {record['duration_s']}s "
+              f"turns={record.get('turns')} tool_calls={record.get('tool_calls')} "
+              f"captured {len(cand or '')} bytes, sorry_removed={removed}", flush=True)
+        if not ran:
+            print(f"::error::[vibe-run] {target['id']}: the prover did not run — {why}",
+                  flush=True)
+            tail = _tail(record.get("launcher_log"))
+            if tail:
+                print("[vibe-run] launcher log (tail):\n" + tail, flush=True)
     return 0
 
 
@@ -259,17 +546,37 @@ def _cmd_gate(args) -> int:
         # (the prover is told not to touch the statement/binders; this enforces it). None
         # if the scratch stub is gone — the pin then fails open to the kernel bar.
         stub = read_back(os.path.join(_root, target["file"]))
+        session = _read_json(os.path.join(
+            run_dir, f"{args.run_tag}-{target['id']}.session.json"))
+        ran, why = classify_session(session)
+        session = session or {}
         summary = {"target": target["id"], "stream": target.get("stream", ""),
                    "ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "harness": "vibe",
-                   "arm": getattr(args, "arm", "cron"), "tokens": 0}
+                   "arm": getattr(args, "arm", "cron"),
+                   "engine": session.get("engine"), "model": session.get("model"),
+                   "tokens": int(session.get("tokens") or 0),
+                   "cost_usd": session.get("cost_usd"), "turns": session.get("turns"),
+                   "duration_s": session.get("duration_s")}
         attempt_errors: list = []                 # gate errors, for the experience notebook
-        if not candidate:
+        if not ran:
+            # The prover never started, or died: an infrastructure error, retryable, and
+            # never a verdict about the target. (Before this check, a launcher that
+            # crashed in under a second left the untouched stub behind, which has a
+            # `sorry` in it, so it was recorded `max_rounds` — 14 ticks in a row.)
+            summary["outcome"] = "error"
+            summary["error_reason"] = why
+        elif not candidate:
             summary["outcome"] = "error"          # infra miss (no capture) → retryable
-        elif "sorry" in candidate:
-            summary["outcome"] = "max_rounds"      # vibe ran but didn't close it → record, move on
+            summary["error_reason"] = "no candidate was captured"
+        elif has_sorry(candidate):
+            summary["outcome"] = "max_rounds"      # the prover ran and did not close it
         else:
             g = run_gate(candidate, target["sorry_name"], check_fn=daemon_check, statement=stub)
-            if g["passed"]:
+            if g.get("indeterminate"):
+                summary["outcome"] = "error"      # the daemon could not answer — no verdict
+                summary["error_reason"] = ("the daemon could not gate the candidate: "
+                                           + "; ".join(g.get("errors") or [])[:300])
+            elif g["passed"]:
                 # strengthen: drop hypotheses the proof never used (elaborator
                 # warnings), re-gate; fail-open keeps the proved original. The
                 # stripped re-export entry becomes a RUN artifact open-pr prefers
@@ -342,8 +649,9 @@ def _cmd_gate(args) -> int:
                               f"open(s) {o['removed']}", flush=True)
                 # golf: the prover polishes its own accepted proof to the house
                 # register (proof-only edits enforced by signature equality + a
-                # full re-gate; fail-open). GOLF=0 disables the experiment.
-                if os.environ.get("GOLF", "1") != "0" and os.environ.get("MISTRAL_API_KEY"):
+                # full re-gate; fail-open). Opt-in with GOLF=1: it calls Leanstral,
+                # whose endpoint Mistral retires 2026-09-30.
+                if os.environ.get("GOLF", "0") == "1" and os.environ.get("MISTRAL_API_KEY"):
                     gf = golf_candidate(
                         pack,
                         candidate,
@@ -459,13 +767,19 @@ def main() -> int:
     common.add_argument("--run-tag", required=True)
     common.add_argument("--main-repo", default="/home/rapha/code/automated_proofs_quantfin")
     # A/B scoreboard arm (Task 2.6): the plain cron path is "cron"; the decompose driver
-    # passes "decompose" for its leaf runs. Both Mistral — there is no centaur/claude arm.
+    # passes "decompose" for its leaf runs. Which MODEL proves is `--engine`, not the arm.
     common.add_argument("--arm", default="cron", choices=["cron", "decompose"])
+    common.add_argument("--engine", default=None, choices=["claude", "leanstral"],
+                        help="override `[prover] engine` for this run")
     # pipeline.toml, for `[autoformalize].state_cache`. Absent ⇒ the feature is off and
     # both phases behave byte-identically to before it existed.
     common.add_argument("--config", default=None)
-    pr = sub.add_parser("run", parents=[common], help="LSP phase: headless vibe → .candidate")
+    pr = sub.add_parser("run", parents=[common],
+                        help="LSP phase: canary, then one headless prover session per "
+                             "target → .candidate + .session.json")
     pr.add_argument("--max-turns", type=int, default=40)
+    pr.add_argument("--no-canary", action="store_true",
+                    help="skip the canary (only when this tick already proved it)")
     sub.add_parser("gate", parents=[common], help="daemon phase: verify .candidate → .lean + summary")
     rp = sub.add_parser("states", help="proof-state recurrence report (no daemon, no tokens)")
     rp.add_argument("--config", default=None)

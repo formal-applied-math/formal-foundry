@@ -55,8 +55,11 @@ fi
 if [ -f "$MAIN/.env" ]; then set -a; . "$MAIN/.env"; set +a; export MISTRAL_API_KEY; fi
 [ -n "${MISTRAL_API_KEY:-}" ] || { echo "[leanstral-vibe] MISTRAL_API_KEY not set" >&2; exit 2; }
 
-# 4. House doctrine (live values + idioms + pins), prepended to the -p prompt.
-DOCTRINE="$(python3 -c "import sys; sys.path.insert(0, '$FOUNDRY/probe'); from house_context import build_system_prompt; print(build_system_prompt('$MAIN'))")"
+# 4. House doctrine (live values + idioms + pins), prepended to the -p prompt. Through the
+#    module's CLI, never an inline `python3 -c` call: the 2026-08-16 refactor changed the
+#    function's signature, the inline call raised a TypeError before vibe started, and
+#    every tick until 2026-09-23 scored that crash as a failed proof.
+DOCTRINE="$(python3 "$FOUNDRY/probe/house_context.py" doctrine --main-repo "$MAIN" --domain "$DOMAIN_NAME")"
 args=(); take_prompt=0; injected=0
 for a in "$@"; do
   if [ "$take_prompt" = 1 ]; then

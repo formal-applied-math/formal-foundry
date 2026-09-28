@@ -114,6 +114,13 @@ class AutoformalizeConfig:
     # performs into informed ones; costs one small summariser call per failure and nothing
     # at all on the pass path. Off by default ⇒ prompts stay byte-identical.
     experience: bool = False
+    # The two kernel probes on a draft (hypothesis-rejection ⊢ False, disproof ⊢ ¬Concl),
+    # run by `prover_model`. Off by default: they fired 0 times in the 34+ drafts that
+    # reached them (all 54 cached verdicts negative — the Claude judge caught both false
+    # drafts), and `prover_model` is Mistral's `labs-leanstral-1-5`, retired 2026-09-30 —
+    # after which every probe call raises, the issue-level handler records `error`, and
+    # NO draft can ever be staged. Turn back on only with a live `prover_model`.
+    kernel_probes: bool = False
 
     @staticmethod
     def load(path: str | None) -> "AutoformalizeConfig":
@@ -124,6 +131,49 @@ class AutoformalizeConfig:
         section = data.get("autoformalize", {})
         fields = {f.name for f in dataclasses.fields(AutoformalizeConfig)}
         return AutoformalizeConfig(**{k: v for k, v in section.items() if k in fields})
+
+
+#: The prove engines a `[prover] engine` may name, and the launcher each one runs. Both
+#: launchers take the same contract (`--agent lean --auto-approve --max-turns N -p TASK`)
+#: and give the model the same lean-lsp MCP server and house doctrine.
+PROVER_LAUNCHERS = {"claude": "claude-prove.sh", "leanstral": "leanstral-vibe.sh"}
+
+
+@dataclasses.dataclass(frozen=True)
+class ProverConfig:
+    """Which model proves (the `[prover]` block).
+
+    `claude` is the default: Mistral retires the `labs-leanstral-1-5` endpoint on
+    2026-09-30, and the field's evidence on realistic, library-dependent targets favours a
+    frontier model in a plain agentic loop (AlphaProof Nexus: 9/9 vs 0/9). `leanstral`
+    stays selectable for a live Leanstral endpoint.
+
+    `canary` proves a trivial theorem through the exact production path (launcher, auth,
+    MCP, Lean) before every prove run. From 2026-08-19 to 2026-09-23 the launcher crashed
+    before the prover started on every tick and each crash was scored as a failed proof;
+    a canary would have gone red on the first one."""
+    engine: str = "claude"
+    claude_model: str = "claude-sonnet-5"   # `claude -p --model`; claude-opus-5-5 for hard targets
+    canary: bool = True
+    canary_max_turns: int = 12
+
+    @staticmethod
+    def load(path: str | None) -> "ProverConfig":
+        cfg = ProverConfig()
+        if path and os.path.isfile(path) and tomllib is not None:
+            with open(path, "rb") as f:
+                data = tomllib.load(f)
+            section = data.get("prover", {})
+            fields = {f.name for f in dataclasses.fields(ProverConfig)}
+            cfg = ProverConfig(**{k: v for k, v in section.items() if k in fields})
+        if cfg.engine not in PROVER_LAUNCHERS:
+            raise ValueError(f"[prover] engine must be one of {sorted(PROVER_LAUNCHERS)}, "
+                             f"got {cfg.engine!r}")
+        return cfg
+
+    @property
+    def launcher(self) -> str:
+        return PROVER_LAUNCHERS[self.engine]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -248,7 +298,8 @@ def attempted_ids(state: dict) -> set[str]:
 
 
 def selection_census(candidates: list[dict], state: dict, *, claimed_fn=None,
-                     queue_dir: str | None = None) -> dict:
+                     queue_dir: str | None = None,
+                     quarantined: list[str] | None = None) -> dict:
     """Why did selection return what it returned? Counts per exclusion reason, plus
     whether the candidate list actually covers the stubs on disk.
 
@@ -274,12 +325,17 @@ def selection_census(candidates: list[dict], state: dict, *, claimed_fn=None,
         "excluded_claimed": n_claimed,
         "selectable": len(candidates) - n_attempted - n_claimed,
     }
+    held = set(quarantined or [])
+    if held:
+        # build_manifest excluded these on purpose (malformed or not elaborating); they
+        # are a person's to fix or retire, and reported as such, not as staleness
+        out["quarantined"] = sorted(held)
     if queue_dir and os.path.isdir(queue_dir):
         on_disk = {f[:-5] for f in os.listdir(queue_dir) if f.endswith(".lean")}
         listed = {c.get("id") for c in candidates}
         out["stubs_on_disk"] = len(on_disk)
         # the stale-manifest signature: stubs exist that the candidate list omits
-        out["missing_from_candidates"] = sorted(on_disk - listed)
+        out["missing_from_candidates"] = sorted(on_disk - listed - held)
     return out
 
 

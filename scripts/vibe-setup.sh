@@ -23,11 +23,15 @@ eval "$(python3 "$FOUNDRY/probe/domain_pack.py" --export-env ${DOMAIN:+"$DOMAIN"
 VIBE_HOME="${VIBE_HOME_DIR:-$HOME/.vibe}"
 
 # 1. install the CLI (bundles the lean agent) if absent — uv tool if available, else pip.
+# Pinned: unpinned, CI drifted from 2.22.0 (the last version a real Leanstral session ran
+# on, 2026-07-28) to 2.25.8 without a single session exercising any of those releases.
+VIBE_VERSION="${VIBE_VERSION:-2.25.8}"
 if ! command -v vibe >/dev/null 2>&1; then
   if command -v uv >/dev/null 2>&1; then
-    uv tool install mistral-vibe
+    uv tool install "mistral-vibe==${VIBE_VERSION}"
   else
-    pip install --quiet mistral-vibe || pip install --quiet --break-system-packages mistral-vibe
+    pip install --quiet "mistral-vibe==${VIBE_VERSION}" \
+      || pip install --quiet --break-system-packages "mistral-vibe==${VIBE_VERSION}"
   fi
 fi
 
