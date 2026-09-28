@@ -4,7 +4,7 @@
   "description": "Defines the term/whole-life insurance EPV A_x and proves the fundamental identity A_x = 1 - d·ä_x via telescoping.",
   "domain": "mathematical_finance",
   "code": {
-    "lean": "import MathFin.Actuarial.WholeLifeInsuranceEPV\n\nopen MathFin\n\n/-- Defines the term/whole-life insurance EPV A_x and proves the fundamental identity A_x = 1 - d·ä_x via telescoping. -/\ntheorem mf_actuarial_whole_life_insurance_epv (v : ℝ) (S q : ℕ → ℝ) (h : isLifeTable S q) (ω : ℕ) (hω : S ω = 0) :\n    insuranceEPV v q S ω = 1 - (1 - v) * annuityDueEPV v S ω :=\n  MathFin.insuranceEPV_eq_one_sub_d_mul_annuityDueEPV v S q h ω hω\n"
+    "lean": "import MathFin.Actuarial.WholeLifeInsuranceEPV\n\nopen MathFin\nopen MeasureTheory ProbabilityTheory\nopen scoped NNReal ENNReal\n\n/-- Defines the term/whole-life insurance EPV A_x and proves the fundamental identity A_x = 1 - d·ä_x via telescoping. -/\ntheorem mf_actuarial_whole_life_insurance_epv (v : ℝ) (S q : ℕ → ℝ) (h : isLifeTable S q) (ω : ℕ) (hω : S ω = 0) :\n    insuranceEPV v q S ω = 1 - (1 - v) * annuityDueEPV v S ω :=\n  MathFin.insuranceEPV_eq_one_sub_d_mul_annuityDueEPV v S q h ω hω\n"
   },
   "metadata": {
     "chapter": 0,

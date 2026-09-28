@@ -1615,9 +1615,15 @@ def emit_target_files(pack: DomainPack, issue: dict, stub: str,
 
     mf_name = benchmark_id.replace("-", "_")
     app = f"{pack.qualified(name)} {' '.join(explicit_arg_names(binders))}".rstrip()
+    # The re-export must elaborate in the module's notation context: the statement is
+    # copied verbatim, so `ℝ≥0`, `∫ … ∂μ`, `Integrable`… need the house opens the module
+    # carries. With `open <Namespace>` alone, `(Λ : ℝ≥0)` parsed as the Prop `ℝ ≥ 0` and
+    # the ledger rejected cal-bk-129's entry (`failed to synthesize instance`) after its
+    # proof had passed every gate — the first proof in two months, blocked at assembly.
+    reexport_opens = "\n".join([f"open {pack.namespace}", *pack.opens])
     reexport = (
         f"import {pack.namespace}.{section}.{module_name}\n\n"
-        f"open {pack.namespace}\n\n"
+        f"{reexport_opens}\n\n"
         f"/-- {docstring} -/\n"
         f"theorem {mf_name} {binders.strip()} :{concl.rstrip()} :=\n"
         f"  {app}\n"
