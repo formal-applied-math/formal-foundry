@@ -1,0 +1,42 @@
+name: tests
+
+# The foundry's ~750 unit tests had never run in CI: the only pytest in any workflow was
+# the daemon-backed instance probe inside the pipeline tick. So a refactor that updated
+# every Python test and missed the two shell callers (2026-08-16) merged green, and the
+# prover launcher crashed on every tick for five weeks. This runs the daemon-free suite
+# (the daemon tests self-skip without a live REPL) and a syntax check of every script,
+# including the test that scans the Python embedded in those scripts.
+#
+# Telemetry commits from the pipeline carry `[skip ci]`, so they do not trigger this.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pytest
+        run: python -m pip install -q pytest
+
+      - name: Unit tests (daemon-free)
+        working-directory: probe
+        run: python -m pytest -q
+
+      - name: Shell syntax
+        shell: bash
+        run: |
+          for f in scripts/*.sh; do bash -n "$f" || exit 1; done

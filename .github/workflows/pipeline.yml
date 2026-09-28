@@ -204,13 +204,19 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Install Claude Code CLI (frontier drafter — [drafter] engine="claude")
+      - name: Install Claude Code CLI (the drafter, and the prover under [prover] engine="claude")
         if: ${{ !inputs.mtest_only }}
-        # the drafter shells `claude -p`; with CLAUDE_CODE_OAUTH_TOKEN set the tick uses
-        # Claude, else resolve_drafter_engine falls the draft back to mistral (no break).
+        # Pinned, and put FIRST on PATH. Unpinned, this step reported 2.1.197 on every run
+        # while npm's latest moved on — some other `claude` on the runner was shadowing
+        # the one installed here, so the version in use was neither chosen nor visible.
+        # 2.1.197 is the version the drafter has actually been running; bump deliberately.
+        env:
+          CLAUDE_CODE_VERSION: "2.1.197"
         run: |
-          npm install -g @anthropic-ai/claude-code
-          claude --version
+          npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+          echo "$(npm prefix -g)/bin" >> "$GITHUB_PATH"
+          "$(npm prefix -g)/bin/claude" --version
+          which -a claude || true
 
       - name: Run one pipeline tick (prove → on pass, open the PR)
         if: ${{ !inputs.mtest_only }}   # mtest_only dispatch validates item M then stops
@@ -269,10 +275,14 @@ jobs:
       # barren tick is ordinary; a streak is a foundry that has stopped working.
       - name: Foundry health — is the loop still producing?
         if: always()
+        # `shell: bash` is load-bearing: it runs with `-o pipefail`. The default shell does
+        # not, so health.py's exit 1 was swallowed by `tee` — it printed STALLED on every
+        # run from 2026-09-01 and the job stayed green.
+        shell: bash
         run: |
           cd probe
-          python3 health.py --state ../pipeline_state.json --fail-on-alarm \
-            | tee -a "$GITHUB_STEP_SUMMARY"
+          python3 health.py --state ../pipeline_state.json --ticks ../runs/ticks.jsonl \
+            --fail-on-alarm | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Upload telemetry
         if: always()
