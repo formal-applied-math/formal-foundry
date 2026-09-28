@@ -83,6 +83,9 @@ def _agentic_formalize_args(mcp_config_path: str, *, model: str = "") -> list[st
 
 # (the agentic scratch module is the domain's: `pack.scratch_module`)
 
+#: the scaffold's stand-in theorem; the drafter must replace it (a staged stub once kept it)
+_PLACEHOLDER = "_agentic_placeholder"
+
 
 
 
@@ -110,11 +113,18 @@ def _agentic_formalize_prompt(pack: DomainPack, intent: dict, scaffold_module: s
         "(ending `:= by sorry`), "
         "plus 1-2 concrete `example ... := by norm_num`/`decide` instance checks per new def:\n\n"
         f"```lean\n{scaffold_module}\n```\n\n"
+        f"The scaffold's `{_PLACEHOLDER}` is a stand-in: REPLACE it with the real theorem "
+        "under a descriptive snake_case name for the result it states. A module still "
+        "carrying the placeholder name is rejected.\n\n"
         f"Then use the lean-lsp MCP tools (e.g. lean_diagnostics on `{scratch_rel}`) to CHECK and "
         "ITERATE — fix every elaboration error — until diagnostics report NO errors and exactly "
         "ONE `sorry` (the main theorem's). Keep the statement FAITHFUL to the intended statement; "
-        "do NOT prove the theorem (leave its `sorry`); do not touch the license/module/import/"
-        "namespace scaffold lines. Reply DONE when it elaborates cleanly.\n\n"
+        "do NOT prove the theorem (leave its `sorry`). Do not remove or reorder the scaffold's "
+        "license/module/import/namespace lines; you MAY ADD a "
+        f"`public import {pack.namespace}.…` line for an EXISTING library module whose "
+        "definitions the statement uses (an object the issue names can live outside the "
+        "pointer modules), and it is kept. The daemon re-elaborates exactly what you leave "
+        "in the file. Reply DONE when it elaborates cleanly.\n\n"
         + pack.prompt("agentic-pitfalls")
     )
 
@@ -149,8 +159,14 @@ def agentic_formalize(pack: DomainPack, intent: dict, *, issue: dict, main_repo:
             "definitions": intent.get("definitions") or [], "deferred": intent.get("deferred")}
     scratch_rel = scratch_rel if scratch_rel is not None else pack.scratch_module
     scaffold, _e0, _p0 = emit_target_files(
-        pack, issue, "theorem _agentic_placeholder : True := by sorry", meta)
+        pack, issue, f"theorem {_PLACEHOLDER} : True := by sorry", meta)
     scratch_abs = os.path.join(main_repo, scratch_rel)
+    # A file left by an earlier session (another issue, another attempt) must never be
+    # read back as this one's work: a session that writes nothing has to look like one.
+    try:
+        os.remove(scratch_abs)
+    except OSError:
+        pass
 
     tmp_cfg = None
     if mcp_config_path is None:
@@ -174,13 +190,22 @@ def agentic_formalize(pack: DomainPack, intent: dict, *, issue: dict, main_repo:
                 os.unlink(tmp_cfg)
             except OSError:
                 pass
-    tokens = 0
+    tokens, data = 0, {}
     try:
-        data = json.loads((getattr(res, "stdout", "") or "").strip())
+        data = json.loads((getattr(res, "stdout", "") or "").strip()) or {}
         u = data.get("usage") or {}
         tokens = int(u.get("input_tokens", 0) or 0) + int(u.get("output_tokens", 0) or 0)
-    except (ValueError, TypeError):
-        pass
+    except (ValueError, TypeError, AttributeError):
+        data = {}
+    rc = getattr(res, "returncode", 0)
+    if (isinstance(rc, int) and rc != 0) or (isinstance(data, dict) and data.get("is_error")):
+        # a crashed or erroring session is not a draft — and its reason must survive,
+        # not be rewritten downstream into "no elaborating Lean"
+        sub_kind = data.get("subtype") if isinstance(data, dict) else None
+        err_tail = (getattr(res, "stderr", "") or "")[-300:]
+        return {"ok": False, "stub": None, "lean_text": None, "entry": None, "meta": meta,
+                "tokens": tokens,
+                "reason": f"the claude -p session failed (rc={rc}, {sub_kind}): {err_tail}".strip()}
 
     if not os.path.exists(scratch_abs):
         return {"ok": False, "stub": None, "lean_text": None, "entry": None, "meta": meta,
@@ -192,12 +217,51 @@ def agentic_formalize(pack: DomainPack, intent: dict, *, issue: dict, main_repo:
             return {"ok": False, "stub": None, "lean_text": lean_final, "entry": None, "meta": meta,
                     "tokens": tokens, "reason": "final module does not elaborate cleanly"}
     core = _extract_core_stub(pack, lean_final)
+    if core and split_statement(core)[0].startswith(_PLACEHOLDER):
+        # cal-bk-79 was staged as `theorem _agentic_placeholder` and its re-export entry
+        # applied `<Namespace>._agentic_placeholder`: no gate compared the drafted name with
+        # the scaffold's stand-in.
+        return {"ok": False, "stub": None, "lean_text": lean_final, "entry": None,
+                "meta": meta, "tokens": tokens,
+                "reason": f"the theorem kept the scaffold's placeholder name `{_PLACEHOLDER}`; "
+                          "name it for the result it states"}
     if core:                                        # canonicalise via emit → consistent entry
-        lean_text, entry, _placement = emit_target_files(pack, issue, core, meta)
+        # emit rebuilds the imports from the issue's pointers; keep any import of an
+        # EXISTING library module the drafter added (cal-bk-116 used Ito's
+        # `SurvivalModel` objects, whose module the issue never listed as a pointer)
+        extra = _added_library_imports(pack, lean_final, main_repo,
+                                       known=issue.get("pointers", []))
+        emit_issue = {**issue, "pointers": list(issue.get("pointers", [])) + extra} if extra else issue
+        lean_text, entry, placement = emit_target_files(pack, emit_issue, core, meta)
+        if not placement.get("append") and os.path.isfile(
+                os.path.join(main_repo, placement["main_module"])):
+            # open-pr would WRITE this path: it would replace a module that already exists
+            # (cal-bk-116 chose `SurvivalModel.lean`, the module its own objects live in)
+            return {"ok": False, "stub": None, "lean_text": lean_text, "entry": None,
+                    "meta": meta, "tokens": tokens,
+                    "reason": f"main-module {placement['main_module']} already exists in the "
+                              "library; a new result needs a module of its own (name it for "
+                              "the object it introduces), or the issue's `location:` to append"}
     else:                                           # markers absent — ship claude's module as-is
         lean_text, entry = lean_final, None
     return {"ok": True, "stub": core, "lean_text": lean_text, "entry": entry, "meta": meta,
             "tokens": tokens, "reason": ""}
+
+
+def _added_library_imports(pack: DomainPack, lean_text: str, main_repo: str, *,
+                           known: list[str]) -> list[str]:
+    """Pointer paths for the `public import <LakeRoot>.…` lines in `lean_text` that name
+    an existing module of the target library and are not already pointers."""
+    out = []
+    for mod in re.findall(r"^\s*public\s+import\s+([A-Za-z0-9_.']+)\s*$", lean_text, re.M):
+        if not mod.startswith(pack.lake_root + "."):
+            continue
+        path = mod.replace(".", "/") + ".lean"
+        if path in known or path in out:
+            continue
+        if os.path.isfile(os.path.join(main_repo, path)):
+            out.append(path)
+    return out
 
 
 
@@ -360,7 +424,8 @@ def semantic_verdict(pack: DomainPack, *, lean_text: str, stub: str, name: str,
                      deferred: list[str], reason_fn, prove_fn, check_fn, gate_budget: int,
                      depth_gate: bool = True, triviality_gate: bool = True,
                      route: str = "theorem", def_names: list[str] | None = None,
-                     system_prompt=None, cache=None) -> tuple[dict | None, int]:
+                     system_prompt=None, cache=None,
+                     kernel_probes: bool = True) -> tuple[dict | None, int]:
     """Run the semantic gate battery on an ELABORATING draft, cheapest-first:
     depth (theorem route) / defs consumption+grounding (defs route) → triviality
     (structural, zero tokens) → hypothesis-rejection → disproof (kernel,
@@ -368,8 +433,25 @@ def semantic_verdict(pack: DomainPack, *, lean_text: str, stub: str, name: str,
     Returns `(failure, tokens)`: failure is None when every gate passes, else
     `{gate, detail}` for `render_gate_feedback`. The battery's DIVERSITY is the
     anti-Goodhart defense of the repair loop: a re-draft that games one gate still
-    faces five others (and open-pr's honesty guards + the human merge after that)."""
+    faces five others (and open-pr's honesty guards + the human merge after that).
+
+    Gate 0 elaborates the text that will be STAGED. Nothing did: the agentic session
+    self-validates a different text (its scratch module; the staged one is re-emitted
+    with rebuilt imports), `check_fn=None` skipped the re-check, and every later gate
+    counts only its own marker errors or reads any error as a pass. A stub that did not
+    compile reached the queue and blocked it (cal-bk-116, 2026-09-25).
+
+    `kernel_probes=False` skips the two prover-run probes (vacuity, disproof); the
+    refill sets it from `[autoformalize] kernel_probes`."""
     tokens = 0
+    elab = check_fn(lean_text)
+    if elab.get("error"):   # the daemon could not answer: no verdict, retryable
+        return {"gate": "indeterminate", "detail": "elaboration: " + str(elab["error"])[:120]}, 0
+    if elab.get("errors") or elab.get("sorry_count", 1) != 1:
+        detail = "; ".join(str(e) for e in (elab.get("errors") or [])[:3]) or (
+            f"expected exactly one `sorry` (the theorem's), the daemon counted "
+            f"{elab.get('sorry_count')}")
+        return {"gate": "elaboration", "detail": detail}, 0
     if route == "defs":
         dr = defs_rejection(pack, lean_text, name, def_names or [], check_fn=check_fn)
         tokens += dr["tokens"]
@@ -396,16 +478,17 @@ def semantic_verdict(pack: DomainPack, *, lean_text: str, stub: str, name: str,
             return {"gate": "indeterminate", "detail": triv.get("verdict", "")}, tokens
         if triv["trivial"]:
             return {"gate": "trivial", "detail": triv.get("verdict", "")}, tokens
-    vac = hypothesis_rejection(lean_text, name, chat_fn=prove_fn, check_fn=check_fn,
-                               budget=gate_budget, system_prompt=system_prompt, cache=cache)
-    tokens += vac["tokens"]
-    if vac["vacuous"]:
-        return {"gate": "vacuous", "detail": "False is provable from the hypotheses"}, tokens
-    dis = disproof(lean_text, name, chat_fn=prove_fn, check_fn=check_fn,
-                   budget=gate_budget, system_prompt=system_prompt, cache=cache)
-    tokens += dis["tokens"]
-    if dis["false"]:
-        return {"gate": "false", "detail": "the negated conclusion was proved"}, tokens
+    if kernel_probes:
+        vac = hypothesis_rejection(lean_text, name, chat_fn=prove_fn, check_fn=check_fn,
+                                   budget=gate_budget, system_prompt=system_prompt, cache=cache)
+        tokens += vac["tokens"]
+        if vac["vacuous"]:
+            return {"gate": "vacuous", "detail": "False is provable from the hypotheses"}, tokens
+        dis = disproof(lean_text, name, chat_fn=prove_fn, check_fn=check_fn,
+                       budget=gate_budget, system_prompt=system_prompt, cache=cache)
+        tokens += dis["tokens"]
+        if dis["false"]:
+            return {"gate": "false", "detail": "the negated conclusion was proved"}, tokens
     j = judge_faithfulness(pack, issue, stub, chat_fn=reason_fn, deferred=deferred)
     tokens += j["tokens"]
     if not j.get("faithful"):
@@ -498,7 +581,7 @@ def refill(pack: DomainPack, issues: list[dict], *, reason_fn, prove_fn, check_f
            queue_dir: str, budget: int, max_issues: int = 1,
            max_attempt_issues: int = 3, gate_budget: int = 20_000, formalize_rounds: int = 3,
            proactive_fn=None, depth_gate: bool = True, triviality_gate: bool = True,
-           semantic_rounds: int = 2, system_prompt=None,
+           semantic_rounds: int = 2, system_prompt=None, kernel_probes: bool = True,
            feasibility_fn=None, gate_cache=None, experience=None, summarize_fn=None,
            issue_slug: str | None = None, log=lambda m: None) -> dict:
     """Draft + gate + stage up to `max_issues` targets from `issues`.
@@ -618,7 +701,8 @@ def refill(pack: DomainPack, issues: list[dict], *, reason_fn, prove_fn, check_f
                     tele["retrieval_backend"] = fr["retrieval_backend"]
                 if not fr["ok"]:
                     fail = {"gate": "formalize",
-                            "detail": f"no elaborating Lean after {formalize_rounds} rounds"}
+                            "detail": fr.get("reason")
+                            or f"no elaborating Lean after {formalize_rounds} rounds"}
                     row = {"attempt": attempt, **fail}
                     if unknowns:
                         row["unknown_identifiers"] = unknowns
@@ -637,7 +721,8 @@ def refill(pack: DomainPack, issues: list[dict], *, reason_fn, prove_fn, check_f
                     check_fn=check_fn, gate_budget=gate_budget, depth_gate=depth_gate,
                     triviality_gate=triviality_gate, route=route,
                     def_names=drafted_def_names(stub) if route == "defs" else None,
-                    system_prompt=system_prompt, cache=gate_cache)
+                    system_prompt=system_prompt, cache=gate_cache,
+                    kernel_probes=kernel_probes)
                 spent += gate_tokens
                 if fail is None:
                     paths = _write_target(queue_dir, n, lean_text, entry)
@@ -787,6 +872,9 @@ def main() -> int:
     p.add_argument("--triviality-gate", dest="triviality_gate",
                    action=argparse.BooleanOptionalAction, default=None,
                    help="rfl/simp triviality gate (default: config)")
+    p.add_argument("--kernel-probes", dest="kernel_probes",
+                   action=argparse.BooleanOptionalAction, default=None,
+                   help="the prover-run vacuity/disproof probes (default: config)")
     p.add_argument("--semantic-rounds", type=int, default=None,
                    help="total draft attempts per issue incl. feedback re-drafts (default: config)")
     p.add_argument("--retrieval", dest="retrieval", action=argparse.BooleanOptionalAction,
@@ -815,6 +903,7 @@ def main() -> int:
     prover_model = pick(args.prover_model, cfg.prover_model)   # leanstral: the gate battery
     depth_gate = pick(args.depth_gate, cfg.depth_gate)
     triviality_gate = pick(args.triviality_gate, cfg.triviality_gate)
+    kernel_probes = pick(args.kernel_probes, cfg.kernel_probes)
     semantic_rounds = pick(args.semantic_rounds, cfg.semantic_rounds)
     formalize_rounds = pick(args.formalize_rounds, cfg.formalize_rounds)
     retrieval = pick(args.retrieval, cfg.retrieval)
@@ -946,6 +1035,7 @@ def main() -> int:
                  max_issues=max_issues, max_attempt_issues=max_attempt, gate_budget=gate_budget,
                  formalize_rounds=formalize_rounds, proactive_fn=proactive_fn,
                  depth_gate=depth_gate, triviality_gate=triviality_gate,
+                 kernel_probes=kernel_probes,
                  semantic_rounds=semantic_rounds, system_prompt=prove_system,
                  feasibility_fn=feasibility_fn, gate_cache=gate_cache,
                  experience=experience, summarize_fn=summarize_fn,
