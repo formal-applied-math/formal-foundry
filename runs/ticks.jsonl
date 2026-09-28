@@ -1,0 +1,1 @@
+{"ts": "2026-09-28T00:42:15", "tag": "pipeline-20260928-001810", "action": "run", "reason": null, "target": "cal-bk-129", "outcome": "pass", "engine": "claude", "infra_failure": false, "infra_reason": null, "exit_code": 0}
