@@ -177,8 +177,13 @@ def agentic_formalize(pack: DomainPack, intent: dict, *, issue: dict, main_repo:
         tmp_cfg = mcp_config_path
 
     if run_fn is None:
+        from redact import agent_env
+
         def run_fn(argv, stdin, cwd):
+            # only Claude's own credential: this session has file tools, and the refill
+            # runs with GH_TOKEN = MAIN_PR_TOKEN in its environment
             return subprocess.run(argv, input=stdin, capture_output=True, text=True,
+                                  env=agent_env("claude"),
                                   timeout=1800, cwd=cwd)
     argv = _agentic_formalize_args(mcp_config_path, model=model)
     prompt = _agentic_formalize_prompt(pack, intent, scaffold, scratch_rel, premises)
@@ -452,6 +457,10 @@ def semantic_verdict(pack: DomainPack, *, lean_text: str, stub: str, name: str,
             f"expected exactly one `sorry` (the theorem's), the daemon counted "
             f"{elab.get('sorry_count')}")
         return {"gate": "elaboration", "detail": detail}, 0
+    from redact import secret_findings, secret_values
+    leaks = secret_findings(lean_text, secret_values())
+    if leaks:   # never staged, never fed back verbatim: the kinds only
+        return {"gate": "secret", "detail": f"credential-shaped content {leaks}"}, 0
     if route == "defs":
         dr = defs_rejection(pack, lean_text, name, def_names or [], check_fn=check_fn)
         tokens += dr["tokens"]

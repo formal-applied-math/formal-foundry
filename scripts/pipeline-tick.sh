@@ -196,6 +196,20 @@ if [ -n "$DECOMPOSE_FORCE" ] || { [ -n "$DECOMPOSE_ON" ] && [ -n "$DECOMPOSE_TAG
   WHY="$([ -n "$DECOMPOSE_FORCE" ] && echo 'forced by dispatch' || echo 'tagged decompose + enabled')"
   echo "[tick] $ID → lemma-DAG decompose path ($WHY)" >&2
   run_decompose
+elif python3 vibe_prove.py adopt --id "$ID" --run-tag "$TAG" >&2; then
+  # A proof of this target already passed the gate in an earlier tick and never became a
+  # PR (a refused push, a transient assembly failure). Re-gate it on the current daemon —
+  # the pins may have moved — instead of paying for a new session. The daemon is up: no
+  # prover ran, so the Lean slot was never flipped.
+  echo "[tick] $ID: reusing a proof that already passed the gate — re-gating it, no new session" >&2
+  set +e
+  python3 wait_daemon.py; DAEMON_RC=$?
+  if [ "$DAEMON_RC" != 0 ]; then
+    INFRA_FAIL=1; INFRA_WHY="the daemon was not ready to re-gate the adopted proof"
+  else
+    python3 vibe_prove.py gate --manifest "$QUEUE" --only "$ID" --run-tag "$TAG" --main-repo "$MAIN" --config "$CFG"
+  fi
+  set -e
 else
   # Plain vibe ⇄ lean-lsp-mcp harness (spec:
   #   docs/superpowers/specs/2026-07-17-leanstral-vibe-cron-harness-design.md).
@@ -282,6 +296,11 @@ if [ "$OUTCOME" = "pass" ] && [ -f "$CAND" ]; then
         echo "[tick] open-pr content-BLOCKED (rc=3) → will record fail_assembly" >&2
       else
         echo "[tick] (open-pr.sh transient failure rc=$OPENPR_RC; candidate still at $CAND — retryable)" >&2
+        # A proof that passed and could not become a PR is the machinery failing (a push
+        # refused with 403 went green on 2026-09-28). Red, and the next tick REUSES the
+        # verified proof (`vibe_prove.py adopt`) instead of paying for it again.
+        INFRA_FAIL=1
+        INFRA_WHY="$ID passed but its PR could not be opened (open-pr rc=$OPENPR_RC); the verified proof is kept for the next tick"
       fi
     fi
   else

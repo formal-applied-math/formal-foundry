@@ -31,9 +31,11 @@ import json
 import os
 import re
 import subprocess
+import sys
 import time
 
 from probe_lib import has_sorry
+from redact import agent_env, redact, redact_file, secret_findings, secret_values
 
 #: Exit code of `run` when the canary did not come back proved: the prove path itself is
 #: broken (launcher, auth, MCP, Lean), so nothing it would produce is a verdict about the
@@ -192,9 +194,21 @@ def run_prover_session(pack, target: dict, *, main_repo: str, context_pack: str,
             except OSError:
                 proc = 127
         duration = time.monotonic() - t0
-        return {"content": read_back(host), "rc": _returncode(proc),
+        # Everything a session leaves is committed to a PUBLIC repository by the persist
+        # step, and a transcript holds every tool result the agent saw. Redact known
+        # secret values and credential-shaped strings now, and remember that it happened:
+        # a session that surfaced a credential is a security event, not a proof attempt.
+        values = secret_values()
+        leaked = sum(redact_file(p, values) for p in (transcript, launcher_log) if p)
+        content = read_back(host)
+        kinds = secret_findings(content or "", values)
+        if kinds:
+            content, n = redact(content, values)
+            leaked += n
+        return {"content": content, "rc": _returncode(proc),
                 "duration_s": round(duration, 1), "transcript": transcript,
-                "launcher_log": launcher_log}
+                "launcher_log": launcher_log, "secret_leak": leaked,
+                "secret_kinds": kinds}
     finally:
         try:
             os.remove(host)
@@ -276,6 +290,7 @@ def session_record(target: dict, sess: dict, *, engine: str, model: str) -> dict
     """The persisted `<tag>-<id>.session.json`: what ran, and the evidence that it ran."""
     rec = {"target": target["id"], "engine": engine, "model": model,
            "rc": sess["rc"], "duration_s": sess["duration_s"],
+           "secret_leak": sess.get("secret_leak", 0),
            "identical_to_stub": sess["content"] == target["statement"],
            "captured_bytes": len(sess["content"] or ""),
            "transcript": sess.get("transcript"), "launcher_log": sess.get("launcher_log")}
@@ -297,6 +312,9 @@ def classify_session(session: dict | None) -> tuple[bool, str]:
     launcher exited 1 in under a second, with no transcript, having never started."""
     if not session:
         return False, "no session record: the run phase never reached this target"
+    if session.get("secret_leak"):
+        return False, (f"the session surfaced {session['secret_leak']} credential(s), redacted "
+                       "before anything was written — investigate before trusting this run")
     rc = session.get("rc", 0)
     if rc != 0:
         return False, f"the launcher exited rc={rc} (see {session.get('launcher_log')})"
@@ -420,7 +438,10 @@ def _prover(args):
     cfg = ProverConfig.load(getattr(args, "config", None))
     engine = getattr(args, "engine", None) or cfg.engine
     launcher = os.path.join(foundry_root, "scripts", PROVER_LAUNCHERS[engine])
-    env = dict(os.environ)
+    # Only the prover's own credential. It used to inherit the whole CI environment —
+    # MAIN_PR_TOKEN (write access to the library) included — while running with read
+    # access to the runner's filesystem.
+    env = agent_env(engine)
     if engine == "claude":
         env["CLAUDE_PROVER_MODEL"] = cfg.claude_model
         model = cfg.claude_model
@@ -459,6 +480,45 @@ def prover_of(run_dir: str, tag: str, target_id: str, config: str | None = None)
     cfg = ProverConfig.load(config)
     return {"engine": cfg.engine,
             "model": cfg.claude_model if cfg.engine == "claude" else LEANSTRAL_MODEL}
+
+
+def adopt_verified(run_dir: str, target_id: str, tag: str) -> str | None:
+    """Reuse the newest proof of `target_id` that passed the gate in an earlier run and
+    never became a PR (a refused push, a transient assembly failure): copy its raw
+    `.candidate` and its `.session.json` into run `tag`, and return the source run's tag,
+    or None when there is nothing to reuse. The caller re-gates it — the pins may have
+    moved — so reuse can save a session but never skip a check.
+
+    The session is marked `reused_from` and charges 0 tokens: they were spent, and
+    counted, by the run that produced it. cal-bk-129 was proved twice on 2026-09-28
+    because a push was refused after the first proof."""
+    import glob
+    passing = []
+    for path in sorted(glob.glob(os.path.join(run_dir, "*-summary.jsonl"))):
+        src = os.path.basename(path)[:-len("-summary.jsonl")]
+        if src == tag:
+            continue
+        try:
+            with open(path, encoding="utf-8") as f:
+                rows = [json.loads(line) for line in f if line.strip()]
+        except (OSError, ValueError):
+            continue
+        if any(r.get("target") == target_id and r.get("outcome") == "pass"
+               and r.get("harness") == "vibe" for r in rows):
+            passing.append(src)
+    for src in reversed(passing):                                    # newest first
+        content = read_back(os.path.join(run_dir, f"{src}-{target_id}.candidate"))
+        session = _read_json(os.path.join(run_dir, f"{src}-{target_id}.session.json"))
+        if not content or has_sorry(content) or not session:
+            continue
+        with open(os.path.join(run_dir, f"{tag}-{target_id}.candidate"), "w",
+                  encoding="utf-8") as f:
+            f.write(content)
+        _write_json(os.path.join(run_dir, f"{tag}-{target_id}.session.json"),
+                    {**session, "reused_from": src,
+                     "original_tokens": session.get("tokens"), "tokens": 0})
+        return src
+    return None
 
 
 def run_canary(pack, *, main_repo: str, launcher: str, engine: str, model: str,
@@ -802,6 +862,10 @@ def main() -> int:
     rp = sub.add_parser("states", help="proof-state recurrence report (no daemon, no tokens)")
     rp.add_argument("--config", default=None)
     rp.add_argument("--json", action="store_true", help="emit the raw report dict")
+    ad = sub.add_parser("adopt", help="reuse a proof of a target that already passed the gate "
+                                      "in an earlier run (exit 1 when there is none)")
+    ad.add_argument("--id", required=True)
+    ad.add_argument("--run-tag", required=True)
     po = sub.add_parser("prover-of", help="the engine + model that proved a target in a run")
     po.add_argument("--run-tag", required=True)
     po.add_argument("--id", required=True)
@@ -813,6 +877,13 @@ def main() -> int:
         return _cmd_states(args)
     if args.cmd == "experience":
         return _cmd_experience(args)
+    if args.cmd == "adopt":
+        _, run_dir = _run_dir()
+        src = adopt_verified(run_dir, args.id, args.run_tag)
+        print(f"[vibe-adopt] {args.id}: " + (f"reusing the proof that passed in {src}"
+                                              if src else "no verified proof to reuse"),
+              file=sys.stderr)
+        return 0 if src else 1
     if args.cmd == "prover-of":
         _, run_dir = _run_dir()
         print(json.dumps(prover_of(run_dir, args.run_tag, args.id, args.config)))

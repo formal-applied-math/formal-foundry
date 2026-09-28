@@ -244,3 +244,57 @@ def test_prover_of_reads_the_session_then_the_leaves_then_the_config(tmp_path):
         json.dumps({"engine": "claude", "model": "claude-sonnet-5"}))
     assert vibe_prove.prover_of(runs, "t", "cal-bk-1") == {
         "engine": "claude", "model": "claude-sonnet-5"}               # its own session wins
+
+
+# --- a session that surfaced a credential is a security event --------------------
+
+def test_a_leaked_credential_is_redacted_on_disk_and_the_session_is_an_error(tmp_path, monkeypatch):
+    (tmp_path / "MathFin").mkdir()
+    secret = "sk-ant-oat01-" + "q" * 40
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", secret)
+    target = {"id": "cal-bk-7", "sorry_name": "foo", "statement": _STUB}
+    host, _ = vibe_prove.scratch_paths(PACK, str(tmp_path), target["id"])
+
+    def env_dumping_agent(argv, stdout=None, stderr=None, **kw):
+        stdout.write(_transcript() + json.dumps({"type": "user", "message": {"content": [
+            {"type": "tool_result", "content": f"CLAUDE_CODE_OAUTH_TOKEN={secret}"}]}}) + "\n")
+        with open(host, "w", encoding="utf-8") as f:
+            f.write(f"-- {secret}\ntheorem foo : True := trivial\n")
+        return 0
+
+    sess = vibe_prove.run_prover_session(
+        PACK, target, main_repo=str(tmp_path), context_pack="", max_turns=5,
+        launcher="/x/claude-prove.sh", run_fn=env_dumping_agent, log_prefix=str(tmp_path / "t"))
+    assert secret not in open(sess["transcript"]).read()          # redacted before persist
+    assert secret not in sess["content"]                          # the candidate too
+    rec = vibe_prove.session_record(target, sess, engine="claude", model="m")
+    ran, why = vibe_prove.classify_session(rec)
+    assert ran is False and "credential" in why
+
+
+def test_the_prover_environment_holds_only_its_own_credential(monkeypatch):
+    monkeypatch.setenv("MAIN_PR_TOKEN", "ghp_" + "x" * 36)
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-" + "y" * 30)
+    engine, _launcher, _model, env, _cfg = vibe_prove._prover(
+        type("A", (), {"config": None, "engine": "claude"})())
+    assert "MAIN_PR_TOKEN" not in env and env["CLAUDE_CODE_OAUTH_TOKEN"].startswith("sk-ant-")
+
+
+# --- reuse a proof that already passed instead of paying for it again --------------
+
+def test_adopt_reuses_the_newest_verified_proof_and_charges_nothing(tmp_path):
+    runs = tmp_path
+    for tag, outcome in (("pipeline-20260928-001810", "pass"), ("pipeline-20260928-011101", "pass"),
+                         ("pipeline-20260929-000000", "max_rounds")):
+        (runs / f"{tag}-summary.jsonl").write_text(json.dumps(
+            {"target": "cal-bk-129", "harness": "vibe", "outcome": outcome}) + "\n")
+        (runs / f"{tag}-cal-bk-129.candidate").write_text(
+            "theorem x : True := trivial\n" if outcome == "pass" else "theorem x : True := by sorry\n")
+        (runs / f"{tag}-cal-bk-129.session.json").write_text(json.dumps(
+            {"engine": "claude", "model": "claude-sonnet-5", "rc": 0, "tokens": 72456}))
+    src = vibe_prove.adopt_verified(str(runs), "cal-bk-129", "pipeline-20261001-061700")
+    assert src == "pipeline-20260928-011101"
+    rec = json.load(open(runs / "pipeline-20261001-061700-cal-bk-129.session.json"))
+    assert rec["reused_from"] == src and rec["tokens"] == 0 and rec["original_tokens"] == 72456
+    assert "trivial" in (runs / "pipeline-20261001-061700-cal-bk-129.candidate").read_text()
+    assert vibe_prove.adopt_verified(str(runs), "cal-bk-999", "t") is None
