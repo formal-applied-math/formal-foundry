@@ -21,7 +21,8 @@ from probe_lib import axiom_guard_block, lint_violations, slop_report
 def gate(candidate: str, sorry_name: str, *, check_fn, statement: str | None = None) -> dict:
     """Return {passed, reason, axioms_clean, slop, errors, warnings}. `reason` is one
     of `forbidden:<list>` / `lint:<list>` / `compile_or_sorry` / `axiom_dirty` /
-    `statement_altered` / `ok`. `warnings` are the CANDIDATE check's elaborator warnings
+    `statement_altered` / `ok`, or `daemon_error` with `indeterminate: True` when the
+    daemon could not answer (no verdict). `warnings` are the CANDIDATE check's elaborator warnings
     (the strengthen pass reads `unused variable` off them); textual screens surface none.
 
     `statement` (item J): the ORIGINAL stub. When supplied, an accepted candidate must
@@ -40,10 +41,14 @@ def gate(candidate: str, sorry_name: str, *, check_fn, statement: str | None = N
                 "axioms_clean": None, "slop": slop, "errors": [], "warnings": []}
     result = check_fn(candidate)
     warnings = result.get("warnings", [])
+    if result.get("error"):
+        return _indeterminate(result, slop)
     if not (result.get("success") and result.get("sorry_count", 0) == 0):
         return {"passed": False, "reason": "compile_or_sorry", "axioms_clean": None,
                 "slop": slop, "errors": result.get("errors", []), "warnings": warnings}
     guard = check_fn(axiom_guard_block(candidate, sorry_name))
+    if guard.get("error"):
+        return _indeterminate(guard, slop)
     if not guard.get("success"):
         return {"passed": False, "reason": "axiom_dirty", "axioms_clean": False,
                 "slop": slop, "errors": [], "warnings": warnings}
@@ -56,3 +61,13 @@ def gate(candidate: str, sorry_name: str, *, check_fn, statement: str | None = N
                     "slop": slop, "errors": [], "warnings": warnings}
     return {"passed": True, "reason": "ok", "axioms_clean": True, "slop": slop,
             "errors": [], "warnings": warnings}
+
+
+def _indeterminate(result: dict, slop: dict) -> dict:
+    """The daemon failed to answer (dead, wedged, respawning, timed out). That is not a
+    verdict on the candidate: a valid proof must never be scored `compile_or_sorry` — or,
+    worse, `axiom_dirty` — because the Lean process died between two checks. Callers
+    treat `indeterminate` as an infrastructure error and keep the target retryable."""
+    return {"passed": False, "indeterminate": True, "reason": "daemon_error",
+            "axioms_clean": None, "slop": slop, "errors": [str(result.get("error"))],
+            "warnings": []}

@@ -230,3 +230,24 @@ def test_a_well_formed_reply_carries_no_infra_sentinel():
     r = _parse_daemon_response(_j.dumps({"success": True, "sorry_count": 0,
                                            "errors": []}).encode())
     assert not r.get("error") and r["success"] is True
+
+
+def test_the_daemons_own_catch_all_is_flagged_as_infrastructure():
+    """The daemon's catch-all answers WELL-FORMED: `{"success": false, "errors":
+    ["daemon error: …"]}` with no `error` key (a crashed REPL, its elaboration timeout,
+    a failed respawn). Read as a Lean rejection of the submitted code, a dead daemon
+    became a verdict — `compile_or_sorry` on a valid proof, `axiom_dirty` on a clean one."""
+    import json as _j
+    r = _parse_daemon_response(_j.dumps(
+        {"success": False, "errors": ["daemon error: TimeoutError()"]}).encode())
+    assert r["error"].startswith("daemon error:")
+    r = _parse_daemon_response(b'{"success": false, "errors": ["empty input"]}')
+    assert r["error"] == "empty input"
+
+
+def test_a_real_lean_error_is_not_mistaken_for_the_daemon():
+    import json as _j
+    r = _parse_daemon_response(_j.dumps(
+        {"success": False, "sorry_count": 0,
+         "errors": ["line 3:2: unknown identifier `daemon`"]}).encode())
+    assert not r.get("error")

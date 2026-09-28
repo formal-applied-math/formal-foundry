@@ -8,10 +8,91 @@ import re
 
 ALLOWED_AXIOMS = ["propext", "Classical.choice", "Quot.sound"]
 
-FORBIDDEN = [
-    "sorry", "admit", "native_decide", "polyrith",
-    "exact?", "apply?", "hint",
-]
+# The forbidden-text screen, kept identical to the target library's own values gate
+# (`tests/test_values.py::FORBIDDEN_PATTERNS` in the flagship), which is what finally
+# accepts or rejects a PR. It used to be a raw substring list, and two things went wrong:
+# `"hint"` matched the binders `hintS2`/`hintEx` in cal-bk-57 and the hypothesis
+# `have hint` in cal-bk-80, so no proof of either could ever pass a gate the library
+# itself does not impose; and the tokens the library DOES forbid (`rw?`, `simp?`,
+# `hammer`, `#loogle`, `leansearch`) sailed through here and would only have been caught
+# at PR time. Matched on word boundaries in comment-stripped text, like the library.
+FORBIDDEN_PATTERNS = (
+    (re.compile(r"\bsorry\b"), "sorry"),
+    (re.compile(r"\badmit\b"), "admit"),
+    (re.compile(r"\bnative_decide\b"), "native_decide"),
+    (re.compile(r"\bpolyrith\b"), "polyrith"),
+    (re.compile(r"\bexact\?"), "exact?"),
+    (re.compile(r"\bapply\?"), "apply?"),
+    (re.compile(r"\brw\?"), "rw?"),
+    (re.compile(r"\bsimp\?"), "simp?"),
+    (re.compile(r"\bhammer\b"), "hammer"),
+    (re.compile(r"#loogle"), "#loogle"),
+    (re.compile(r"\bleansearch\b", re.IGNORECASE), "leansearch"),
+)
+FORBIDDEN = [label for _pattern, label in FORBIDDEN_PATTERNS]
+
+_SORRY_RE = re.compile(r"\bsorry\b")
+
+
+def strip_lean_comments(src: str) -> str:
+    """Remove Lean comments — nested `/- -/` blocks (docstrings included) and `--` line
+    comments — keeping newlines so line numbers stay stable. String literals are
+    respected, so a `--` inside a string survives. A port of the target library's own
+    `strip_comments` (its `tools/verify` declaration index), so both sides read the
+    same text."""
+    out = []
+    i, n = 0, len(src)
+    depth = 0
+    in_string = False
+    while i < n:
+        c = src[i]
+        nxt = src[i + 1] if i + 1 < n else ""
+        if depth == 0 and not in_string and c == '"':
+            in_string = True
+            out.append(c)
+            i += 1
+            continue
+        if in_string:
+            if c == "\\":
+                out.append(c)
+                out.append(nxt)
+                i += 2
+                continue
+            if c == '"':
+                in_string = False
+            out.append(c)
+            i += 1
+            continue
+        if c == "/" and nxt == "-":
+            depth += 1
+            i += 2
+            continue
+        if depth > 0:
+            if c == "-" and nxt == "/":
+                depth -= 1
+                i += 2
+                continue
+            if c == "\n":
+                out.append(c)
+            i += 1
+            continue
+        if c == "-" and nxt == "-":
+            while i < n and src[i] != "\n":
+                i += 1
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def count_sorries(code: str) -> int:
+    """`sorry` occurrences in CODE, not in prose — a docstring saying "no sorry" is not
+    one. Every "is this still a stub?" question in the pipeline goes through here."""
+    return len(_SORRY_RE.findall(strip_lean_comments(code)))
+
+
+def has_sorry(code: str) -> bool:
+    return count_sorries(code) > 0
 
 _FENCE_RE = re.compile(r"```(lean)?\s*\n(.*?)```", re.DOTALL)
 
@@ -127,7 +208,8 @@ def best_failure(results: list[dict]) -> int:
 
 
 def slop_report(code: str) -> dict:
-    found = [w for w in FORBIDDEN if w in code]
+    stripped = strip_lean_comments(code)
+    found = [label for pattern, label in FORBIDDEN_PATTERNS if pattern.search(stripped)]
     brackets = re.findall(r"\[([^\[\]]*)\]", code)
     max_args = max((len([a for a in b.split(",") if a.strip()]) for b in brackets),
                    default=0)
