@@ -127,11 +127,16 @@ transient() {  # infra/transient failure (network, gh, docker pull): no issue, n
 cd "$MAIN"
 BRANCH="autoform/$ID-$TAG"
 git checkout -B "$BRANCH"
-python3 - "$CAND" "$QUEUE" "$ID" "$MAIN" "$FOUNDRY/probe" "$FOUNDRY/runs/$TAG-$ID.entry.json" <<'PY' || exit 1
+python3 - "$CAND" "$QUEUE" "$ID" "$MAIN" "$FOUNDRY/probe" "$FOUNDRY/runs/$TAG-$ID.entry.json" "$DOMAIN_NAME" <<'PY' || exit 1
 import json, os, sys
-cand_path, queue_path, tid, main, probe_dir, entry_override = sys.argv[1:7]
+cand_path, queue_path, tid, main, probe_dir, entry_override, domain_name = sys.argv[1:8]
 sys.path.insert(0, probe_dir)
+import domain_pack
 from assemble import apply_contribution, ensure_umbrella_import
+# the pack is passed DOWN (2026-08-16 refactor); this heredoc was missed by it, so the
+# first real pass after that date would have crashed here and — treated as transient —
+# been re-proved every tick without ever opening a PR.
+pack = domain_pack.load(domain_name)
 q = json.load(open(queue_path))
 target = next(t for t in (q.get("targets", q) if isinstance(q, dict) else q) if t["id"] == tid)
 if os.path.exists(entry_override):
@@ -142,8 +147,8 @@ if os.path.exists(entry_override):
 else:
     entry = target["benchmark_entry"]  # authored in the seed manifest
 code = open(cand_path, encoding="utf-8").read()
-written = apply_contribution(code, target, entry, main)
-written += ensure_umbrella_import(main, target["main_module"])
+written = apply_contribution(pack, code, target, entry, main)
+written += ensure_umbrella_import(main, target["main_module"], f"{pack.namespace}.lean")
 print("[open-pr] wrote:", ", ".join(written), file=sys.stderr)
 PY
 

@@ -2306,3 +2306,122 @@ def test_locate_named_still_accepts_an_attribute_before_a_modifier():
     src = "@[simp]\nprivate theorem t (h : True) : 0 ≤ 1 := by norm_num\n"
     bstart, sep, _end = af._locate_named(src, "t")
     assert src[bstart:sep].strip() == "(h : True)"
+
+
+# --- Phase 0: the drafter elaborates what it stages ------------------------------
+
+def _sv(check_fn, **kw):
+    kw.setdefault("prove_fn", _NOOP)
+    return af.semantic_verdict(PACK, lean_text="theorem fra_value : True := by sorry",
+                               stub=_STUB, name="fra_value", intent={}, issue=_ISSUE,
+                               deferred=[], reason_fn=_NOOP, check_fn=check_fn,
+                               gate_budget=100, **kw)
+
+
+def test_gate0_rejects_a_staged_text_that_does_not_elaborate():
+    """cal-bk-116 reached the queue without its import, and blocked it."""
+    fail, _tok = _sv(lambda c: {"success": False, "sorry_count": 0,
+                                "errors": ["line 44:13: Unknown identifier `SurvivalModel.alive`"]})
+    assert fail["gate"] == "elaboration" and "SurvivalModel.alive" in fail["detail"]
+
+
+def test_gate0_wants_exactly_the_theorems_sorry_and_a_dead_daemon_is_no_verdict():
+    fail, _ = _sv(lambda c: {"success": True, "errors": [], "sorry_count": 2})
+    assert fail["gate"] == "elaboration" and "counted 2" in fail["detail"]
+    fail, _ = _sv(lambda c: {"success": False, "error": "daemon check did not complete",
+                             "errors": ["daemon check did not complete"]})
+    assert fail["gate"] == "indeterminate"
+
+
+def test_kernel_probes_off_never_calls_the_retired_prover(monkeypatch):
+    """After 2026-09-30 every Leanstral call raises; with the probes on, that exception
+    escapes the battery and the issue is recorded `error` — no draft could be staged."""
+    import pytest
+
+    def retired(msgs):
+        raise RuntimeError("HTTP 400 from Mistral API: invalid model")
+
+    monkeypatch.setattr(af, "judge_faithfulness",
+                        lambda *a, **k: {"faithful": True, "tokens": 0})
+    fail, _ = _sv(_ELAB_OK, prove_fn=retired, kernel_probes=False)
+    assert fail is None
+    with pytest.raises(RuntimeError):
+        _sv(_ELAB_OK, prove_fn=retired, kernel_probes=True)
+
+
+class _Rc(_FakeRun):
+    returncode = 1
+
+
+def _write_scratch(cwd, text):
+    with open(os.path.join(cwd, PACK.scratch_module), "w", encoding="utf-8") as f:
+        f.write(text)
+
+
+def _formalize(tmp_path, fake_run, issue=None):
+    return af.agentic_formalize(PACK, _AGENTIC_INTENT, issue=issue or _ISSUE,
+                                main_repo=str(tmp_path), run_fn=fake_run,
+                                mcp_config_path="/tmp/x.json")
+
+
+def test_agentic_formalize_rejects_the_scaffold_placeholder_name(tmp_path):
+    """cal-bk-79 was staged as `theorem _agentic_placeholder`."""
+    os.makedirs(tmp_path / "MathFin")
+
+    def fake_run(argv, stdin, cwd):
+        _write_scratch(cwd, _agentic_scaffolded("theorem _agentic_placeholder : 1 = 1 := by sorry"))
+        return _FakeRun(stdout='{"is_error":false}')
+    r = _formalize(tmp_path, fake_run)
+    assert r["ok"] is False and "placeholder" in r["reason"]
+
+
+def test_agentic_formalize_never_reads_back_a_stale_scratch_file(tmp_path):
+    os.makedirs(tmp_path / "MathFin")
+    _write_scratch(str(tmp_path), _agentic_scaffolded("theorem other_issue : True := by sorry"))
+    r = _formalize(tmp_path, lambda a, s, c: _FakeRun(stdout="{}"))
+    assert r["ok"] is False and "no file" in r["reason"]
+
+
+def test_agentic_formalize_reports_a_failed_session_as_such(tmp_path):
+    os.makedirs(tmp_path / "MathFin")
+    r = _formalize(tmp_path, lambda a, s, c: _Rc(stdout="", stderr="usage limit reached"))
+    assert r["ok"] is False and "rc=1" in r["reason"] and "usage limit" in r["reason"]
+
+    def erroring(argv, stdin, cwd):
+        _write_scratch(cwd, _agentic_scaffolded("theorem t_ok : True := by sorry"))
+        return _FakeRun(stdout='{"is_error": true, "subtype": "error_during_execution"}')
+    r = _formalize(tmp_path, erroring)
+    assert r["ok"] is False and "error_during_execution" in r["reason"]
+
+
+def test_agentic_formalize_keeps_an_added_import_of_an_existing_library_module(tmp_path):
+    """The objects an issue names can live outside its pointer modules (cal-bk-116's
+    `SurvivalModel`); the re-emit used to drop every import Claude added."""
+    os.makedirs(tmp_path / "MathFin" / "Actuarial")
+    (tmp_path / "MathFin" / "Actuarial" / "SurvivalModel.lean").write_text("")
+
+    def fake_run(argv, stdin, cwd):
+        lt = _agentic_scaffolded("theorem survive_bridge : True := by sorry")
+        lt = lt.replace("public import Mathlib\n",
+                        "public import Mathlib\npublic import MathFin.Actuarial.SurvivalModel\n"
+                        "public import MathFin.Actuarial.DoesNotExist\n", 1)
+        _write_scratch(cwd, lt)
+        return _FakeRun(stdout="{}")
+    r = _formalize(tmp_path, fake_run)
+    assert r["ok"] is True, r["reason"]
+    assert "public import MathFin.Actuarial.SurvivalModel" in r["lean_text"]
+    assert "MathFin/Actuarial/SurvivalModel.lean" in r["lean_text"]      # a pointer now
+    assert "DoesNotExist" not in r["lean_text"]
+
+
+def test_agentic_formalize_refuses_to_overwrite_an_existing_module(tmp_path):
+    """cal-bk-116's main-module was `SurvivalModel.lean` itself: open-pr WRITES that path."""
+    existing = tmp_path / "MathFin" / "FixedIncome" / "UpCapAgentic.lean"
+    os.makedirs(existing.parent)
+    existing.write_text("-- a module already in the library")
+
+    def fake_run(argv, stdin, cwd):
+        _write_scratch(cwd, _agentic_scaffolded("theorem up_capture_ok : True := by sorry"))
+        return _FakeRun(stdout="{}")
+    r = _formalize(tmp_path, fake_run)
+    assert r["ok"] is False and "already exists" in r["reason"]

@@ -1,5 +1,11 @@
 # Why the foundry produced nothing for five weeks
 
+> **Superseded 2026-09-27.** From 2026-08-19 the prover never started: the launcher raised
+> a TypeError before `vibe` ran and each crash was scored `max_rounds`, and before that the
+> queue was blocked. "The easy targets were exhausted" and "the direct prover hits
+> `max_rounds` on all of it" were never measured. See
+> [`2026-09-27-prover-outage-postmortem.md`](2026-09-27-prover-outage-postmortem.md).
+
 **Status 2026-09-01.** The loop runs on schedule and every CI run is green. It has
 produced **4 candidates ever**, all between 2026-07-17 and 2026-07-26, and **nothing
 since**.

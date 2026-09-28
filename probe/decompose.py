@@ -240,6 +240,29 @@ def with_target(dag: Dag, target_text: str) -> Dag:
     return dag
 
 
+def drop_unresolvable_pointers(dag: Dag, main_repo: str, *, log=lambda m: None) -> Dag:
+    """`dag` with every leaf pointer that names a module MISSING from the checkout
+    removed (each is logged).
+
+    One unresolvable import leaves Lean with an empty environment, so the first errors
+    are the house `open` lines — `unknown namespace MeasureTheory` / `NNReal`. Four
+    consecutive ticks (cal-bk-75, 74, 90, 91; 2026-09-15..23) rejected their splits that
+    way, and the rejections were read as the REPL losing Mathlib; the environment canary
+    that runs before every rejection says the environment was fine. The splitter's
+    natural mistake is to point a leaf at the target's own main module, which does not
+    exist until the target is proved — and whose definitions already ride the skeleton
+    via `with_target`. The refill filters its pointers the same way (`prepare_issues`)."""
+    for leaf in dag.leaves:
+        kept = []
+        for p in leaf.pointers:
+            if p.endswith(".lean") and not os.path.isfile(os.path.join(main_repo, p)):
+                log(f"leaf {leaf.name}: dropped pointer to a module that does not exist: {p}")
+                continue
+            kept.append(p)
+        leaf.pointers = kept
+    return dag
+
+
 def dag_to_dict(dag: Dag) -> dict:
     """Serialize a `Dag` back to the decomposer's JSON shape (inverse of `parse_dag`), so
     a run can persist the DAG and reparse it in the recompose step."""

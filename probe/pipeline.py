@@ -51,8 +51,13 @@ def cmd_plan(args) -> int:
     try:
         queue = json.load(open(args.queue))
         candidates = queue.get("targets", []) if isinstance(queue, dict) else list(queue)
+        quarantined = ([q.get("id") for q in queue.get("quarantined", [])]
+                       if isinstance(queue, dict) else [])
     except (OSError, ValueError):
-        candidates = []
+        candidates, quarantined = [], []
+    if quarantined:
+        print(f"[plan] QUARANTINED stubs (excluded; fix or retire them): {quarantined}",
+              file=sys.stderr)
     # backlog T: `attempted_issues` is the fast path, but it is a mutable file written
     # after the PR is opened — when it lost the 2026-07-20 attempts the pipeline
     # re-drafted #161/#162 and opened duplicate PRs for both. So ground truth backstops
@@ -77,14 +82,18 @@ def cmd_plan(args) -> int:
         census = P.selection_census(
             candidates, state,
             claimed_fn=lambda c: bool(ask_gh) and P.pr_claimed(c, repo=pack.slug),
-            queue_dir=os.path.dirname(os.path.abspath(args.queue)))
+            queue_dir=os.path.dirname(os.path.abspath(args.queue)),
+            quarantined=quarantined)
         print(f"[plan] nothing selectable: {census}", file=sys.stderr)
         if census.get("missing_from_candidates"):
             print("[plan] STALE MANIFEST: stubs on disk absent from the candidate "
                   f"list: {census['missing_from_candidates']} — rebuild it with "
                   "`probe/build_manifest.py`", file=sys.stderr)
+        # the tick rebuilds the manifest and re-plans on this flag before it refills,
+        # rather than drafting a new stub while staged ones sit unactivated
         return emit({"action": "skip", "reason": "no_unattempted_targets",
-                     "census": census})
+                     "census": census,
+                     "stale_manifest": bool(census.get("missing_from_candidates"))})
 
     difficulty = target.get("difficulty")
     if not P.can_afford(state, cfg, difficulty):

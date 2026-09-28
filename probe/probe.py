@@ -122,7 +122,7 @@ def _parse_daemon_response(raw: bytes) -> dict:
     dict rather than raising, so callers (run_target / formalize_with_repair) treat it
     as a failed check and retry instead of crashing the target."""
     try:
-        return json.loads(raw.decode("utf-8"))
+        parsed = json.loads(raw.decode("utf-8"))
     except (ValueError, UnicodeDecodeError) as e:
         # A malformed/empty payload is INFRASTRUCTURE, not a verdict about the code, so
         # it carries the `error` sentinel exactly like a socket failure does. This is
@@ -137,6 +137,21 @@ def _parse_daemon_response(raw: bytes) -> dict:
         # Lean. `errors` is kept so the repair loop still treats it as a failed check.
         msg = f"daemon returned an empty or malformed response: {e}"
         return {"success": False, "sorry_count": 0, "error": msg, "errors": [msg]}
+    # The daemon's own catch-all (a crashed REPL, its elaboration timeout, a respawn that
+    # failed) answers WELL-FORMED — `{"success": false, "errors": ["daemon error: …"]}` —
+    # with no `error` key, so every caller that keys on `error` read it as a real Lean
+    # rejection of the submitted code. It is the daemon talking about itself.
+    if isinstance(parsed, dict) and not parsed.get("error"):
+        infra = [str(m) for m in (parsed.get("errors") or [])
+                 if str(m).startswith(_DAEMON_SELF_REPORTS)]
+        if infra:
+            parsed["error"] = infra[0]
+    return parsed
+
+
+#: Messages the daemon uses about ITSELF (see the target library's `lean_repl.handle`),
+#: as opposed to diagnostics about the code it was sent.
+_DAEMON_SELF_REPORTS = ("daemon error:", "empty input")
 
 
 def daemon_check(code: str, *, host="127.0.0.1", port=7878, timeout=300) -> dict:

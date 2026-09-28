@@ -18,9 +18,16 @@ import sys
 
 from decompose import build_leaf_manifest, parse_dag
 from probe import daemon_check
-from probe_lib import sha256_hex
+from probe_lib import count_sorries, sha256_hex
 
 STREAMS = {"bk": "backlog", "a4": "depth", "sp": "textbook", "ctl": "control"}
+
+_FOUNDRY = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_DEFAULT_CONFIG = os.path.join(_FOUNDRY, "pipeline.toml")
+
+#: The daemon could not answer. No manifest is written: a manifest built on a sick daemon
+#: would quarantine every stub for a fault that is not theirs.
+EXIT_INFRA = 2
 
 
 def parse_pointers(code: str) -> list[str]:
@@ -92,16 +99,43 @@ def build_dag_leaves(args) -> int:
     dag = parse_dag(json.load(open(args.dag)))
     meta = json.loads(args.meta) if args.meta else {}
     proved = json.loads(open(args.proved).read()) if args.proved else None
-    man = build_leaf_manifest(dag, meta, args.out, toolchain=toolchain,
+    import domain_pack
+    pack = domain_pack.load(args.domain or domain_pack.name_from_config(_DEFAULT_CONFIG))
+    man = build_leaf_manifest(pack, dag, meta, args.out, toolchain=toolchain,
                               main_commit=commit, proved=proved)
     print(f"wrote {os.path.join(args.out, 'manifest.json')}: "
           f"{len(man['targets'])} leaf target(s)")
     return 0
 
 
+def validate_stub(fname: str, code: str, *, check_fn) -> tuple[str, str]:
+    """One stub's verdict: `("ok", "")`, `("quarantine", why)` for a stub that is itself
+    malformed, or `("infra", why)` when the daemon could not answer.
+
+    Each stub stands or falls ALONE. This used to be a batch gate — one stub that did not
+    elaborate failed the whole manifest, the planner then found nothing selectable, the
+    tick drafted yet another stub, and that one could not activate either. It held the
+    queue shut from 2026-07-29 to 2026-08-18 and again from 2026-09-25 (cal-bk-116, a
+    missing import), with every CI run green."""
+    if not re.match(r"cal-(bk|a4|sp|ctl)-\d+\.lean", fname):
+        return "quarantine", "bad name"
+    if not re.search(r"\btheorem\s+([A-Za-z0-9_'.]+)", code):
+        return "quarantine", "no theorem decl found"
+    n = count_sorries(code)            # code only: a docstring saying "sorry" is not one
+    if n != 1:
+        return "quarantine", f"expected exactly 1 sorry, found {n}"
+    res = check_fn(code)
+    if res.get("error"):
+        return "infra", str(res["error"])
+    if res.get("errors"):
+        return "quarantine", f"statement does not elaborate: {res['errors'][:2]}"
+    return "ok", ""
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--main-repo", required=True)
+    ap.add_argument("--domain", default=None, help="domain pack (default: pipeline.toml)")
     # --dag mode: build a leaf manifest for a decomposed target instead of scanning stubs.
     ap.add_argument("--dag", help="path to a skeleton-gated lemma-DAG json (Phase 2 leaf routing)")
     ap.add_argument("--out", help="output dir for the leaf manifest + stubs (--dag mode)")
@@ -116,31 +150,23 @@ def main() -> int:
 
     # the live queue the scheduler reads (targets/queue/manifest.json); stubs +
     # their <id>.entry.json sidecars live alongside it.
-    tdir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                        "targets", "queue")
+    tdir = os.path.join(_FOUNDRY, "targets", "queue")
     toolchain, commit = _toolchain_and_commit(args.main_repo)
 
-    targets, bad = [], []
+    targets, quarantined = [], []
     for path in sorted(glob.glob(os.path.join(tdir, "cal-*.lean"))):
         fname = os.path.basename(path)
+        code = open(path, encoding="utf-8").read()
+        verdict, why = validate_stub(fname, code, check_fn=daemon_check)
+        if verdict == "infra":
+            print(f"[manifest] the daemon could not answer while checking {fname} ({why}) "
+                  "— NOT writing a manifest from a sick daemon", file=sys.stderr)
+            return EXIT_INFRA
+        if verdict == "quarantine":
+            quarantined.append({"id": fname[:-5], "file": fname, "reason": why})
+            continue
         m = re.match(r"cal-(bk|a4|sp|ctl)-\d+\.lean", fname)
-        if not m:
-            bad.append(f"{fname}: bad name")
-            continue
-        code = open(path).read()
         decl = re.search(r"\btheorem\s+([A-Za-z0-9_'.]+)", code)
-        if not decl:
-            bad.append(f"{fname}: no theorem decl found")
-            continue
-        if code.count("sorry") != 1:
-            bad.append(f"{fname}: expected exactly 1 sorry")
-            continue
-        res = daemon_check(code)
-        # a well-formed statement elaborates: no errors, exactly the 1 sorry
-        if res["errors"]:
-            bad.append(f"{fname}: statement does not elaborate: "
-                       f"{res['errors'][:2]}")
-            continue
         target = {
             "id": fname[:-5], "stream": STREAMS[m.group(1)], "kind": "prove",
             "sorry_name": decl.group(1), "file": fname,
@@ -159,14 +185,18 @@ def main() -> int:
         targets.append(target)
         print(f"ok  {fname}  ({decl.group(1)})")
 
-    if bad:
-        print("MANIFEST BLOCKED:", *bad, sep="\n  ", file=sys.stderr)
-        return 1
+    if quarantined:
+        # Loud, and every other target stays live. A quarantined stub is fixed or
+        # retired by a person; it is never silently dropped and never blocks the rest.
+        print("QUARANTINED (excluded from this manifest; the rest stay live):",
+              *[f"{q['file']}: {q['reason']}" for q in quarantined], sep="\n  ",
+              file=sys.stderr)
     manifest = {"toolchain": toolchain, "main_commit": commit,
-                "targets": targets}
+                "targets": targets, "quarantined": quarantined}
     out = os.path.join(tdir, "manifest.json")
-    json.dump(manifest, open(out, "w"), indent=2)
-    print(f"wrote {out}: {len(targets)} targets")
+    with open(out, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, indent=2)
+    print(f"wrote {out}: {len(targets)} targets, {len(quarantined)} quarantined")
     return 0
 
 

@@ -125,3 +125,24 @@ def test_gate_no_statement_pin_by_default():
     weak = "import Mathlib\ntheorem t (h : p) : True := trivial"
     r = gate.gate(weak, "t", check_fn=_OK)
     assert r["passed"] is True
+
+
+# --- a dead daemon is not a verdict -------------------------------------------
+
+def test_a_daemon_failure_on_the_candidate_check_is_indeterminate_not_a_rejection():
+    r = gate.gate(CLEAN, "t", check_fn=lambda c: {
+        "success": False, "sorry_count": 0, "error": "daemon error: EOF",
+        "errors": ["daemon error: EOF"]})
+    assert r["passed"] is False and r["indeterminate"] is True
+    assert r["reason"] == "daemon_error"
+
+
+def test_a_daemon_death_between_the_two_checks_is_not_axiom_dirty():
+    # the candidate check succeeds, then the daemon dies before the axiom guard: that
+    # used to be recorded as a disallowed axiom on a proof that was clean
+    seq = iter([{"success": True, "sorry_count": 0, "errors": []},
+                {"success": False, "sorry_count": 0, "error": "daemon check did not complete",
+                 "errors": ["daemon check did not complete"]}])
+    r = gate.gate(CLEAN, "t", check_fn=lambda c: next(seq))
+    assert r["indeterminate"] is True and r["reason"] == "daemon_error"
+    assert r["axioms_clean"] is None

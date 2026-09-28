@@ -15,7 +15,7 @@ if docker ps --format '{{.Image}}' | grep -q "$DOMAIN_VERIFY_IMAGE"; then
 fi
 
 STAMP="$(date -u +%Y%m%d-%H%M%S)"
-ARM="${ARM:-mathfin}"
+ARM="${ARM:-library}"   # necessity_sweep.py --arm: library | catalogue | mathlib
 OUT="runs/necessity-sweep/${STAMP}-${ARM}.jsonl"
 mkdir -p runs/necessity-sweep
 echo "[sweep] arm=${ARM} out=${OUT}"

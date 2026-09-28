@@ -121,6 +121,39 @@ def test_slop_report_flags_forbidden():
     assert clean["max_bracket_args"] == 2
 
 
+def test_slop_report_ignores_identifiers_that_merely_contain_a_forbidden_word():
+    # cal-bk-57's binders and cal-bk-80's hypothesis. `hint` was never forbidden by the
+    # target library's own values gate, and a substring match made both stubs
+    # unprovable: the statement pin forbids renaming the binders.
+    stub = ("theorem betterOfTwo (hintS2 : Integrable S2T Q)\n"
+            "    (hintEx : Integrable f Q) : P := by\n"
+            "  have hint : a = b := by ring\n  rw [hint]\n")
+    assert slop_report(stub)["forbidden"] == []
+    assert slop_report("theorem t (hsorry : P) : P := hsorry")["forbidden"] == []
+
+
+def test_slop_report_reads_code_not_comments_or_docstrings():
+    doc = ("/-- A proof with no `sorry`; do not use `native_decide`. -/\n"
+           "theorem t : 1 = 1 := by\n  rfl -- polyrith would also work\n")
+    assert slop_report(doc)["forbidden"] == []
+    assert slop_report("theorem t : P := by\n  /- nested /- sorry -/ -/ sorry\n")["forbidden"] == ["sorry"]
+
+
+def test_slop_report_matches_the_libraries_forbidden_list():
+    for code, label in [("by rw?", "rw?"), ("by simp?", "simp?"), ("by hammer", "hammer"),
+                        ("#loogle Real.exp", "#loogle"), ("by exact?", "exact?"),
+                        ("by apply?", "apply?"), ("by admit", "admit")]:
+        assert slop_report(f"theorem t : P := {code}")["forbidden"] == [label], code
+
+
+def test_count_sorries_ignores_prose():
+    from probe_lib import count_sorries, has_sorry
+    stub = "/-- the stub; no sorry in the docs counts -/\ntheorem t : P := by sorry\n"
+    assert count_sorries(stub) == 1
+    assert has_sorry("theorem t : P := by\n  exact h -- was sorry\n") is False
+    assert count_sorries('def s : String := "sorry"\ntheorem t : P := h') == 1  # strings are code
+
+
 def test_sha256_and_jsonl():
     assert len(sha256_hex("abc")) == 64
     with tempfile.TemporaryDirectory() as d:

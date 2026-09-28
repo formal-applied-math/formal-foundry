@@ -48,14 +48,16 @@ jout() { printf '%s' "$1" | python3 -c "import sys,json;print(json.load(sys.stdi
 # NOTHING on disk saying whether the split was undraftable, the skeleton did not
 # elaborate, or the daemon was wedged. A loop that fails invisibly cannot be repaired
 # from its own telemetry, which is the whole point of running it unattended.
+ENGINE="$(python3 -c "import pipeline_lib as p; print(p.ProverConfig.load('$CFG').engine)")"
 record() {
   python3 - "$SUMMARY" "$RUNS" "$ID" "$1" "${2:-0}" "${3:-0}" "${4:-0}" \
-    "$FOUNDRY/docs/research/ab-decomposer.md" "${5:-}" <<'PY'
+    "$FOUNDRY/docs/research/ab-decomposer.md" "${5:-}" "$ENGINE" <<'PY'
 import json, sys, time
 sys.path.insert(0, ".")
 from scoreboard import ab_row, append_ab_row, update_scoreboard_md
 summ, runs, tid, outcome, tok, lt, lc, md = sys.argv[1:9]
 reason = (sys.argv[9] if len(sys.argv) > 9 else "").strip()
+engine = (sys.argv[10] if len(sys.argv) > 10 else "") or "leanstral"
 tok, lt, lc = int(tok), int(lt), int(lc)
 ts = time.strftime("%Y-%m-%dT%H:%M:%S")
 with open(summ, "a", encoding="utf-8") as f:
@@ -65,7 +67,7 @@ with open(summ, "a", encoding="utf-8") as f:
                         "reason": reason}) + "\n")
 append_ab_row(runs, ab_row(target=tid, arm="decompose", outcome=outcome, ts=ts,
                            leaves_total=lt, leaves_closed=lc, tokens=tok,
-                           note=reason[:200]))
+                           note=reason[:200], engine=engine))
 update_scoreboard_md(md, runs)
 PY
 }
@@ -93,20 +95,43 @@ fi
 
 # 2. prove ALL leaves in one flip pair (mirrors pipeline-tick.sh step 2, leaf manifest).
 echo "[decompose] proving leaves via vibe ⇄ lean-lsp-mcp (max_turns=$TURNS)…" >&2
+# The plain attempt this tick escalated from already proved the canary; a forced
+# decompose has not, so its leaf run proves it first.
+CANARY_ARGS=()
+if python3 -c "import json,sys; sys.exit(0 if json.load(open(sys.argv[1])).get('canary_ok') else 1)" \
+     "$RUNS/$TAG-foundry-canary.json" 2>/dev/null; then
+  CANARY_ARGS=(--no-canary)
+fi
 set +e
-python3 vibe_prove.py run --manifest "$LEAFMAN" --arm decompose \
+python3 vibe_prove.py run --manifest "$LEAFMAN" --arm decompose "${CANARY_ARGS[@]}" \
   --max-turns "$TURNS" --run-tag "$TAG" --main-repo "$MAIN" --config "$CFG"
+RUN_RC=$?
 echo "[decompose] flipping the Lean slot back to the daemon for the leaf gates…" >&2
 docker compose -f "$BASE" -f "$LSP" stop lean-lsp >/dev/null 2>&1
 docker compose -f "$BASE" -p docker up -d lean-repl >/dev/null 2>&1
-python3 wait_daemon.py || echo "[decompose] WARNING: daemon not ready; gates may fail" >&2
+python3 wait_daemon.py; DAEMON_RC=$?
+set -e
+# A leaf run that never proved anything because the machinery failed is an `error`
+# (retryable), not a `max_rounds` "remainder" — every split that passed its skeleton
+# gate from 2026-09-03 to 2026-09-21 was retired that way without one real prover turn.
+if [ "$RUN_RC" != 0 ]; then
+  record error 0 "$LT" 0 "leaf prove phase failed (rc=$RUN_RC; 5 = prover canary failed)"
+  echo "[decompose] leaf prove phase failed rc=$RUN_RC — recorded as error" >&2
+  exit 0
+fi
+if [ "$DAEMON_RC" != 0 ]; then
+  record error 0 "$LT" 0 "the daemon did not come back to gate the leaves"
+  echo "[decompose] daemon not ready — recorded as error" >&2
+  exit 0
+fi
+set +e
 python3 vibe_prove.py gate --manifest "$LEAFMAN" --arm decompose \
   --run-tag "$TAG" --main-repo "$MAIN" --config "$CFG"
 set -e
 
 # 3. recompose (daemon up): assemble proved leaves + main, full gate → candidate.
 RECMP="$(python3 decompose_tick.py recompose --id "$ID" --tag "$TAG" --runs "$RUNS" \
-  || echo '{"outcome":"fail_gate","leaves_total":0,"leaves_closed":0}')"
+  || echo '{"outcome":"error","reason":"recompose crashed","leaves_total":0,"leaves_closed":0}')"
 ROUT="$(jout "$RECMP" outcome)"
 LT="$(jout "$RECMP" leaves_total)"; LT="${LT:-0}"
 LC="$(jout "$RECMP" leaves_closed)"; LC="${LC:-0}"
@@ -117,6 +142,7 @@ echo "[decompose] recompose outcome=$ROUT leaves=$LC/$LT" >&2
 case "$ROUT" in
   pass)    record pass 0 "$LT" "$LC" ;;
   partial) record max_rounds 0 "$LT" "$LC" "remainder: $(jout "$RECMP" remainder)" ;;
+  error)   record error 0 "$LT" "$LC" "$(jout "$RECMP" reason)" ;;
   *)       record fail_gate 0 "$LT" "$LC" "$(jout "$RECMP" reason)" ;;
 esac
 exit 0

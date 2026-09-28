@@ -26,3 +26,16 @@ def test_tolerates_check_exceptions_then_succeeds():
 
     assert wait_daemon.wait_ready(tries=6, sleep=0, check_fn=flaky,
                                   sleep_fn=lambda s: None) is True
+
+
+def test_a_live_daemon_without_its_environment_is_not_ready():
+    """The REPL answers `example : True := by trivial` with or without Mathlib."""
+    import domain_pack
+    pack = domain_pack.load("mathfin")
+    no_mathlib = lambda code: {"success": False, "sorry_count": 0,  # noqa: E731
+                               "errors": ["line 18:5: unknown namespace `MeasureTheory`"]}
+    assert wait_daemon.environment_ready(check_fn=no_mathlib, pack=pack, tries=2,
+                                         sleep=0, sleep_fn=lambda s: None) is False
+    healthy = lambda code: {"success": True, "sorry_count": 0, "errors": []}  # noqa: E731
+    assert wait_daemon.environment_ready(check_fn=healthy, pack=pack, tries=2,
+                                         sleep=0, sleep_fn=lambda s: None) is True

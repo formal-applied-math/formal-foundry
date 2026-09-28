@@ -92,3 +92,40 @@ def test_load_entry_none_when_absent():
         stub = os.path.join(d, "cal-bk-99.lean")
         open(stub, "w").close()
         assert load_entry(stub) is None
+
+
+# --- per-target quarantine (was: one bad stub blocked the whole queue) ---------
+
+from build_manifest import validate_stub  # noqa: E402
+
+_GOOD = "module\n\npublic import Mathlib\n\n/-- no sorry in prose -/\ntheorem t : True := by sorry\n"
+
+
+def _ok(code):
+    return {"success": True, "errors": [], "sorry_count": 1}
+
+
+def test_a_well_formed_stub_is_ok_and_prose_sorry_does_not_count():
+    assert validate_stub("cal-bk-1.lean", _GOOD, check_fn=_ok) == ("ok", "")
+
+
+def test_a_stub_that_does_not_elaborate_is_quarantined_alone():
+    # cal-bk-116: `SurvivalModel.alive` without its import. It used to fail the batch.
+    verdict, why = validate_stub("cal-bk-116.lean", _GOOD, check_fn=lambda c: {
+        "success": False, "errors": ["line 44:13: Unknown identifier `SurvivalModel.alive`"]})
+    assert verdict == "quarantine" and "does not elaborate" in why
+
+
+def test_a_dead_daemon_is_infrastructure_not_a_quarantine():
+    verdict, why = validate_stub("cal-bk-1.lean", _GOOD, check_fn=lambda c: {
+        "success": False, "error": "daemon check did not complete", "errors": ["x"]})
+    assert verdict == "infra"
+
+
+def test_malformed_stubs_are_quarantined_without_touching_the_daemon():
+    calls = []
+    chk = lambda c: calls.append(c) or _ok(c)  # noqa: E731
+    assert validate_stub("notes.lean", _GOOD, check_fn=chk)[0] == "quarantine"
+    assert validate_stub("cal-bk-2.lean", "theorem t : True := trivial\n", check_fn=chk)[0] == "quarantine"
+    assert validate_stub("cal-bk-3.lean", "def x := 1\n", check_fn=chk)[0] == "quarantine"
+    assert calls == []

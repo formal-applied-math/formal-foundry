@@ -71,7 +71,8 @@ fi
 
 # 4. The same lean-lsp MCP server vibe spawns — stdio, exec'd into the running container.
 #    Both arms therefore see an identical tool surface; the only variable is the model.
-MCP="$(mktemp)"; trap 'rm -f "$MCP"' EXIT
+MCP="$(mktemp)"; DOCTRINE_FILE="$(mktemp)"
+trap 'rm -f "$MCP" "$DOCTRINE_FILE"' EXIT
 cat > "$MCP" <<JSON
 {"mcpServers": {"lean-lsp": {"command": "docker",
   "args": ["exec", "-i", "${DOMAIN_LEAN_LSP_CONTAINER}",
@@ -79,13 +80,28 @@ cat > "$MCP" <<JSON
 JSON
 
 # 5. The house doctrine, injected as a system prompt — the same text leanstral-vibe.sh
-#    prepends to the task. Same content, the mechanism Claude is built for.
-DOCTRINE="$(python3 -c "import sys; sys.path.insert(0, '$FOUNDRY/probe'); from house_context import build_system_prompt; print(build_system_prompt('$MAIN'))")"
+#    prepends to the task. Through the module's CLI (an inline `python3 -c` call is what
+#    broke both launchers on 2026-08-16), and passed as a FILE where the CLI supports it:
+#    the doctrine is ~117 KB, and Linux caps a single argv string at 128 KiB.
+python3 "$FOUNDRY/probe/house_context.py" doctrine --main-repo "$MAIN" \
+  --domain "$DOMAIN_NAME" --out "$DOCTRINE_FILE"
+CLAUDE_HELP="$(claude --help 2>&1 || true)"   # captured, not piped into grep -q: under
+case "$CLAUDE_HELP" in                        # pipefail a SIGPIPE'd `claude` fails the test
+  *--append-system-prompt-file*) SYSTEM_ARGS=(--append-system-prompt-file "$DOCTRINE_FILE") ;;
+  *)                             SYSTEM_ARGS=(--append-system-prompt "$(cat "$DOCTRINE_FILE")") ;;
+esac
 
+# 6. Run. The tool allow-list is load-bearing: headless `-p` cannot ask for permission,
+#    so any tool not listed here is DENIED — without `mcp__lean-lsp` the prover would run
+#    with no Lean at all. It mirrors the drafter's (autoformalize.py) plus read-only search.
+#    stream-json goes to stdout, where vibe_prove.py captures it as the session transcript
+#    (turns, tool calls, tokens, cost, and whether the MCP server connected).
 cd "$MAIN"
-exec claude -p "$TASK" \
-  --mcp-config "$MCP" \
-  --append-system-prompt "$DOCTRINE" \
-  --max-turns "$TURNS" \
+claude -p "$TASK" \
+  --mcp-config "$MCP" --strict-mcp-config \
+  --allowedTools "Read,Grep,Glob,Edit,Write,mcp__lean-lsp" \
   --permission-mode acceptEdits \
-  --model "${CLAUDE_PROVER_MODEL:-sonnet}"
+  "${SYSTEM_ARGS[@]}" \
+  --max-turns "$TURNS" \
+  --output-format stream-json --verbose \
+  --model "${CLAUDE_PROVER_MODEL:-claude-sonnet-5}"

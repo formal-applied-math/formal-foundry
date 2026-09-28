@@ -24,8 +24,8 @@ import sys
 import domain_pack
 
 from decompose import (assemble_skeleton, build_leaf_manifest, dag_to_dict,
-                       draft_decomposition, environment_canary, parse_dag, recompose,
-                       skeleton_gate, with_target)
+                       draft_decomposition, drop_unresolvable_pointers, environment_canary,
+                       parse_dag, recompose, skeleton_gate, with_target)
 
 
 def _pack(args):
@@ -46,7 +46,8 @@ def _leafdir(runs_dir, tag, tid):
 
 def do_draft(pack, tid, tag, runs_dir, *, target_text, context_pack, drafter_preamble,
              cfg_max_leaves, cfg_max_reask, chat_fn, check_fn, toolchain="",
-             main_commit="", meta=None) -> dict:
+             main_commit="", meta=None, main_repo: str | None = None,
+             log=lambda m: None) -> dict:
     """Split the target and gate the skeleton. On pass, persist `<tag>-<id>.dag.json` and a
     per-leaf manifest under `<tag>-<id>-leaves/`; return the outcome. Outcomes: `drafted`
     (skeleton passed), `fail_draft` (no valid DAG after re-asks), `fail_skeleton` (split did
@@ -61,6 +62,8 @@ def do_draft(pack, tid, tag, runs_dir, *, target_text, context_pack, drafter_pre
     # elaborates, every leaf stub, and the recomposed candidate are then assembled
     # against the same context, and it survives the dag.json handoff to recompose.
     dag, tokens = with_target(r["dag"], target_text), r["tokens"]
+    if main_repo:
+        dag = drop_unresolvable_pointers(dag, main_repo, log=log)
 
     canary = lambda: environment_canary(pack, check_fn)   # noqa: E731 — bound below
     g = skeleton_gate(assemble_skeleton(pack, dag), len(dag.leaves), check_fn=check_fn,
@@ -76,11 +79,17 @@ def do_draft(pack, tid, tag, runs_dir, *, target_text, context_pack, drafter_pre
         tokens += r2["tokens"]
         if r2["ok"]:
             dag = with_target(r2["dag"], target_text)
+            if main_repo:
+                dag = drop_unresolvable_pointers(dag, main_repo, log=log)
             g = skeleton_gate(assemble_skeleton(pack, dag), len(dag.leaves),
                               check_fn=check_fn, canary_fn=canary)
     if g["indeterminate"]:
         return {"outcome": "indeterminate", "reason": g["verdict"], "tokens": tokens}
     if not g["passed"]:
+        # keep the rejected split: a rejection with no DAG on disk cannot be diagnosed
+        with open(os.path.join(runs_dir, f"{tag}-{tid}.rejected-dag.json"), "w",
+                  encoding="utf-8") as f:
+            json.dump(dag_to_dict(dag), f, indent=2)
         return {"outcome": "fail_skeleton", "reason": g["verdict"], "tokens": tokens}
 
     with open(_dag_path(runs_dir, tag, tid), "w", encoding="utf-8") as f:
@@ -148,7 +157,9 @@ def _cmd_draft(args) -> int:
         check_fn=daemon_check,
         toolchain=open(os.path.join(args.main_repo, "lean-toolchain")).read().strip(),
         meta={k: target[k] for k in ("main_module", "benchmark", "source_issue")
-              if k in target} | {"id": args.id})
+              if k in target} | {"id": args.id},
+        main_repo=args.main_repo,
+        log=lambda m: print(f"[decompose] {m}", file=sys.stderr))
     print(json.dumps(r))
     return 0
 

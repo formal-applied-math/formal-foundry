@@ -32,6 +32,15 @@ pipeline, its prompts, and its telemetry — `runs/` records what the prover act
 failed at, not only what it landed. Credentials live in CI secrets and have never
 been committed.
 
+> **Status 2026-09-27 — read this first.** The prover did not run from 2026-07-28 to
+> 2026-09-27: the queue was blocked, then the launcher crashed before starting on every
+> tick and each crash was scored as a failed proof, with every CI run green
+> ([postmortem](docs/research/2026-09-27-prover-outage-postmortem.md)). Mistral retires the
+> Leanstral endpoint on 2026-09-30, so the prover is now `[prover] engine` in
+> `pipeline.toml` — Claude by default, Leanstral selectable — and where this README says
+> "Leanstral proves", read "the configured prover". A canary proves a trivial theorem
+> through the real path before every run, and a tick whose prover did not run goes red.
+
 > **New here?** Read [`docs/overview.md`](docs/overview.md) first — the full map of
 > both repos, the pipeline, and the outside reading to get fluent. Design of
 > record: `formal-mathfin docs/superpowers/specs/2026-07-08-leanstral-foundry-design.md`.
