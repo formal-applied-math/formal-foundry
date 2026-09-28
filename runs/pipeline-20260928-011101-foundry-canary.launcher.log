@@ -1,0 +1,8 @@
+[claude-prove] lean-repl daemon is UP — stopping it (one Lean process)…
+ Container docker-lean-repl-1  Stopping
+ Container docker-lean-repl-1  Stopped
+ Container mathfin-lean-lsp  Creating
+ Container mathfin-lean-lsp  Created
+ Container mathfin-lean-lsp  Starting
+ Container mathfin-lean-lsp  Started
+[claude-prove] waiting for lean-lsp-mcp…

@@ -1,0 +1,59 @@
+{
+  "target": "foundry-canary",
+  "engine": "claude",
+  "model": "claude-sonnet-5",
+  "rc": 0,
+  "duration_s": 66.5,
+  "identical_to_stub": false,
+  "captured_bytes": 158,
+  "transcript": "/home/runner/work/formal-foundry/formal-foundry/runs/pipeline-20260928-011101-foundry-canary.transcript.jsonl",
+  "launcher_log": "/home/runner/work/formal-foundry/formal-foundry/runs/pipeline-20260928-011101-foundry-canary.launcher.log",
+  "mcp_servers": {
+    "lean-lsp": "pending"
+  },
+  "tool_calls": 4,
+  "lean_tool_calls": 1,
+  "result": {
+    "subtype": "success",
+    "is_error": false,
+    "num_turns": 5,
+    "duration_ms": 42032,
+    "total_cost_usd": 0.9568349999999999,
+    "usage": {
+      "input_tokens": 4166,
+      "cache_creation_input_tokens": 139329,
+      "cache_read_input_tokens": 327070,
+      "output_tokens": 629,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 139329,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 41,
+          "cache_read_input_tokens": 95691,
+          "cache_creation_input_tokens": 147,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 147
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "turns": 5,
+  "cost_usd": 0.9568349999999999,
+  "tokens": 4795,
+  "last_text": "No errors or warnings — the file compiles clean with `Nat.add_comm a b`, no `sorry` remaining.",
+  "canary_ok": true,
+  "canary_reason": ""
+}
