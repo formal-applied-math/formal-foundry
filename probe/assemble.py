@@ -47,7 +47,7 @@ def ensure_umbrella_import(main_repo: str, main_module: str,
 # so a re-pick would have emitted that claim for a Claude-drafted artifact.
 _RETIRED_DRAFTERS = ("magistral",)
 
-# What a drafter-agnostic entry says instead. The prover stays credited (leanstral);
+# What a drafter-agnostic entry says instead. The prover stays credited (`stamp_prover`);
 # the drafter is not named, per the repo's standing attribution rule.
 _ANON_DRAFTER = "autoform"
 
@@ -58,8 +58,8 @@ def sanitize_provenance(entry: dict) -> tuple[dict, list[str]]:
     The last gate before a claim about *how this artifact was produced* lands in the
     public corpus. A stale queue entry naming a drafter that is no longer in the
     pipeline is a falsified record, and it is the kind that survives review because it
-    looks like ordinary metadata. Only the DRAFTER fields are touched — `source` and
-    `model` name the prover, which is unchanged and correctly credited.
+    looks like ordinary metadata. Only the DRAFTER fields are touched; the prover is
+    `stamp_prover`'s.
 
     Returns `(entry, changed_keys)`; the entry is copied, never mutated in place."""
     out = json.loads(json.dumps(entry))
@@ -80,6 +80,35 @@ def sanitize_provenance(entry: dict) -> tuple[dict, list[str]]:
     if isinstance(scope, str):
         new = re.sub(r"(?i)\b(" + "|".join(_RETIRED_DRAFTERS) + r")-drafted\b",
                      "autoformalized", scope)
+        if new != scope:
+            meta["formalization_scope"] = new
+            changed.append("formalization_scope")
+    return out, changed
+
+
+def stamp_prover(entry: dict, *, model: str) -> tuple[dict, list[str]]:
+    """Record the model that actually PROVED this candidate in the entry's provenance.
+
+    Provenance used to be written once, at seed time, as `model: labs-leanstral-1-5` and
+    "(autoformalized statement, leanstral proof)", because Leanstral was the only prover.
+    From 2026-09-28 the prover is whatever `[prover] engine` selected for the run, so the
+    seed-time value is a guess and this is the fact: `model` and the scope prose are set
+    from the session that ran. `source` stays `leanstral-autoform` — the counting marker
+    the target library's disclosure reads, which names the pipeline, not the prover.
+
+    Returns `(entry, changed_keys)`; the entry is copied, never mutated in place."""
+    out = json.loads(json.dumps(entry))
+    meta = out.get("metadata")
+    if not isinstance(meta, dict):
+        return out, []
+    changed = []
+    prov = meta.get("provenance")
+    if isinstance(prov, dict) and prov.get("model") != model:
+        prov["model"] = model
+        changed.append("model")
+    scope = meta.get("formalization_scope")
+    if isinstance(scope, str) and "leanstral" not in model.lower():   # already true then
+        new = re.sub(r"(?i)\bleanstral proof\b", f"{model} proof", scope)
         if new != scope:
             meta["formalization_scope"] = new
             changed.append("formalization_scope")

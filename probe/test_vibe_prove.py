@@ -231,3 +231,16 @@ def test_a_launcher_that_cannot_start_is_a_failed_session_not_a_crash(tmp_path):
         context_pack="", max_turns=5, launcher="/x/claude-prove.sh", run_fn=not_executable,
         log_prefix=str(tmp_path / "t"))
     assert sess["rc"] == 127 and "Permission denied" in open(sess["launcher_log"]).read()
+
+
+def test_prover_of_reads_the_session_then_the_leaves_then_the_config(tmp_path):
+    runs = str(tmp_path)
+    assert vibe_prove.prover_of(runs, "t", "cal-bk-1")["engine"] == "claude"   # config default
+    (tmp_path / "t-cal-bk-1__leaf_a.session.json").write_text(
+        json.dumps({"engine": "leanstral", "model": "labs-leanstral-1-5"}))
+    assert vibe_prove.prover_of(runs, "t", "cal-bk-1") == {
+        "engine": "leanstral", "model": "labs-leanstral-1-5"}          # a decompose candidate
+    (tmp_path / "t-cal-bk-1.session.json").write_text(
+        json.dumps({"engine": "claude", "model": "claude-sonnet-5"}))
+    assert vibe_prove.prover_of(runs, "t", "cal-bk-1") == {
+        "engine": "claude", "model": "claude-sonnet-5"}               # its own session wins

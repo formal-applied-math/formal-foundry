@@ -443,6 +443,24 @@ def _tail(path: str | None, n: int = 25) -> str:
         return ""
 
 
+def prover_of(run_dir: str, tag: str, target_id: str, config: str | None = None) -> dict:
+    """`{engine, model}` of the session that proved `target_id` in run `tag`: its own
+    session record; else a leaf session of the same target (a decompose candidate is
+    assembled from leaves); else `[prover]` config. The PR, the commit and the entry's
+    provenance are stamped from this — the prover is read, never assumed."""
+    import glob
+    paths = [os.path.join(run_dir, f"{tag}-{target_id}.session.json"),
+             *sorted(glob.glob(os.path.join(run_dir, f"{tag}-{target_id}__*.session.json")))]
+    for path in paths:
+        rec = _read_json(path)
+        if rec and rec.get("engine") and rec.get("model"):
+            return {"engine": rec["engine"], "model": rec["model"]}
+    from pipeline_lib import ProverConfig
+    cfg = ProverConfig.load(config)
+    return {"engine": cfg.engine,
+            "model": cfg.claude_model if cfg.engine == "claude" else LEANSTRAL_MODEL}
+
+
 def run_canary(pack, *, main_repo: str, launcher: str, engine: str, model: str,
                run_dir: str, tag: str, max_turns: int, env: dict | None,
                run_fn=subprocess.run) -> tuple[bool, str]:
@@ -784,6 +802,10 @@ def main() -> int:
     rp = sub.add_parser("states", help="proof-state recurrence report (no daemon, no tokens)")
     rp.add_argument("--config", default=None)
     rp.add_argument("--json", action="store_true", help="emit the raw report dict")
+    po = sub.add_parser("prover-of", help="the engine + model that proved a target in a run")
+    po.add_argument("--run-tag", required=True)
+    po.add_argument("--id", required=True)
+    po.add_argument("--config", default=None)
     xp = sub.add_parser("experience", help="experience-memory report (no daemon, no tokens)")
     xp.add_argument("--json", action="store_true", help="emit the raw report dict")
     args = ap.parse_args()
@@ -791,6 +813,10 @@ def main() -> int:
         return _cmd_states(args)
     if args.cmd == "experience":
         return _cmd_experience(args)
+    if args.cmd == "prover-of":
+        _, run_dir = _run_dir()
+        print(json.dumps(prover_of(run_dir, args.run_tag, args.id, args.config)))
+        return 0
     return _cmd_run(args) if args.cmd == "run" else _cmd_gate(args)
 
 
