@@ -146,3 +146,12 @@ def test_a_daemon_death_between_the_two_checks_is_not_axiom_dirty():
     r = gate.gate(CLEAN, "t", check_fn=lambda c: next(seq))
     assert r["indeterminate"] is True and r["reason"] == "daemon_error"
     assert r["axioms_clean"] is None
+
+
+def test_a_candidate_carrying_a_credential_is_rejected_and_the_value_is_not_repeated():
+    token = "ghp_" + "Q" * 36
+    calls = []
+    r = gate.gate(f"-- {token}\n" + CLEAN, "t",
+                  check_fn=lambda c: calls.append(c) or {"success": True, "sorry_count": 0})
+    assert r["passed"] is False and r["reason"] == "secret:['github-token']"
+    assert token not in r["reason"] and calls == []

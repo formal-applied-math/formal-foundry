@@ -141,12 +141,14 @@ transient() {  # infra/transient failure (network, gh, docker pull): no issue, n
 cd "$MAIN"
 BRANCH="autoform/$ID-$TAG"
 git checkout -B "$BRANCH"
-python3 - "$CAND" "$QUEUE" "$ID" "$MAIN" "$FOUNDRY/probe" "$FOUNDRY/runs/$TAG-$ID.entry.json" "$DOMAIN_NAME" "$MODEL" <<'PY' || exit 1
+set +e
+python3 - "$CAND" "$QUEUE" "$ID" "$MAIN" "$FOUNDRY/probe" "$FOUNDRY/runs/$TAG-$ID.entry.json" "$DOMAIN_NAME" "$MODEL" <<'PY'
 import json, os, sys
 cand_path, queue_path, tid, main, probe_dir, entry_override, domain_name, prover_model = sys.argv[1:9]
 sys.path.insert(0, probe_dir)
 import domain_pack
 from assemble import apply_contribution, ensure_umbrella_import, stamp_prover
+from redact import secret_findings, secret_values
 # the pack is passed DOWN (2026-08-16 refactor); this heredoc was missed by it, so the
 # first real pass after that date would have crashed here and — treated as transient —
 # been re-proved every tick without ever opening a PR.
@@ -164,10 +166,24 @@ entry, stamped = stamp_prover(entry, model=prover_model)
 if stamped:
     print(f"[open-pr] provenance: prover is {prover_model} ({stamped})", file=sys.stderr)
 code = open(cand_path, encoding="utf-8").read()
+# The last look before anything is written to a PUBLIC pull request: the proof and the
+# entry (whose prose a model drafted) must not carry a credential. Kinds only, never values.
+leaks = sorted(set(secret_findings(code, secret_values())
+                   + secret_findings(json.dumps(entry, ensure_ascii=False), secret_values())))
+if leaks:
+    print(f"[open-pr] credential-shaped content {leaks} in the candidate or its entry",
+          file=sys.stderr)
+    sys.exit(3)
 written = apply_contribution(pack, code, target, entry, main)
 written += ensure_umbrella_import(main, target["main_module"], f"{pack.namespace}.lean")
 print("[open-pr] wrote:", ", ".join(written), file=sys.stderr)
 PY
+PLACE_RC=$?
+set -e
+if [ "$PLACE_RC" = 3 ]; then
+  blocked "credential-shaped content in the candidate or its entry (kinds in the tick log; values never printed)"
+fi
+[ "$PLACE_RC" = 0 ] || exit 1
 
 # --- 3. promotion-honesty guard (reject an rfl-trivial "full") ---------------
 # H9: use the tested probe_lib.rfl_proof_present (the shell glob missed `:= by rfl`
@@ -251,7 +267,11 @@ git -c user.name="$DOMAIN_NAME-autoform" -c user.email="autoform@users.noreply.g
     -m "feat(autoform): $ID — prove $(basename "$MODULE" .lean) ($CLOSE_KW #$ISSUE)" \
     -m "$PROVER_DESC" \
     "${COMMIT_TRAILER[@]}"
-git push -f origin "$BRANCH"
+# The checkout does not persist credentials (the prover can read the runner's files), so
+# this one command carries the token, as an extra header that is never written to disk.
+[ -n "${GH_TOKEN:-}" ] || transient "no GH_TOKEN to push with"
+git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" \
+    push -f origin "$BRANCH"
 
 TOKENS="$(python3 - "$FOUNDRY/runs/$TAG-summary.jsonl" "$ID" <<'PY'
 import json, sys

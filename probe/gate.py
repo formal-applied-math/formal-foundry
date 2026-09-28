@@ -16,6 +16,7 @@ The bar (unchanged, this is where we are ahead of the field):
 from __future__ import annotations
 
 from probe_lib import axiom_guard_block, lint_violations, slop_report
+from redact import secret_findings, secret_values
 
 
 def gate(candidate: str, sorry_name: str, *, check_fn, statement: str | None = None) -> dict:
@@ -34,6 +35,10 @@ def gate(candidate: str, sorry_name: str, *, check_fn, statement: str | None = N
     slop = slop_report(candidate)
     if slop["forbidden"]:
         return {"passed": False, "reason": f"forbidden:{slop['forbidden']}",
+                "axioms_clean": None, "slop": slop, "errors": [], "warnings": []}
+    leaks = secret_findings(candidate, secret_values())
+    if leaks:   # the kinds only — the reason is logged and may be filed as an issue
+        return {"passed": False, "reason": f"secret:{leaks}",
                 "axioms_clean": None, "slop": slop, "errors": [], "warnings": []}
     lint = lint_violations(candidate)
     if lint:

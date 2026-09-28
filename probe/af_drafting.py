@@ -147,8 +147,11 @@ def claude_draft_fn(messages: list[dict], *, model: str = "", run_fn=None) -> tu
     for tests (defaults to `subprocess.run`). Raises `ClaudeCapError` on a subscription
     cap so the tick can defer / fall back."""
     if run_fn is None:
+        from redact import agent_env
+
         def run_fn(argv, stdin):
-            return subprocess.run(argv, input=stdin, capture_output=True,
+            # only Claude's own credential (the refill runs with GH_TOKEN = MAIN_PR_TOKEN)
+            return subprocess.run(argv, input=stdin, capture_output=True, env=agent_env("claude"),
                                   text=True, timeout=600)
     argv, stdin = _claude_draft_args(messages, model=model)
     res = run_fn(argv, stdin)

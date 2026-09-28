@@ -2429,3 +2429,11 @@ def test_agentic_formalize_refuses_to_overwrite_an_existing_module(tmp_path):
         return _FakeRun(stdout="{}")
     r = _formalize(tmp_path, fake_run)
     assert r["ok"] is False and "already exists" in r["reason"]
+
+
+def test_a_draft_carrying_a_credential_is_never_staged():
+    fail, _ = af.semantic_verdict(
+        PACK, lean_text="-- ghp_" + "R" * 36 + "\ntheorem fra_value : True := by sorry",
+        stub=_STUB, name="fra_value", intent={}, issue=_ISSUE, deferred=[], reason_fn=_NOOP,
+        prove_fn=_NOOP, check_fn=_ELAB_OK, gate_budget=100)
+    assert fail["gate"] == "secret" and "ghp_" not in fail["detail"]
