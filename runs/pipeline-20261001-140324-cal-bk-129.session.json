@@ -1,0 +1,59 @@
+{
+  "target": "cal-bk-129",
+  "engine": "claude",
+  "model": "claude-sonnet-5",
+  "rc": 0,
+  "duration_s": 666.7,
+  "identical_to_stub": false,
+  "captured_bytes": 8748,
+  "transcript": "/home/runner/work/formal-foundry/formal-foundry/runs/pipeline-20260928-011101-cal-bk-129.transcript.jsonl",
+  "launcher_log": "/home/runner/work/formal-foundry/formal-foundry/runs/pipeline-20260928-011101-cal-bk-129.launcher.log",
+  "mcp_servers": {
+    "lean-lsp": "pending"
+  },
+  "tool_calls": 43,
+  "lean_tool_calls": 22,
+  "result": {
+    "subtype": "success",
+    "is_error": false,
+    "num_turns": 44,
+    "duration_ms": 665616,
+    "total_cost_usd": 4.5491624,
+    "usage": {
+      "input_tokens": 4766,
+      "cache_creation_input_tokens": 275652,
+      "cache_read_input_tokens": 6201258,
+      "output_tokens": 67690,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 275652,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 487,
+          "cache_read_input_tokens": 199972,
+          "cache_creation_input_tokens": 237,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 237
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "turns": 44,
+  "cost_usd": 4.5491624,
+  "tokens": 0,
+  "last_text": "nditional term's derivative.\n- Built a uniform Lipschitz bound on `(0, ∞)` via `Convex.lipschitzOnWith_of_nnnorm_hasDerivWithin_le` (using `Φ ≤ 1`), then differentiated under the Poisson-mixture integral sign with Mathlib's `hasDerivAt_integral_of_dominated_loc_of_lip`, consuming `integrable_mertonCallTerm`/`integrable_mertonSpot` rather than reproving integrability.\n- For the `[0,1]` membership, used `integral_mertonSpot` (spot recombination) to show the mixture weights `w(n)·(spot_n/S₀)` sum to `1`, then sandwiched the Φ-weighted sum between `0` and that same sum via `Summable.tsum_le_tsum`.",
+  "reused_from": "pipeline-20260929-043448",
+  "original_tokens": 0
+}

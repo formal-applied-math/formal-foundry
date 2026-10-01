@@ -1,0 +1,1 @@
+{"target": "cal-bk-129", "stream": "backlog", "ts": "2026-10-01T14:04:25", "harness": "vibe", "arm": "cron", "engine": "claude", "model": "claude-sonnet-5", "tokens": 0, "cost_usd": 4.5491624, "turns": 44, "duration_s": 666.7, "outcome": "pass", "axioms_clean": true, "proof_states": 1, "new_proof_states": 0}
