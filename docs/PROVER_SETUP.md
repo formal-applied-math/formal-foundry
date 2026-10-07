@@ -153,7 +153,9 @@ source issue. That step needs one credential — the only thing granting the
 foundry write access to main:
 
 1. On `formal-applied-math/formal-mathfin`, create a **fine-grained PAT** scoped to
-   that repo with **Contents: read/write** + **Pull requests: read/write**.
+   that repo with **Contents: read/write** + **Pull requests: read/write** — both; the
+   push needs the first and the PR the second — plus **Issues: read/write**, so the
+   pipeline can move the source issue's `status:` label.
 2. Store it as the foundry secret (never in argv/logs):
 
    ```bash
@@ -162,6 +164,19 @@ foundry write access to main:
 
 Without `MAIN_PR_TOKEN` the tick falls back to candidate-notify and opens no PR,
 so the pipeline is safe before the grant. Revoking the PAT fully disables auto-PR.
+
+**The tick checks the grant before it spends anything** (`probe/pr_access.py`, step 0a
+of `pipeline-tick.sh`). From 2026-09-28 to 2026-10-07 the token held Contents: write but
+not Pull requests: write. Every tick re-gated the same verified proof of cal-bk-129,
+rebuilt the library, pushed a branch, was refused the PR
+(`Resource not accessible by personal access token (createPullRequest)`) and filed the
+refusal as transient. So the target was never recorded, the planner chose it again, and
+the thirteen targets queued behind it never ran. Now each write is attempted in a form
+GitHub must refuse whatever the token holds (a ref at the zero object, a PR from a
+branch that does not exist). A `422` means the permission is held; a `403` means it is
+not. A refusal stops the tick RED in seconds and names the permission, in the run's
+`::error::` line and in `runs/ticks.jsonl`, where the health check reads it. A check
+that cannot answer (rate limit, network) lets the tick proceed.
 
 ### The PAT's repository list, once there is a second library
 

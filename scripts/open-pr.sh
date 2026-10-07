@@ -137,6 +137,17 @@ transient() {  # infra/transient failure (network, gh, docker pull): no issue, n
   exit 4
 }
 
+# A write GitHub REFUSED for want of a grant is not transient: no retry fixes it, a person
+# editing the token does. Six ticks to 2026-10-07 filed `Resource not accessible by
+# personal access token` under transient and the tick could only say "rc=4". exit 5: the
+# tick names the missing grant, and the verified proof is still kept for the next tick.
+# (not a bare `HTTP 403`: gh prints a rate limit that way too, and that one IS transient)
+REFUSED='not accessible by|Permission to .* denied|returned error: 40[13]|Bad credentials|Authentication failed|SAML enforcement'
+refused() {
+  echo "[open-pr] REFUSED: $1" >&2
+  exit 5
+}
+
 # --- 2. branch + place -------------------------------------------------------
 cd "$MAIN"
 BRANCH="autoform/$ID-$TAG"
@@ -270,8 +281,16 @@ git -c user.name="$DOMAIN_NAME-autoform" -c user.email="autoform@users.noreply.g
 # The checkout does not persist credentials (the prover can read the runner's files), so
 # this one command carries the token, as an extra header that is never written to disk.
 [ -n "${GH_TOKEN:-}" ] || transient "no GH_TOKEN to push with"
-git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" \
-    push -f origin "$BRANCH"
+PUSH_ERR="$(mktemp)"
+if ! git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" \
+    push -f origin "$BRANCH" 2>"$PUSH_ERR"; then
+  cat "$PUSH_ERR" >&2
+  if grep -qiE "$REFUSED" "$PUSH_ERR"; then
+    refused "GitHub refused the push of $BRANCH (the token needs Contents: write on $SLUG)"
+  fi
+  transient "the push of $BRANCH failed"
+fi
+cat "$PUSH_ERR" >&2
 
 TOKENS="$(python3 - "$FOUNDRY/runs/$TAG-summary.jsonl" "$ID" <<'PY'
 import json, sys
@@ -362,9 +381,16 @@ if grep -q '^-- new-defs:' "$MODULE" 2>/dev/null; then
     --description "autoform PR introducing new definitions — review the design, not just the proof" 2>/dev/null || true
   PR_FLAGS+=(--label new-defs)
 fi
-gh pr create --repo "$SLUG" --head "$BRANCH" --label autoform "${PR_FLAGS[@]}" \
-  --title "autoform: $(basename "$MODULE" .lean) $TITLE_SUFFIX" \
-  --body "$BODY" || transient "gh pr create failed (candidate is green — retry next tick)"
+PR_ERR="$(mktemp)"
+if ! gh pr create --repo "$SLUG" --head "$BRANCH" --label autoform "${PR_FLAGS[@]}" \
+    --title "autoform: $(basename "$MODULE" .lean) $TITLE_SUFFIX" \
+    --body "$BODY" 2>"$PR_ERR"; then
+  cat "$PR_ERR" >&2
+  if grep -qiE "$REFUSED" "$PR_ERR"; then
+    refused "GitHub refused to open the PR (the token needs Pull requests: write on $SLUG)"
+  fi
+  transient "gh pr create failed (candidate is green — retry next tick)"
+fi
 echo "[open-pr] PR opened for $ID ($CLOSE_KW #$ISSUE)" >&2
 
 # The ISSUE is the state machine; move it to `status:review` now that a PR exists.

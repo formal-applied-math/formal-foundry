@@ -69,6 +69,31 @@ if ! ( cd "$MAIN" && python3 -m pytest tests/ -q ) >"$FOUNDRY/runs/preflight-pyt
   exit 0
 fi
 
+# 0a. Can the token deliver? From 2026-09-28 to 2026-10-07 six ticks gated cal-bk-129's
+# proof, built it green and pushed its branch, then `gh pr create` was refused: the token
+# held Contents: write but not Pull requests: write. open-pr filed that as transient, so
+# the target stayed selected and the queue behind it never moved, an hour of CI a time.
+# A missing permission is a person's to grant, not a retry's, so ask before spending
+# anything and stand down RED with the permission named. Only a definite refusal stops
+# the tick; a check that cannot answer (rate limit, network) lets the real attempt decide.
+if [ -n "${MAIN_PR_TOKEN:-}" ]; then
+  set +e
+  ACCESS="$(GH_TOKEN="$MAIN_PR_TOKEN" python3 pr_access.py --repo "$MAIN_REPO_SLUG")"
+  ACCESS_RC=$?
+  set -e
+  if [ "$ACCESS_RC" = 3 ]; then
+    TICK_ACTION="skip"; TICK_REASON="pr_token_denied"
+    INFRA_FAIL=1; INFRA_WHY="MAIN_PR_TOKEN $ACCESS"
+    echo "::error::[tick] $INFRA_WHY" >&2
+    exit 1
+  fi
+  if [ "$ACCESS_RC" = 0 ]; then
+    echo "[tick] MAIN_PR_TOKEN $ACCESS" >&2
+  else
+    echo "::warning::[tick] MAIN_PR_TOKEN ${ACCESS:-access check crashed (rc=$ACCESS_RC); proceeding}" >&2
+  fi
+fi
+
 # 0b. The ISSUE is the state machine — reconcile it BEFORE planning, so the refill
 # reads a truthful backlog. Without this the pipeline only ever writes state forward
 # (seed → in-progress, PR → review) and nothing walks it back: a PR closed unmerged,
@@ -294,6 +319,11 @@ if [ "$OUTCOME" = "pass" ] && [ -f "$CAND" ]; then
         # candidate): retrying the SAME stub re-blocks every tick — record it.
         ASSEMBLY_BLOCKED=1
         echo "[tick] open-pr content-BLOCKED (rc=3) → will record fail_assembly" >&2
+      elif [ "$OPENPR_RC" = 5 ]; then
+        # GitHub refused the push or the PR for want of a grant (step 0a could not tell):
+        # a person's to fix. Red, unrecorded, and the next tick reuses this proof.
+        INFRA_FAIL=1
+        INFRA_WHY="$ID passed but GitHub refused MAIN_PR_TOKEN its push or PR (open-pr rc=5): it needs Contents and Pull requests: write on $MAIN_REPO_SLUG; the verified proof is kept for the next tick"
       else
         echo "[tick] (open-pr.sh transient failure rc=$OPENPR_RC; candidate still at $CAND — retryable)" >&2
         # A proof that passed and could not become a PR is the machinery failing (a push
