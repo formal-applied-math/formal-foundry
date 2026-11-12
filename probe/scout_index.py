@@ -137,6 +137,40 @@ class ScoutIndex:
             return None
         return (r.get("module", ""), r.get("type", ""), r.get("docString"))
 
+    def dependents_of(self, targets) -> set[str]:
+        """Every constant that depends on one of `targets`, transitively, with the
+        targets themselves. `deps` in const_dep are a declaration's type AND value
+        (`ConstantInfo.getUsedConstantsAsSet`), so a theorem counts through its proof:
+        this is the relation the target library's program map draws its edges with."""
+        rev: dict[str, list[str]] = {}
+        for name, deps in self._dep_of().items():
+            for d in deps:
+                rev.setdefault(d, []).append(name)
+        seen, stack = set(), [t for t in targets]
+        while stack:
+            x = stack.pop()
+            if x in seen:
+                continue
+            seen.add(x)
+            stack.extend(rev.get(x, ()))
+        return seen
+
+    def module_of(self, name: str) -> str | None:
+        """The module that declares `name`, or None when the index does not hold it."""
+        if getattr(self, "_module_of_cache", None) is None:
+            self._module_of_cache = {r["name"]: r.get("module") for r in self._cd()
+                                     if r.get("name")}
+        return self._module_of_cache.get(name)
+
+    def names_in(self, modules: list[str]) -> dict[str, list[str]]:
+        """{module: [constant names]} for the requested modules (paths or module names)."""
+        wanted = {path_to_module(m) for m in modules}
+        out: dict[str, list[str]] = {}
+        for r in self._cd():
+            if r.get("module") in wanted and r.get("name"):
+                out.setdefault(r["module"], []).append(r["name"])
+        return out
+
     def dependency_closure(self, names: list[str], depth: int = 2) -> list[str]:
         """BFS over const_dep from `names` up to `depth` hops; the reachable
         constants excluding the seeds, in discovery order. This is the cross-file

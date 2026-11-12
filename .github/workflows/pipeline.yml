@@ -37,7 +37,7 @@ on:
         type: boolean
         default: false
       mtest_only:
-        description: "validate the instance-probe daemon test (item M) on real Lean, then STOP — no tick, no tokens, no PR"
+        description: "validate the real-Lean gate tests (instance probe, map gate), then STOP — no tick, no tokens, no PR"
         type: boolean
         default: false
       domain:
@@ -171,10 +171,15 @@ jobs:
           # /app/.lake on first mount (Docker volume semantics), so no seed step.
           docker compose -f main/docker/docker-compose.yml up -d lean-repl
           echo "probing 7878 until the daemon serves (cold Mathlib load ~5 min)…"
-          python3 probe/wait_daemon.py \
+          # 35 minutes, not 10. The daemon builds whatever the library checkout holds
+          # that the image does not, and the image is republished ~30 min AFTER a push
+          # to the library: a run that starts inside that window rebuilds the changed
+          # modules here. Run 43159501106 started 9 minutes before the new image landed
+          # and ran out of the old 10 while the build was at 4881 of 5042.
+          python3 probe/wait_daemon.py --tries 420 \
             || { echo "::error::daemon not ready"; docker logs docker-lean-repl-1 2>&1 | tail -60; exit 1; }
 
-      - name: Item M — instance-probe gate on real Lean (daemon warm, pre-tick)
+      - name: Gates on real Lean — instance probe, map gate (daemon warm, pre-tick)
         # The instance-probe gate's slip-catch depends on Lean/Mathlib behaviour
         # (`norm_num` evaluating a def against its intended value), so it needs the
         # daemon — the fast unit lane covers only the gate's parse logic. The daemon
@@ -187,6 +192,10 @@ jobs:
         run: |
           python3 -m pip show pytest >/dev/null 2>&1 || python3 -m pip install -q pytest
           cd probe && python3 -m pytest test_instance_probe_daemon.py -v
+          # the map gate is a Lean meta block built as a string, and it reports through
+          # one marked error: a block that stops elaborating would pass every statement
+          # in silence. Both directions are checked on the library itself.
+          python3 -m pytest test_map_gate_daemon.py -v
 
       - name: Provision Node (the disk-cleanup step wipes /usr/local/lib/node_modules → breaks npm)
         if: ${{ !inputs.mtest_only }}

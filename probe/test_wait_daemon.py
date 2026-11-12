@@ -39,3 +39,12 @@ def test_a_live_daemon_without_its_environment_is_not_ready():
     healthy = lambda code: {"success": True, "sorry_count": 0, "errors": []}  # noqa: E731
     assert wait_daemon.environment_ready(check_fn=healthy, pack=pack, tries=2,
                                          sleep=0, sleep_fn=lambda s: None) is True
+
+
+def test_the_cold_start_can_be_given_longer(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(wait_daemon, "wait_ready",
+                        lambda **k: seen.update(k) or True)
+    monkeypatch.setattr(wait_daemon, "environment_ready", lambda **k: True)
+    assert wait_daemon.main(["--tries", "420"]) == 0 and seen == {"tries": 420}
+    assert wait_daemon.main([]) == 0 and seen == {"tries": 120}

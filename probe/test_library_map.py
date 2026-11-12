@@ -117,7 +117,11 @@ def repo(tmp_path):
     _write(root, "docs/blueprint_frontier.toml", FRONTIER)
     _write(root, "docs/blueprint_nodes.json", json.dumps([
         {"label": "thm:vasicek", "name": "MathFin.vasicekBondPrice", "title": "Vasicek"},
-        {"label": "def:phi", "name": "MathFin.Phi", "title": "Normal CDF"}]))
+        {"label": "def:phi", "name": "MathFin.Phi", "title": "Normal CDF",
+         "module": "MathFin.Probability.Gaussian.Phi"},
+        # a node drawn on an upstream declaration: on the map, never an anchor
+        {"label": "def:brownian-motion", "name": "ProbabilityTheory.IsPreBrownianReal",
+         "title": "Brownian motion", "module": "Mathlib.Probability.BrownianMotion.Basic"}]))
     _write(root, "benchmarks/interest_rates.json", json.dumps({"theorems": [
         _entry("mf-zcb-a", "MathFin.Models.Rates.ZCB"),
         _entry("mf-zcb-b", "MathFin.Models.Rates.Vasicek"),
@@ -253,7 +257,9 @@ def test_the_blueprint_tells_proved_from_frontier(repo):
     assert "do NOT restate: `mf-survival-a` — the ratio." in note
     assert "ground: Mathlib: conditional probability" in note
     # the issue's own anchors first, then the map's definition nodes
-    assert bp.hint(["thm:ho-lee"]) == "`MathFin.vasicekBondPrice`, `MathFin.Phi`"
+    # (unfiltered here; `prepare_issues` keeps the library's own declarations only)
+    assert bp.hint(["thm:ho-lee"]) == (
+        "`MathFin.vasicekBondPrice`, `ProbabilityTheory.IsPreBrownianReal`, `MathFin.Phi`")
 
 
 def test_add_core_creates_extends_and_is_idempotent():
@@ -333,7 +339,9 @@ def test_prepare_issues_places_an_issue_from_the_checkout(repo):
     assert issue["benchmark"] == "benchmarks/interest_rates.json"
     assert issue["subjects"] == ["MSC 91G30", "JEL E43"]
     assert issue["blueprint"] == ["thm:ho-lee"] and issue["frontier"] == ["thm:ho-lee"]
+    # the upstream node (Brownian motion, declared in Mathlib) is neither anchor nor hint
     assert issue["map_anchors"] == ["MathFin.Phi", "MathFin.vasicekBondPrice"]
+    assert "IsPreBrownianReal" not in issue["map_hint"] and "`MathFin.Phi`" in issue["map_hint"]
     assert "Hull" in issue["bibliography"] and "- Hull:" in issue["citable"]
     assert any("moved in the library, followed" in m for m in logs)
     assert any("dropped pointer(s)" in m and "missing" in m for m in logs)
@@ -505,6 +513,10 @@ def test_the_map_gate_skips_without_a_map_and_reads_its_own_marker():
     assert not skipped["off_map"]
     probe = af.map_probe(PACK, "theorem t : True := trivial", "t", ["MathFin.Phi", "A.b"])
     assert "`MathFin.t" in probe and "[`MathFin.Phi, `A.b]" in probe
+    # only the library's own declarations are walked or count as anchors, and a theorem
+    # on the way counts through its proof: the library's index draws the same relation
+    assert probe.index("if !own c then continue") < probe.index("if anchors.contains c")
+    assert ".thmInfo v => todo := todo ++ v.value.getUsedConstants" in probe
     off = af.map_rejection(PACK, "x", "t", ["MathFin.Phi"], check_fn=lambda c: {
         "errors": ["map-gate: the statement reaches no declaration of the program map"]})
     assert off["off_map"]
@@ -595,3 +607,93 @@ def test_a_candidate_without_a_module_doc_gets_its_stubs(repo):
         < out.index("@[expose] public section")
     assert assemble.ensure_module_doc(out, stub) == out          # one docstring, not two
     assert assemble.ensure_module_doc(rebuilt, None) == rebuilt  # nothing to take it from
+
+
+# --- the map census: which issues CAN pass the map gate ---------------------------------
+
+def _census_index(tmp_path):
+    """A scout index of four declarations: a def and a theorem that rest on the anchor
+    `MathFin.Phi`, a def that rests only on an upstream node, and one that rests on nothing."""
+    from scout_index import ScoutIndex
+    d = tmp_path / "index"
+    d.mkdir()
+    (d / "types.jsonl").write_text("")
+    rows = [
+        ("MathFin.Phi", "MathFin.Probability.Gaussian.Phi", ["Real.exp"]),
+        ("MathFin.bsV", "MathFin.Models.BlackScholes.Call", ["MathFin.Phi"]),
+        ("MathFin.bsV_pos", "MathFin.Models.BlackScholes.Call", ["MathFin.bsV"]),
+        ("MathFin.gbm", "MathFin.Models.BlackScholes.GBM",
+         ["ProbabilityTheory.IsPreBrownianReal"]),
+        ("ProbabilityTheory.IsPreBrownianReal", "Mathlib.Probability.BrownianMotion.Basic", []),
+        ("MathFin.walkPos", "MathFin.Models.Binomial.Path", ["Nat.succ"]),
+        ("MathFin.walkPos_zero", "MathFin.Models.Binomial.Path", ["MathFin.walkPos"]),
+        ("MathFin.price_eq", "MathFin.Models.Binomial.Thm", ["MathFin.bsV_pos"]),
+    ]
+    (d / "const_dep.jsonl").write_text("".join(
+        json.dumps({"name": n, "module": m, "deps": deps, "allowCompletion": True}) + "\n"
+        for n, m, deps in rows))
+    root = tmp_path / "lib"
+    _write(str(root), "MathFin/Models/BlackScholes/Call.lean",
+           "noncomputable def bsV (x : ℝ) : ℝ := x\ntheorem bsV_pos : True := trivial\n")
+    _write(str(root), "MathFin/Models/BlackScholes/GBM.lean", "def gbm : ℕ := 0\n")
+    _write(str(root), "MathFin/Models/Binomial/Path.lean",
+           "def walkPos : ℕ := 0\ntheorem walkPos_zero : True := trivial\n")
+    _write(str(root), "MathFin/Models/Binomial/Thm.lean", "theorem price_eq : True := trivial\n")
+    return ScoutIndex(str(d)), str(root)
+
+
+ANCHORS = ["MathFin.Phi", "ProbabilityTheory.IsPreBrownianReal"]
+
+
+def test_the_census_says_whether_a_statement_can_rest_on_the_map(tmp_path):
+    idx, root = _census_index(tmp_path)
+    c = af.map_census(idx, ANCHORS, root, ["MathFin/Models/BlackScholes/Call.lean"],
+                      own_root="MathFin")
+    assert c == {"verdict": "statement", "defs": ["MathFin.bsV"], "theorems": 1}
+    # a theorem that rests on the map is something a PROOF can cite, not a statement
+    c = af.map_census(idx, ANCHORS, root, ["MathFin/Models/Binomial/Thm.lean"],
+                      own_root="MathFin")
+    assert c["verdict"] == "proof_only" and c["defs"] == []
+    c = af.map_census(idx, ANCHORS, root, ["MathFin/Models/Binomial/Path.lean"],
+                      own_root="MathFin")
+    assert c == {"verdict": "off_map", "defs": [], "theorems": 0}
+
+
+def test_the_census_does_not_count_an_upstream_node(tmp_path):
+    """`gbm` depends on Brownian motion, which the blueprint draws on a Mathlib
+    declaration. The library's index records dependence on its own constants only, so by
+    its count an entry stated through `gbm` alone is off the map."""
+    idx, root = _census_index(tmp_path)
+    ptr = ["MathFin/Models/BlackScholes/GBM.lean"]
+    assert af.map_census(idx, ANCHORS, root, ptr, own_root="MathFin")["verdict"] == "off_map"
+    assert af.map_census(idx, ANCHORS, root, ptr)["verdict"] == "statement"   # unfiltered
+
+
+def test_the_census_is_silent_when_it_cannot_measure(tmp_path):
+    from scout_index import ScoutIndex
+    idx, root = _census_index(tmp_path)
+    ptr = ["MathFin/Models/BlackScholes/Call.lean"]
+    assert af.map_census(ScoutIndex(str(tmp_path / "absent")), ANCHORS, root, ptr) is None
+    assert af.map_census(idx, [], root, ptr) is None            # a library with no map
+    assert af.map_census(idx, ANCHORS, root, []) is None        # an issue with no pointers
+    assert af.map_census(idx, ANCHORS, root, ["MathFin/Not/Indexed.lean"]) is None
+
+
+def test_issues_a_statement_can_serve_are_attempted_first():
+    xs = [{"number": 1, "difficulty": "small", "map_census": {"verdict": "off_map"}},
+          {"number": 2, "difficulty": "small", "map_census": {"verdict": "proof_only"}},
+          {"number": 3, "difficulty": "small", "map_census": None},
+          {"number": 4, "difficulty": "medium", "map_census": {"verdict": "statement"}},
+          {"number": 5, "difficulty": "small", "map_census": {"verdict": "statement"},
+           "family": "undraftable"}]
+    # the map outranks difficulty; a demoted family still goes last
+    assert [i["number"] for i in af.order_by_route(xs)] == [4, 3, 2, 1, 5]
+
+
+def test_the_intent_prompt_names_the_map_objects_of_the_issue():
+    issue = {"number": 51, "title": "t", "body": "b",
+             "map_census": {"verdict": "statement", "defs": ["MathFin.bsV"], "theorems": 3}}
+    user = af.intent_messages(PACK, issue, "")[-1]["content"]
+    assert "MAP OBJECTS" in user and "`MathFin.bsV`" in user
+    bare = af.intent_messages(PACK, {**issue, "map_census": None}, "")[-1]["content"]
+    assert "MAP OBJECTS" not in bare

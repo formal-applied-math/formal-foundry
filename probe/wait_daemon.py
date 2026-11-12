@@ -63,7 +63,10 @@ def environment_ready(*, check_fn=None, pack=None, tries: int = 3, sleep: float 
 
 def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
-    if not wait_ready():
+    tries = 120
+    if "--tries" in argv:        # the cold start of a run may have a library to rebuild
+        tries = int(argv[argv.index("--tries") + 1])
+    if not wait_ready(tries=tries):
         return 1
     if "--liveness-only" in argv:
         return 0

@@ -154,7 +154,13 @@ def map_probe(pack: DomainPack, lean_text: str, name: str, anchors: list[str]) -
     """The stub + a `run_cmd` meta block that FAILS elaboration unless the theorem's TYPE
     reaches one of `anchors` (the fully-qualified names the program map tags), walking
     through the types and bodies of declarations in the library's own modules and of the
-    stub's own new definitions."""
+    stub's own new definitions. A theorem met on the way counts through its proof, as it
+    does in the library's own index and in `af_routing.map_census`, so the census and the
+    gate agree on what rests on the map. Only the library's OWN declarations are walked and
+    only its own anchors count: the library's index records dependence on its own
+    constants alone, so a statement that touches the map only at an upstream node (a
+    Mathlib or BrownianMotion declaration the blueprint also draws) is off the map by the
+    library's count, and its build would refuse the entry after the proof was paid for."""
     names = ", ".join(f"`{a}" for a in anchors)
     meta = (
         "\nopen Lean in\n"
@@ -176,13 +182,16 @@ def map_probe(pack: DomainPack, lean_text: str, name: str, anchors: list[str]) -
         "    todo := todo.pop\n"
         "    if seen.contains c then continue\n"
         "    seen := seen.insert c\n"
+        "    if !own c then continue\n"
         "    if anchors.contains c then\n"
         "      hit := true\n"
-        "    else if own c then\n"
+        "    else\n"
         "      if let some d := env.find? c then\n"
         "        todo := todo ++ d.type.getUsedConstants\n"
         "        match d with\n"
         "        | .defnInfo v => todo := todo ++ v.value.getUsedConstants\n"
+        "        | .thmInfo v => todo := todo ++ v.value.getUsedConstants\n"
+        "        | .opaqueInfo v => todo := todo ++ v.value.getUsedConstants\n"
         "        | .inductInfo v => todo := todo ++ v.ctors.toArray\n"
         "        | _ => pure ()\n"
         "  unless hit do\n"
