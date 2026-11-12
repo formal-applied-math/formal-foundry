@@ -745,3 +745,40 @@ def test_leaf_pointers_to_missing_modules_are_dropped(tmp_path):
     drop_unresolvable_pointers(dag, str(tmp_path), log=logged.append)
     assert leaf.pointers == ["MathFin/RiskMeasures/Spectral.lean"]
     assert logged and "Distortion.lean" in logged[0]
+
+
+# --- what the library takes from a recomposed module (cal-bk-318, 2026-11-12) ----------
+
+def test_the_stub_docstring_documents_the_main_theorem_not_the_first_leaf():
+    from decompose import split_main_doc, with_target, assemble_skeleton
+    pre, doc = split_main_doc("def f : ℕ := 0\n\n/-- The main result. -/")
+    assert pre == "def f : ℕ := 0" and doc == "/-- The main result. -/"
+    assert split_main_doc("/-- f's doc -/\ndef f : ℕ := 0") == ("/-- f's doc -/\ndef f : ℕ := 0", "")
+    dag = with_target(parse_dag(_SKEL_FIXTURE),
+                      "namespace MathFin\n\n/-- The main result. -/\n"
+                      "theorem main_thm (x : ℝ) : x = x := by sorry\n")
+    skel = assemble_skeleton(PACK, dag)
+    assert skel.index("theorem lem_refl") < skel.index("/-- The main result. -/") \
+        < skel.index("theorem main_thm")
+    assert parse_dag(__import__("decompose").dag_to_dict(dag)).main_doc == dag.main_doc
+
+
+def test_a_leaf_that_only_renames_a_library_lemma_is_inlined():
+    from decompose import alias_target, recompose
+    assert alias_target("theorem l : Tendsto Phi atBot (𝓝 0) :=\n  tendsto_Phi_atBot") \
+        == "tendsto_Phi_atBot"
+    assert alias_target("theorem l : P := by exact h 0") is None         # not a bare name
+    assert alias_target("theorem l (x : ℝ) : x = x := foo") is None      # binders
+    assert alias_target("theorem l : 0 = 0 := rfl") is None              # a closing term
+    dag = parse_dag({
+        "main": {"name": "main_thm", "statement": "theorem main_thm : True",
+                 "proof": "by\n  have _h := lem_alias\n  trivial"},
+        "leaves": [{"name": "lem_alias", "statement": "theorem lem_alias : 1 = 1"}]})
+    proved = {"lem_alias": "theorem lem_alias : 1 = 1 := one_eq_one\n"}
+    r = recompose(PACK, dag, proved, check_fn=lambda m: {"passed": True})
+    assert r["ok"] and "theorem lem_alias" not in r["module"]
+    assert "have _h := one_eq_one" in r["module"]
+    # the inlined module fails its gate: the leaf stays, as before
+    r = recompose(PACK, dag, proved,
+                  check_fn=lambda m: {"passed": "theorem lem_alias" in m, "reason": "x"})
+    assert r["ok"] and "theorem lem_alias" in r["module"]

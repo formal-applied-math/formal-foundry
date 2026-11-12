@@ -131,7 +131,7 @@ set -e
 
 # 3. recompose (daemon up): assemble proved leaves + main, full gate → candidate.
 RECMP="$(python3 decompose_tick.py recompose --id "$ID" --tag "$TAG" --runs "$RUNS" \
-  || echo '{"outcome":"error","reason":"recompose crashed","leaves_total":0,"leaves_closed":0}')"
+  --main-repo "$MAIN" --config "$CFG" || echo '{"outcome":"error","reason":"recompose crashed","leaves_total":0,"leaves_closed":0}')"
 ROUT="$(jout "$RECMP" outcome)"
 LT="$(jout "$RECMP" leaves_total)"; LT="${LT:-0}"
 LC="$(jout "$RECMP" leaves_closed)"; LC="${LC:-0}"

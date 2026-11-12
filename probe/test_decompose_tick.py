@@ -126,3 +126,39 @@ def test_draft_then_recompose_chains(tmp_path):
 def test_skeleton_smoke():
     # guard the driver's contract with assemble_skeleton stays intact
     assert "by sorry" in assemble_skeleton(PACK, parse_dag(dag_to_dict(parse_dag(_DAG))))
+
+
+def test_a_recomposed_candidate_is_reflowed_and_trunk_checked(tmp_path):
+    """The leaves were reflowed, the main statement was not (cal-bk-318: three long
+    lines); a proof through an unfounded price is refused before the library build."""
+    import decompose_tick
+    long = "theorem m : True := by\n  " + "trivial <;> " * 12 + "trivial\n"
+    path = tmp_path / "c.lean"
+    path.write_text(long)
+    short = long.replace("<;> ", "<;>\n    ")
+    chat = lambda msgs: (f"```lean\n{short}```", 0)                       # noqa: E731
+    ok = lambda c: {"passed": True}                                      # noqa: E731
+    r = decompose_tick.finish_candidate(PACK, str(path), "m", {"outcome": "pass"},
+                                        regate_fn=ok, check_fn=lambda c: {"errors": []},
+                                        main_repo="", config=None, chat_fn=chat)
+    assert r["outcome"] == "pass" and path.read_text() == short
+    path.write_text(long)
+    r = decompose_tick.finish_candidate(PACK, str(path), "m", {"outcome": "pass"},
+                                        regate_fn=ok, check_fn=lambda c: {"errors": []},
+                                        main_repo="", config=None,
+                                        chat_fn=lambda msgs: ("no", 0))
+    assert r["outcome"] == "fail_gate" and "long_lines" in r["reason"]
+    lib = tmp_path / "lib"
+    (lib / "tools").mkdir(parents=True)
+    (lib / "tools" / "t.toml").write_text(
+        '[trunk]\nanchors = ["MathFin.Market.price"]\n[prices]\nnames = ["MathFin.bsV"]\n')
+    import dataclasses
+    pack = dataclasses.replace(PACK, layout=dataclasses.replace(PACK.layout,
+                                                               price_table="tools/t.toml"))
+    path.write_text(short)
+    r = decompose_tick.finish_candidate(
+        pack, str(path), "m", {"outcome": "pass"}, regate_fn=ok,
+        check_fn=lambda c: {"errors": ["trunk-gate: the price MathFin.bsV"]},
+        main_repo=str(lib), config=None, chat_fn=chat)
+    assert r["outcome"] == "fail_gate" and "off_trunk" in r["reason"]
+    assert not path.exists()                     # never left for open-pr to pick up

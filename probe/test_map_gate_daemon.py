@@ -114,3 +114,14 @@ def test_a_price_founded_on_the_functional_passes():
     trunk = {"trunk": [PACK.qualified(obj)], "prices": [PACK.qualified(obj)]}
     errs = _errors(af_gates.map_probe(PACK, stub, "t_founded", [PACK.qualified(obj)], trunk))
     assert errs == [], errs
+
+
+def test_a_proof_through_an_unfounded_price_is_caught_through_the_proof():
+    """The statement names no price; the proof does. The statement walk passes it, the
+    proof walk (`trunk_rejection`) refuses it — the library counts an entry by its proof."""
+    _, obj = _fixture()
+    stub = _stub(f"theorem t_pf : True := by\n  have _h : {obj} 0 = {obj} 0 := rfl\n  trivial\n")
+    trunk = {"trunk": [f"{PACK.namespace}.Market.price"], "prices": [PACK.qualified(obj)]}
+    assert _errors(af_gates.map_probe(PACK, stub, "t_pf", [], trunk)) == []
+    errs = _errors(af_gates.map_probe(PACK, stub, "t_pf", [], trunk, through_proof=True))
+    assert errs and all(af_gates._TRUNK_MARKER in e for e in errs), errs

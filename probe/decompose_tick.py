@@ -168,10 +168,47 @@ def _cmd_recompose(args) -> int:
     from gate import gate as run_gate
     from probe import daemon_check
     dag = parse_dag(json.load(open(_dag_path(args.runs, args.tag, args.id))))
-    r = do_recompose(_pack(args), args.id, args.tag, args.runs,
-                     check_fn=lambda m: run_gate(m, dag.main.name, check_fn=daemon_check))
+    pack = _pack(args)
+    regate = lambda m: run_gate(m, dag.main.name, check_fn=daemon_check)  # noqa: E731
+    r = do_recompose(pack, args.id, args.tag, args.runs, check_fn=regate)
+    if r["outcome"] == "pass":
+        r = finish_candidate(pack, os.path.join(args.runs, f"{args.tag}-{args.id}.lean"),
+                             dag.main.name, r, regate_fn=regate, check_fn=daemon_check,
+                             main_repo=args.main_repo, config=args.config)
     print(json.dumps(r))
     return 0
+
+
+def finish_candidate(pack, path, name, r, *, regate_fn, check_fn, main_repo, config,
+                     chat_fn=None) -> dict:
+    """What the plain path's gate does to an accepted proof, done to a recomposed one:
+    break the lines over the library's limit (the leaves were reflowed, the main
+    statement and its proof were not: cal-bk-318 was refused for three long lines), and
+    refuse a proof through a price not yet founded on the pricing functional. A miss
+    turns `pass` into `fail_gate` with the reason, before the library build is paid."""
+    import library_map
+    from af_gates import trunk_rejection
+    from autoformalize import reflow_candidate
+    module = open(path, encoding="utf-8").read()
+    if chat_fn is None:
+        from prove_session import _reflow_chat
+        chat_fn = _reflow_chat(config)
+    rf = reflow_candidate(pack, module, chat_fn=chat_fn, regate_fn=regate_fn,
+                          log=lambda m: print(f"[decompose] {m}", file=sys.stderr))
+    if rf["long"]:
+        return {**r, "outcome": "fail_gate",
+                "reason": f"lint:long_lines {rf['long'][:8]} after recompose"}
+    if rf["reflowed"]:
+        module = rf["candidate"]
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(module)
+    tr = trunk_rejection(pack, module, name,
+                         library_map.price_table(main_repo or "", pack.layout.price_table),
+                         check_fn=check_fn)
+    if tr["off_trunk"]:
+        os.remove(path)            # not a candidate open-pr may pick up
+        return {**r, "outcome": "fail_gate", "reason": "off_trunk: " + tr["verdict"][:300]}
+    return r
 
 
 def main() -> int:
@@ -187,6 +224,8 @@ def main() -> int:
     d.add_argument("--config", default=None)   # the split model is [drafter].claude_model
     r = sub.add_parser("recompose", parents=[common])
     r.add_argument("--queue", default=None)   # unused; kept for a uniform call shape
+    r.add_argument("--main-repo", default="")  # the library checkout: its price table
+    r.add_argument("--config", default=None)   # the reflow model is [drafter].claude_model
     args = ap.parse_args()
     return _cmd_draft(args) if args.cmd == "draft" else _cmd_recompose(args)
 

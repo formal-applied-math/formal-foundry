@@ -635,6 +635,9 @@ def _cmd_gate(args) -> int:
     state_cache = _state_cache(run_dir, getattr(args, "config", None))
     memory = _experience_store(run_dir, getattr(args, "config", None))
     summarizer = _summarizer(getattr(args, "config", None)) if memory is not None else None
+    from af_gates import trunk_rejection
+    price_tab = library_map.price_table(getattr(args, "main_repo", "") or "",
+                                        pack.layout.price_table)
     for target, _root in _iter_targets(args.manifest, args.only):
         cand_path = os.path.join(run_dir, f"{args.run_tag}-{target['id']}.candidate")
         candidate = read_back(cand_path)
@@ -672,6 +675,23 @@ def _cmd_gate(args) -> int:
                 summary["outcome"] = "error"      # the daemon could not answer — no verdict
                 summary["error_reason"] = ("the daemon could not gate the candidate: "
                                            + "; ".join(g.get("errors") or [])[:300])
+            elif g["passed"] and (tr := trunk_rejection(
+                    pack, candidate, target["sorry_name"], price_tab,
+                    check_fn=daemon_check))["off_trunk"]:
+                # the library counts an entry by what its proof cites: a proof through a
+                # price not yet founded on the pricing functional is an entry its ratchet
+                # refuses. A verdict now, with the reason in the notebook, not at assembly.
+                summary["outcome"] = "fail_gate"
+                summary["gate_reason"] = "off_trunk: " + tr["verdict"][:300]
+                append_jsonl(summary_log, summary)
+                print(f"[prove-gate] {target['id']}: fail_gate ({summary['gate_reason']})",
+                      flush=True)
+                if memory is not None:
+                    memory.record(target["id"], {"outcome": "fail_gate",
+                                                 "reason": summary["gate_reason"],
+                                                 "errors": [summary["gate_reason"]]},
+                                  summarize_fn=summarizer)
+                continue
             elif g["passed"]:
                 # strengthen: drop hypotheses the proof never used (elaborator
                 # warnings), re-gate; fail-open keeps the proved original. The

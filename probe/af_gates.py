@@ -152,7 +152,7 @@ _TRUNK_MARKER = "trunk-gate:"
 
 
 def map_probe(pack: DomainPack, lean_text: str, name: str, anchors: list[str],
-              trunk: dict | None = None) -> str:
+              trunk: dict | None = None, *, through_proof: bool = False) -> str:
     """The stub + a `run_cmd` meta block that FAILS elaboration unless the theorem's TYPE
     reaches one of `anchors` (the fully-qualified names the program map tags), walking
     through the types and bodies of declarations in the library's own modules and of the
@@ -169,7 +169,12 @@ def map_probe(pack: DomainPack, lean_text: str, name: str, anchors: list[str],
     when the statement reaches a price but not the functional. That is the library's
     `price_entries_off_trunk` rule read on the statement: a price founded on the functional
     carries the statement to it, one not yet re-founded does not (cal-bk-318: `SVI.bsSmile`
-    is defined through `bsV`; the proof passed and its entry was refused at assembly)."""
+    is defined through `bsV`; the proof passed and its entry was refused at assembly).
+
+    `through_proof` starts the walk from the theorem's proof as well as its type: the
+    library counts an entry by what its proof cites, so a proof can reach an unfounded
+    price its statement never names (cal-bk-318's redraft, through `SVI.blackCall`). With
+    no `anchors` the map half is off and only the trunk is checked."""
     names = ", ".join(f"`{a}" for a in anchors)
     trunk = trunk or {}
     prices = ", ".join(f"`{a}" for a in trunk.get("prices") or [])
@@ -190,7 +195,9 @@ def map_probe(pack: DomainPack, lean_text: str, name: str, anchors: list[str],
         "    | none => true\n"
         "  let mut seen : NameSet := {}\n"
         "  let mut todo : Array Name := ci.type.getUsedConstants\n"
-        "  let mut hit := false\n"
+        + ("  todo := todo ++ ((ci.value? true).map (·.getUsedConstants)).getD #[]\n"
+           if through_proof else "")
+        + "  let mut hit := false\n"
         "  let mut price : Option Name := none\n"
         "  let mut onTrunk := false\n"
         "  while !todo.isEmpty do\n"
@@ -210,14 +217,31 @@ def map_probe(pack: DomainPack, lean_text: str, name: str, anchors: list[str],
         "      | .opaqueInfo v => todo := todo ++ v.value.getUsedConstants\n"
         "      | .inductInfo v => todo := todo ++ v.ctors.toArray\n"
         "      | _ => pure ()\n"
-        "  unless hit do\n"
-        f'    throwError "{_MAP_MARKER} the statement reaches no declaration of the program map"\n'
-        "  if let some p := price then\n"
+        + ("  unless hit do\n"
+           f'    throwError "{_MAP_MARKER} the statement reaches no declaration of the program '
+           'map"\n' if anchors else "")
+        + "  if let some p := price then\n"
         "    unless onTrunk do\n"
         f'      throwError m!"{_TRUNK_MARKER} the statement reaches the price {{p}}, which the '
         'library has not yet founded on its pricing functional"\n'
     )
     return lean_text.rstrip() + "\n" + meta
+
+
+def trunk_rejection(pack: DomainPack, lean_text: str, name: str, trunk: dict | None,
+                    *, check_fn) -> dict:
+    """After a proof passes: does the theorem, statement AND proof, reach a price the
+    library has not founded on its pricing functional, without reaching the functional?
+    `{off_trunk, indeterminate?, verdict}`; skips with no table, fails open on a daemon
+    error. The library's ratchet would refuse such an entry at assembly, after the build."""
+    if not trunk:
+        return {"off_trunk": False, "verdict": "no price table — trunk check skipped"}
+    res = check_fn(map_probe(pack, lean_text, name, [], trunk, through_proof=True))
+    if res.get("error"):
+        return {"off_trunk": False, "indeterminate": True,
+                "verdict": "indeterminate: " + str(res["error"])[:120]}
+    errs = [str(e) for e in (res.get("errors") or []) if _TRUNK_MARKER in str(e)]
+    return {"off_trunk": bool(errs), "verdict": "; ".join(errs[:2])}
 
 
 def map_rejection(pack: DomainPack, lean_text: str, name: str, anchors: list[str],
