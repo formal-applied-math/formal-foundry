@@ -1,0 +1,21 @@
+{
+  "_comment": "The assembly canary: a small, genuine theorem through a program object (`Phi`, the blueprint's `def:standard-normal-cdf`), with its proof. `scripts/assembly-smoke.sh` emits it through the real emitter, places it with the real applier and runs this pack's whole assembly recipe on it, then STOPS before the push. It is never contributed: once it were, it would be a duplicate statement and the canary would (correctly) go red.",
+  "issue": {
+    "number": 0,
+    "title": "assembly canary: the central probability of the standard normal",
+    "areas": ["probability/gaussian"],
+    "area": "probability/gaussian",
+    "difficulty": "small",
+    "body": "## Pointers\n- `MathFin/Probability/Gaussian/StandardNormal.lean`\n\nBlueprint: def:standard-normal-cdf\n"
+  },
+  "intent": {
+    "module_name": "AssemblyCanary",
+    "benchmark_id": "mf-assembly-canary-central-probability",
+    "docstring": "For every real `x`, the standard normal distribution function satisfies `Phi x - Phi (-x) = 2 * Phi x - 1`: the mass of `[-x, x]` in terms of `Phi x` alone.",
+    "title": "The central probability of the standard normal",
+    "tags": ["standard normal", "distribution function", "central probability"],
+    "citation": {"key": "Hull", "locator": ""},
+    "deferred": [],
+    "definitions": []
+  }
+}

@@ -1,0 +1,106 @@
+name: assembly canary
+
+# Would a proof that passed the gate TODAY still assemble green against the target
+# library as it is today? `scripts/assembly-smoke.sh` emits the pack's fixture theorem
+# through the real emitter, places it with the real applier, runs the pack's whole
+# assembly recipe on it in the verify image (build → narrow imports → lint → regenerate
+# → ledger → declaration index + ratchet), commits, runs the library's host-side gates —
+# and stops before the push. No model is called; nothing leaves the runner.
+#
+# Why it exists: the prover had a canary and assembly had none, so when the flagship
+# reorganised (2026-11-08) the recipe went stale unobserved. It runs
+#   * on any PR that touches the assembly path or a pack — the change is tried against
+#     the live library before it merges;
+#   * weekly — the LIBRARY moves too, and a gate it adds must be added to the recipe;
+#   * on demand.
+
+on:
+  pull_request:
+    paths:
+      - "scripts/open-pr.sh"
+      - "scripts/assembly-smoke.sh"
+      - "probe/assemble.py"
+      - "probe/assembly_smoke.py"
+      - "probe/autoformalize.py"
+      - "probe/library_map.py"
+      - "probe/domain_pack.py"
+      - "domains/**"
+      - ".github/workflows/assembly-smoke.yml"
+  schedule:
+    - cron: "41 4 * * 1"
+  workflow_dispatch:
+    inputs:
+      domain:
+        description: "domain pack to assemble against (a directory under domains/ with a smoke/ fixture)"
+        type: string
+        default: mathfin
+
+permissions:
+  contents: read
+
+concurrency:
+  group: assembly-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      DOMAIN: ${{ inputs.domain || 'mathfin' }}
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+                      /usr/local/.ghcup /usr/local/share/boost /opt/hostedtoolcache/CodeQL \
+                      2>/dev/null || true
+          docker image prune -af >/dev/null 2>&1 || true
+          df -h / | tail -1
+
+      - name: Checkout foundry
+        uses: actions/checkout@v4
+
+      - name: Resolve the domain pack
+        run: |
+          python3 probe/domain_pack.py --export-env "$DOMAIN" --format env >> "$GITHUB_ENV"
+          python3 probe/domain_pack.py --show "$DOMAIN" >&2
+
+      - name: Checkout the target library
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.MAIN_REPO_SLUG }}
+          path: main
+          fetch-depth: 0                 # the library's attribution gate reads git history
+          persist-credentials: false
+
+      - name: Pull the pinned verify image
+        run: docker pull "$DOMAIN_VERIFY_IMAGE"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Assemble the canary (dry run — no push, no PR)
+        env:
+          MAIN_REPO: ${{ github.workspace }}/main
+          GH_TOKEN: ${{ github.token }}   # read-only: the library's blueprint check lists its issues
+          COMPOSE_PROJECT_NAME: docker
+        run: bash scripts/assembly-smoke.sh
+
+      - name: What the canary would have contributed
+        if: always()
+        run: |
+          cd main
+          git log -1 --stat --format='%an <%ae>%n%s%n' || true
+          f="$(git show --name-only --format= HEAD | grep -E '\.lean$' | grep -v AxiomAuditGen | head -1)"
+          [ -n "$f" ] && { echo "::group::$f"; cat "$f"; echo "::endgroup::"; } || true
+
+      - name: Upload the assembly log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: assembly-smoke
+          path: |
+            runs/smoke-*
+          if-no-files-found: ignore

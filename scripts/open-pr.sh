@@ -8,17 +8,21 @@
 #   1. reads the winning candidate + placement metadata,
 #   2. branches on the main checkout, places the proof in its library module,
 #      appends the re-export benchmark entry, registers the module in the umbrella,
-#   3. VALIDATES + REGENERATES green-or-abort: lake build → axiom_audit_gen →
-#      formalization_yaml → ledger; any failure files an `autoform-blocked` issue
-#      on the FOUNDRY repo and exits 0 WITHOUT opening a PR (never a red PR),
+#   3. VALIDATES + REGENERATES green-or-abort, by the DOMAIN PACK's own recipe
+#      (`domains/<name>/regen.sh`, run in the verify image: build → narrow imports →
+#      lint → regenerate → ledger → declaration index + ratchet), then commits and runs
+#      the pack's host-side gates (`host-gates.sh`) on the COMMITTED tree. Any failure
+#      files an `autoform-blocked` issue on the FOUNDRY repo and exits WITHOUT opening
+#      a PR (never a red PR),
 #   4. promotion-honesty guard: reject an rfl-trivial "full" proof,
-#   5. specific git add + commit (NO Claude attribution) + push + gh pr create
-#      (label autoform, body closes the source issue). R runs the 8-lens review
-#      and merges — scout authors the draft, human authors the merge.
+#   5. push + gh pr create (label autoform). The commit is authored by the pack's
+#      `commit_author` (a `[bot]`, which is how the library's attribution gate tells a
+#      machine commit from a contributor's). The body `closes` the source issue only
+#      when the proof covers all of it AND the issue names no frontier node; otherwise
+#      it `refs` it. R runs the 8-lens review and merges.
 #
-# Daemon lifecycle is owned by the workflow: the daemon is DOWN here (lake build
-# is the one Lean/Lake writer). The ledger re-verify (which needs the daemon) is
-# a separate workflow step after this script; if it cannot run, the PR body says so.
+# Daemon lifecycle is owned by the workflow: this script stops the daemon (the build is
+# the one Lean/Lake writer).
 set -euo pipefail
 
 ID=""; TAG=""
@@ -44,7 +48,8 @@ eval "$(python3 "$FOUNDRY/probe/domain_pack.py" --export-env ${DOMAIN:+"$DOMAIN"
 # is exactly where a dead path is least likely to be noticed.
 MAIN="${MAIN_REPO:-$(dirname "$FOUNDRY")/$DOMAIN_REPO_NAME}"
 SLUG="$MAIN_REPO_SLUG"
-QUEUE="$FOUNDRY/targets/queue/manifest.json"
+# QUEUE_MANIFEST: the assembly canary stages its own one-target manifest
+QUEUE="${QUEUE_MANIFEST:-$FOUNDRY/targets/queue/manifest.json}"
 CAND="$FOUNDRY/runs/$TAG-$ID.lean"
 [ -f "$CAND" ] || { echo "[open-pr] no candidate at $CAND" >&2; exit 1; }
 
@@ -64,31 +69,6 @@ ISSUE="$(read_meta source_issue)"
 DEFERRED="$(read_meta deferred)"   # json list of facts a SUBSET proof left for follow-up (or "")
 [ -n "$MODULE" ] && [ -n "$BENCH" ] || {
   echo "[open-pr] target $ID missing main_module/benchmark metadata" >&2; exit 1; }
-
-# A SUBSET proof (its `-- deferred:` header → manifest `deferred` list) must NOT
-# auto-close its multi-part parent issue on merge: use `refs` (not `closes`) in the
-# commit + PR body, and surface the deferred facts as a suggested-follow-up section
-# for R to open. Absent/empty deferred → the usual `closes #N` full-issue proof.
-FOLLOWUPS="$(python3 - "$DEFERRED" "$ISSUE" <<'PY'
-import json, sys
-raw, issue = sys.argv[1].strip(), sys.argv[2]
-try:
-    items = json.loads(raw) if raw else []
-except ValueError:
-    items = []
-if items:
-    out = ["", f"this pr is a faithful SUBSET of #{issue}; the drafter deferred the rest.",
-           "suggested follow-up issues (open one per remaining fact, then close the parent):"]
-    out += [f"- [ ] {it}" for it in items]
-    print("\n".join(out))
-PY
-)"
-if [ -n "$FOLLOWUPS" ]; then
-  CLOSE_KW="refs"; CLOSE_LINE="refs #$ISSUE (subset — see follow-ups below)"
-  TITLE_SUFFIX="(subset of #$ISSUE)"
-else
-  CLOSE_KW="closes"; CLOSE_LINE="closes #$ISSUE"; TITLE_SUFFIX="(closes #$ISSUE)"
-fi
 
 # The prover, READ from the session that ran — never assumed. This block used to say
 # "Proved by Leanstral" for every candidate; from 2026-09-28 the prover is whatever
@@ -118,14 +98,28 @@ PROOF_BULLET="- \`$MODULE\` — the proof (axioms-clean; the probe's axiom guard
 
 FOUNDRY_SLUG="${FOUNDRY_REPO:-formal-applied-math/formal-foundry}"
 
+REGEN_LOG="$FOUNDRY/runs/$TAG-$ID.assembly.log"
+
 blocked() {  # file an autoform-blocked issue on the FOUNDRY repo, do NOT open a PR
   echo "[open-pr] BLOCKED: $1" >&2
-  if [ -n "${CI:-}" ] && command -v gh >/dev/null 2>&1; then
-    gh label create autoform-blocked --repo "$FOUNDRY_SLUG" --color B60205 \
+  # WHY, kept: the last lines of the recipe's output ride the run's telemetry and the
+  # issue, so "did not assemble green" names the gate that said so.
+  local tail_txt=""
+  [ -f "$REGEN_LOG" ] && tail_txt="$(tail -n 40 "$REGEN_LOG" | cut -c1-400)"
+  # The foundry's OWN token files the issue: GH_TOKEN here is the library's PR token,
+  # which has no rights on this repository (it filed nothing from 2026-09-28 on).
+  if [ -n "${CI:-}" ] && [ -z "${DRY_RUN:-}" ] && command -v gh >/dev/null 2>&1; then
+    GH_TOKEN="${FOUNDRY_GH_TOKEN:-${GH_TOKEN:-}}" gh label create autoform-blocked \
+      --repo "$FOUNDRY_SLUG" --color B60205 \
       --description "autoform candidate did not assemble green" 2>/dev/null || true
-    gh issue create --repo "$FOUNDRY_SLUG" \
+    GH_TOKEN="${FOUNDRY_GH_TOKEN:-${GH_TOKEN:-}}" gh issue create --repo "$FOUNDRY_SLUG" \
       --title "autoform-blocked: $ID ($TAG)" --label "autoform-blocked" \
-      --body "candidate for $ID ($TAG) did not assemble green: $1. proof is at runs/$TAG-$ID.lean; needs manual placement." \
+      --body "candidate for $ID ($TAG) did not assemble green: $1. proof is at runs/$TAG-$ID.lean.
+
+last lines of the assembly log:
+\`\`\`
+$tail_txt
+\`\`\`" \
       2>/dev/null || true
   fi
   exit 3   # CONTENT-deterministic block: the tick RECORDS the target (fail_assembly)
@@ -139,15 +133,20 @@ transient() {  # infra/transient failure (network, gh, docker pull): no issue, n
 
 # --- 2. branch + place -------------------------------------------------------
 cd "$MAIN"
-BRANCH="autoform/$ID-$TAG"
+# ONE branch per target, force-pushed. A run-tagged branch name left thirteen copies of
+# cal-bk-129 on the library (2026-09-28 .. 10-21: every tick pushed, none could open its
+# PR); a retry now updates the branch it already has.
+BRANCH="autoform/$ID"
 git checkout -B "$BRANCH"
 set +e
-python3 - "$CAND" "$QUEUE" "$ID" "$MAIN" "$FOUNDRY/probe" "$FOUNDRY/runs/$TAG-$ID.entry.json" "$DOMAIN_NAME" "$MODEL" <<'PY'
+PLACED="$FOUNDRY/runs/$TAG-$ID.placement.json"
+python3 - "$CAND" "$QUEUE" "$ID" "$MAIN" "$FOUNDRY/probe" "$FOUNDRY/runs/$TAG-$ID.entry.json" "$DOMAIN_NAME" "$MODEL" "$PLACED" <<'PY'
 import json, os, sys
-cand_path, queue_path, tid, main, probe_dir, entry_override, domain_name, prover_model = sys.argv[1:9]
+cand_path, queue_path, tid, main, probe_dir, entry_override, domain_name, prover_model, placed = sys.argv[1:10]
 sys.path.insert(0, probe_dir)
 import domain_pack
-from assemble import apply_contribution, ensure_umbrella_import, stamp_prover
+from assemble import (apply_contribution, ensure_umbrella_import, record_frontier_core,
+                      stamp_prover)
 from redact import secret_findings, secret_values
 # the pack is passed DOWN (2026-08-16 refactor); this heredoc was missed by it, so the
 # first real pass after that date would have crashed here and — treated as transient —
@@ -176,7 +175,20 @@ if leaks:
     sys.exit(3)
 written = apply_contribution(pack, code, target, entry, main)
 written += ensure_umbrella_import(main, target["main_module"], f"{pack.namespace}.lean")
+# The program map: an issue that names a node still on the frontier is not CLOSED by a
+# machine. The entry is recorded as proving part of the node (its `core` list — the
+# library's own mechanism), and whether the node is delivered stays the reviewer's call.
+frontier = record_frontier_core(main, pack.layout.blueprint_frontier,
+                                target.get("blueprint") or [], entry["id"])
+if frontier:
+    written.append(pack.layout.blueprint_frontier)
+    print(f"[open-pr] frontier node(s) {frontier}: recorded {entry['id']} in `core`",
+          file=sys.stderr)
 print("[open-pr] wrote:", ", ".join(written), file=sys.stderr)
+with open(placed, "w", encoding="utf-8") as f:
+    json.dump({"written": written, "frontier": frontier, "entry_id": entry["id"],
+               "blueprint": target.get("blueprint") or [],
+               "new_defs": target.get("new_defs") or []}, f)
 PY
 PLACE_RC=$?
 set -e
@@ -184,6 +196,43 @@ if [ "$PLACE_RC" = 3 ]; then
   blocked "credential-shaped content in the candidate or its entry (kinds in the tick log; values never printed)"
 fi
 [ "$PLACE_RC" = 0 ] || exit 1
+placed() { python3 -c 'import json,sys; v=json.load(open(sys.argv[1])).get(sys.argv[2]) or []; print(", ".join(v) if isinstance(v, list) else v)' "$PLACED" "$1"; }
+FRONTIER="$(placed frontier)"
+BLUEPRINT="$(placed blueprint)"
+NEW_DEFS="$(placed new_defs)"
+
+# A SUBSET proof (its `-- deferred:` header → manifest `deferred` list) must NOT
+# auto-close its multi-part parent issue on merge: use `refs` (not `closes`) in the
+# commit + PR body, and surface the deferred facts as a suggested-follow-up section
+# for R to open. So must a proof toward a FRONTIER node. Otherwise → `closes #N`.
+FOLLOWUPS="$(python3 - "$DEFERRED" "$ISSUE" <<'PY'
+import json, sys
+raw, issue = sys.argv[1].strip(), sys.argv[2]
+try:
+    items = json.loads(raw) if raw else []
+except ValueError:
+    items = []
+if items:
+    out = ["", f"this pr is a faithful SUBSET of #{issue}; the drafter deferred the rest.",
+           "suggested follow-up issues (open one per remaining fact, then close the parent):"]
+    out += [f"- [ ] {it}" for it in items]
+    print("\n".join(out))
+PY
+)"
+if [ -n "$FOLLOWUPS" ]; then
+  CLOSE_KW="refs"; CLOSE_LINE="refs #$ISSUE (subset — see follow-ups below)"
+  TITLE_SUFFIX="(subset of #$ISSUE)"
+elif [ -n "$FRONTIER" ]; then
+  # #N names a result the program map still lists as not formalized. Closing it here
+  # would leave a frontier node no open issue works toward, which the library's
+  # blueprint check refuses on main; and whether this theorem IS that node is a
+  # judgment about a statement, which is the reviewer's.
+  CLOSE_KW="refs"; CLOSE_LINE="refs #$ISSUE (frontier node $FRONTIER — see the note below)"
+  TITLE_SUFFIX="(toward #$ISSUE)"
+else
+  CLOSE_KW="closes"; CLOSE_LINE="closes #$ISSUE"; TITLE_SUFFIX="(closes #$ISSUE)"
+fi
+
 
 # --- 3. promotion-honesty guard (reject an rfl-trivial "full") ---------------
 # H9: use the tested probe_lib.rfl_proof_present (the shell glob missed `:= by rfl`
@@ -193,37 +242,31 @@ if python3 -c "import sys; sys.path.insert(0, '$FOUNDRY/probe'); from probe_lib 
 fi
 
 # --- 4. validate + regenerate (green-or-abort) -------------------------------
-# The Lean toolchain lives in the domain's verify IMAGE, not on the runner host,
-# so the build + elaboration-dependent regens run INSIDE the image against this
-# fresh checkout (mounted at /work). formalization.yaml is host-side Python (no
-# Lean) and is regenerated either way. The daemon must be DOWN for the build
-# (one Lake writer) — the workflow guarantees that before calling this script.
-# FIRST-RUN NOTE: this docker/mount/cache path is validated on the first live PR;
-# on any failure we abort to an autoform-blocked issue rather than open a red PR.
+# The Lean toolchain lives in the domain's verify IMAGE, not on the runner host, so the
+# build and everything that needs an elaborated library runs INSIDE the image against
+# this fresh checkout. The daemon must be DOWN for it (one Lake writer).
+#
+# WHAT runs is the PACK's: `domains/<name>/regen.sh` is that library's CI, step for
+# step. It used to be a block in this script, written against the flagship as it was in
+# July; by November the library's build gated a declaration index, a ratchet, a doc
+# standard and a narrowed import list this script had never heard of, and every
+# candidate it "validated green" would have opened red. A pack with no recipe gets the
+# generic one below.
 IMAGE="${VERIFY_IMAGE:-$DOMAIN_VERIFY_IMAGE}"
+PACK_DIR="$FOUNDRY/domains/$DOMAIN_NAME"
+MODULE_NAME="$(printf '%s' "${MODULE%.lean}" | tr '/' '.')"
 # the proving daemon is done; stop it (all possible names: docker-run `lean-repl`,
 # compose `docker-lean-repl-1`, plus the lean-lsp) so the build has the memory
 # headroom AND is the sole Lake writer to the shared olean volume mounted below.
 docker stop lean-repl docker-lean-repl-1 "$DOMAIN_LEAN_LSP_CONTAINER" >/dev/null 2>&1 || true
-# After the build, verify + record the new benchmark entry in the ledger via
-# `lake env lean` IN THIS container (LEDGER_EXEC_LOCAL — no docker-exec/daemon).
-# Default `verify` scope is stale+missing; the corpus has 0 bare umbrella imports
-# entries, so the umbrella change restales nothing and this checks only the 1 new
-# entry (~60s). A fresh ledger + status=0 is the last green gate.
-# CI-parity: this block must run EVERYTHING the main repo's build.yml gates on —
-# lake build AND lake lint (PRs #123/#124 opened red because lint never ran here:
-# defsWithUnderscore + docBlame are lint-only classes the build accepts).
 # SINGLE-quoted on purpose: `$DOMAIN_NAMESPACE` must survive to the CONTAINER's
 # shell, which means the container needs it in its env (`-e` below). Left
 # unpassed it expands to empty and this silently becomes `lake build ""`.
 REGEN='set -e
+       if [ -f /pack/regen.sh ]; then exec bash /pack/regen.sh; fi
        lake exe cache get >/dev/null 2>&1 || true
        lake build "$DOMAIN_NAMESPACE"
-       lake lint
-       python3 -m tools.verify.axiom_audit_gen --write
-       python3 -m tools.formalization_yaml --write
-       LEDGER_EXEC_LOCAL=1 python3 -m tools.verify.ledger verify --exec --timeout 600
-       python3 -m tools.verify.ledger status'
+       lake lint'
 if command -v docker >/dev/null 2>&1; then
   # --entrypoint bash overrides the image's default entrypoint (the verify
   # CLI); without it the shell command is fed as args to that CLI and errors.
@@ -233,45 +276,81 @@ if command -v docker >/dev/null 2>&1; then
   # (that from-scratch library rebuild blew the 2h job timeout on the first live PR,
   # 2026-07-17: 8558 Mathlib modules came from `cache get`, then heavy library
   # modules like DoobLpMaximalInequality rebuilt at ~400s each).
+  # The build's progress lines are dropped from the log that is kept (a library build
+  # prints ~9000 of them); what is left is the recipe's own output and every error.
+  set +e
   docker run --rm --entrypoint bash \
     -e DOMAIN_NAMESPACE="$DOMAIN_NAMESPACE" \
+    -e DOMAIN_SHAKE_EXE="${DOMAIN_SHAKE_EXE:-}" \
+    -e MODULE="$MODULE" -e MODULE_NAME="$MODULE_NAME" \
     -v "$MAIN":/app \
+    -v "$PACK_DIR":/pack:ro \
     -v "${COMPOSE_PROJECT_NAME:-docker}_lake_build_cache":/app/.lake \
-    -w /app "$IMAGE" -lc "$REGEN" \
-    || blocked "in-image build/regen failed (lake build / lake lint / regen / ledger)"
-  # The OTHER half of main-CI parity: the python gates (values/router/ledger/audit
-  # byte-freshness pytest) run on the placed tree exactly as build.yml runs them
-  # BEFORE the Lean build. The tick's preflight proved these gates green pre-
-  # placement, so red here is THIS candidate's doing — a deterministic block.
-  python3 -m pip show pytest >/dev/null 2>&1 || python3 -m pip install -q pytest
-  ( cd "$MAIN" && python3 -m pytest tests/ -q ) \
-    || blocked "python gates red after placement (pytest tests/)"
+    -w /app "$IMAGE" -lc "$REGEN" 2>&1 \
+    | grep --line-buffered -v -E '^(✔|ℹ|⚠) \[|Replayed |^warning: .*declaration uses .sorry.' \
+    | tee "$REGEN_LOG"
+  REGEN_RC="${PIPESTATUS[0]}"   # the CONTAINER's status, not grep's or tee's
+  set -e
+  [ "$REGEN_RC" = 0 ] \
+    || blocked "in-image build/regen failed rc=$REGEN_RC (domains/$DOMAIN_NAME/regen.sh: build / shake / lint / regen / ledger / index + ratchet)"
 else
-  # no docker (local dry-run): regen only the host-side artifact, flag the rest.
-  python3 -m tools.formalization_yaml --write || blocked "formalization_yaml regen failed"
-  echo "[open-pr] WARN: no docker — AxiomAuditGen + lake build NOT run; PR CI will gate them" >&2
+  echo "[open-pr] WARN: no docker — the library was NOT built; PR CI will gate it" >&2
 fi
 
-# --- 5. commit + push + PR ---------------------------------------------------
+# --- 5. commit, then the host-side gates on the COMMITTED tree ---------------
 # specific adds only (never -A): the proof, the benchmark entry, the umbrella
 # import, and whichever regenerated artifacts exist.
-git add "$MODULE" "$BENCH" "$DOMAIN_NAMESPACE.lean" formalization.yaml
-git add "$DOMAIN_LAKE_ROOT/AxiomAuditGen.lean" verification_ledger.json 2>/dev/null || true
+git add "$MODULE" "$BENCH" "$DOMAIN_NAMESPACE.lean"
+for f in formalization.yaml "$DOMAIN_LAKE_ROOT/AxiomAuditGen.lean" verification_ledger.json \
+         "${DOMAIN_BLUEPRINT_FRONTIER:-}"; do
+  [ -n "$f" ] && [ -e "$f" ] && git add "$f"
+done
+# anything else the regen changed is a generated artifact this script does not know
+# about yet — say so, because a PR that leaves it out opens with a stale-artifact gate red
+LEFT="$(git status --porcelain --untracked-files=no | grep -v '^[MADR] ' \
+        | grep -v -e 'docker/docker-compose.lean-lsp.yml' || true)"
+[ -z "$LEFT" ] || echo "[open-pr] WARN: modified and NOT in this commit: $(printf '%s' "$LEFT" | tr '\n' ' ')" >&2
 # Attribution rule (honest provenance): the PR credits the prover that did the
-# mathematical work (leanstral), matching the benchmark entry's
-# metadata.provenance and the formalization.yaml automation count. Distinct from
-# the standing rule that Claude / the coding assistant is never attributed
-# anywhere.
-git -c user.name="$DOMAIN_NAME-autoform" -c user.email="autoform@users.noreply.github.com" \
+# mathematical work, matching the benchmark entry's metadata.provenance and the
+# formalization.yaml automation count. The AUTHOR is the pack's bot identity: the
+# library reads authorship from git, and a non-bot name here is a contributor its
+# header does not credit and its README does not list.
+git -c user.name="${DOMAIN_COMMIT_AUTHOR:-$DOMAIN_NAME-autoform[bot]}" \
+    -c user.email="autoform@users.noreply.github.com" \
     commit -q \
     -m "feat(autoform): $ID — prove $(basename "$MODULE" .lean) ($CLOSE_KW #$ISSUE)" \
     -m "$PROVER_DESC" \
     "${COMMIT_TRAILER[@]}"
+# The OTHER half of CI parity: the library's host-side gates, run exactly as its
+# build runs them — and AFTER the commit, because the attribution gate reads who
+# added each file from git. (They ran before it until 2026-11: the new module was
+# untracked, the gate could not see it, and the first thing the PR's own build would
+# have said is that `<pack>-autoform` is an uncredited contributor.) The tick's
+# preflight proved these gates green pre-placement, so red here is THIS candidate's
+# doing — a deterministic block.
+if [ -f "$PACK_DIR/host-gates.sh" ]; then
+  ( cd "$MAIN" && bash "$PACK_DIR/host-gates.sh" ) \
+    || blocked "the library's host-side gates are red on the committed contribution (domains/$DOMAIN_NAME/host-gates.sh)"
+else
+  python3 -m pip show pytest >/dev/null 2>&1 || python3 -m pip install -q pytest
+  ( cd "$MAIN" && python3 -m pytest tests/ -q ) \
+    || blocked "python gates red after placement (pytest tests/)"
+fi
+
+if [ -n "${DRY_RUN:-}" ]; then
+  # the assembly canary stops here: everything a real PR's build would check has been
+  # checked on the committed tree, and nothing leaves the runner
+  echo "[open-pr] DRY RUN: $ID assembled green on $(git rev-parse --short HEAD) — not pushed" >&2
+  git show --stat --format='%an <%ae>%n%s' HEAD >&2
+  exit 0
+fi
+
+# --- 6. push + PR ------------------------------------------------------------
 # The checkout does not persist credentials (the prover can read the runner's files), so
 # this one command carries the token, as an extra header that is never written to disk.
 [ -n "${GH_TOKEN:-}" ] || transient "no GH_TOKEN to push with"
 git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" \
-    push -f origin "$BRANCH"
+    push -f origin "$BRANCH" || transient "the push of $BRANCH was refused"
 
 TOKENS="$(python3 - "$FOUNDRY/runs/$TAG-summary.jsonl" "$ID" <<'PY'
 import json, sys
@@ -321,6 +400,16 @@ PY
 )"
 fi
 
+# The program map. The PR names the node(s) its issue names, so the blueprint links it
+# as it links the issue; and a frontier node gets the one decision a machine does not
+# make spelled out for the reviewer.
+BLUEPRINT_LINE=""; FRONTIER_NOTE=""
+[ -z "$BLUEPRINT" ] || BLUEPRINT_LINE="Blueprint: $BLUEPRINT"
+if [ -n "$FRONTIER" ]; then
+  FRONTIER_NOTE="
+frontier: #$ISSUE names \`$FRONTIER\`, which the program map still lists as not formalized. this pr records the entry under the node's \`core\` in \`${DOMAIN_BLUEPRINT_FRONTIER:-the frontier file}\` and leaves the node where it is. if this theorem delivers the node: tag the declaration in the blueprint under the same label, delete the frontier entry, and close #$ISSUE; otherwise split what is left into follow-up issues."
+fi
+
 BODY="$(cat <<EOF
 $BODY_INTRO $CLOSE_LINE.
 
@@ -328,7 +417,9 @@ what it adds:
 $PROOF_BULLET
 - a re-export entry in \`$BENCH\`.
 - regenerated \`$DOMAIN_LAKE_ROOT/AxiomAuditGen.lean\` + \`formalization.yaml\`.
-$DAG_SECTION
+$DAG_SECTION$FRONTIER_NOTE
+
+$BLUEPRINT_LINE
 
 provenance: $PROVENANCE_DESC, run tag \`$TAG\`, ~$TOKENS tokens.
 
@@ -336,6 +427,7 @@ review checklist (8-lens, before merge):
 - [ ] the statement faithfully formalizes (its stated subset of) issue #$ISSUE — no vacuity, no weaker restatement of what it states; a declared subset is fine (see follow-ups).
 - [ ] no DERIVABLE hypothesis survives (the #123 \`hP\` class: a positivity/side condition provable from the concrete defs — the strengthen pass only removes proof-UNUSED ones; this one needs an eye).
 - [ ] the proof is idiomatic and consumes existing lemmas, not a wrapper.
+- [ ] the module docstring's reference and its locator are the source that states this result (the citation key was chosen by the drafter from the bibliography).
 - [ ] ledger row present (run \`ledger verify\` if ci is red on it).
 - [ ] axioms clean; no slop.
 - [ ] coverage.md journal block authored at merge (reviewer-written — the narrative voice stays human).$FOLLOWUPS
@@ -357,7 +449,7 @@ gh label create autoform --repo "$SLUG" --color 0E8A16 \
   --description "opened by the autoform pipeline; review before merge" 2>/dev/null || true
 # defs-route modules introduce new definitions — the architecture-heavy review
 # class (library design, not just proof correctness). Flag them.
-if grep -q '^-- new-defs:' "$MODULE" 2>/dev/null; then
+if [ -n "$NEW_DEFS" ]; then
   gh label create new-defs --repo "$SLUG" --color 5319E7 \
     --description "autoform PR introducing new definitions — review the design, not just the proof" 2>/dev/null || true
   PR_FLAGS+=(--label new-defs)
