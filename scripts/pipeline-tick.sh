@@ -247,8 +247,11 @@ else
   fi
 fi
 
-# 3. Read the final outcome + tokens (the LAST row for $ID — a decompose escalation's row
-#    supersedes the plain attempt's; SUMMARY defined in step 2).
+# 3. Read the final outcome (the LAST row for $ID — a decompose escalation's row
+#    supersedes the plain attempt's; SUMMARY defined in step 2) and the tokens: EVERY row
+#    of $ID and of its leaves ($ID__<leaf>), since an escalation pays for the plain
+#    attempt and each leaf session, and its own row carries none (cal-bk-318 charged 0
+#    for four sessions, 2026-11-12).
 read -r OUTCOME TOKENS < <(python3 - "$SUMMARY" "$ID" <<'PY'
 import json,sys
 path,tid=sys.argv[1],sys.argv[2]
@@ -256,7 +259,9 @@ out,tok="error",0
 try:
     for line in open(path):
         r=json.loads(line)
-        if r.get("target")==tid: out,tok=r.get("outcome","error"),int(r.get("tokens",0))
+        t=r.get("target") or ""
+        if t==tid or t.startswith(tid+"__"): tok+=int(r.get("tokens") or 0)
+        if t==tid: out=r.get("outcome","error")
 except OSError: pass
 print(out,tok)
 PY

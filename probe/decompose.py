@@ -53,6 +53,10 @@ class Dag:
     #: SEPARATE processes: this survives the dag.json roundtrip between them.
     preamble: str = ""
     target_pointers: list[str] = field(default_factory=list)
+    #: the stub's doc comment on its theorem: it documents the MAIN node, so it is emitted
+    #: above the main statement, not left at the end of the preamble where it would land
+    #: on the first leaf (cal-bk-318, 2026-11-12)
+    main_doc: str = ""
 
     @property
     def nodes(self) -> list[Node]:
@@ -116,7 +120,8 @@ def parse_dag(spec, *, max_leaves: int | None = None) -> Dag:
     tgt = spec.get("target") if isinstance(spec.get("target"), dict) else {}
     dag = Dag(main=main, leaves=leaves,
               preamble=str(tgt.get("preamble") or ""),
-              target_pointers=list(tgt.get("pointers") or []))
+              target_pointers=list(tgt.get("pointers") or []),
+              main_doc=str(tgt.get("main_doc") or ""))
     topo_order(dag)   # raises DagError on a cycle
     _check_leaf_reachability(main, leaves)   # raises DagError on a dead (orphan) leaf
     return dag
@@ -232,7 +237,7 @@ def with_target(dag: Dag, target_text: str) -> Dag:
     """`dag` with the target stub's definitions and imports attached. Called once, at
     draft time, so every later stage assembles modules against the same context the
     skeleton gate validated."""
-    dag.preamble = target_preamble(target_text)
+    dag.preamble, dag.main_doc = split_main_doc(target_preamble(target_text))
     dag.target_pointers = [m.replace(".", "/") + ".lean"
                            for m in re.findall(r"^\s*(?:public\s+)?import\s+([A-Za-z0-9_.]+)",
                                                target_text, re.M)
@@ -274,7 +279,8 @@ def dag_to_dict(dag: Dag) -> dict:
                     "applied_to": leaf.applied_to}
                    for leaf in dag.leaves],
         # set by the tick from the target file, never by the model
-        "target": {"preamble": dag.preamble, "pointers": dag.target_pointers},
+        "target": {"preamble": dag.preamble, "pointers": dag.target_pointers,
+                   "main_doc": dag.main_doc},
     }
 
 
@@ -378,6 +384,54 @@ def target_preamble(target_text: str) -> str:
     return "\n".join(out).strip()
 
 
+def split_main_doc(preamble: str) -> tuple[str, str]:
+    """`(preamble, doc)`: a doc comment that ENDS the preamble is the theorem's own (the
+    cut in `target_preamble` falls just below it), so it is taken off and returned."""
+    text = preamble.rstrip()
+    i = text.rfind("/--")
+    if i < 0 or not text.endswith("-/") or "-/" in text[i + 3:-2]:
+        return preamble, ""
+    return text[:i].rstrip(), text[i:]
+
+
+def _main_block(dag: Dag, proof: str) -> str:
+    doc = f"{dag.main_doc}\n" if dag.main_doc else ""
+    return f"{doc}{dag.main.statement} := {proof}"
+
+
+_ALIAS = re.compile(r"^(?:theorem|lemma)\s+[\w.'₀-₉]+\s*:(?:.|\n)*?:=\s*(?:by\s+exact\s+)?"
+                    r"(@?[A-Za-z_][\w.'₀-₉]*)\s*$")
+#: closing terms, not lemmas: a leaf proved by one of these has content of its own
+_NOT_ALIASES = {"rfl", "trivial", "Iff.rfl", "le_rfl", "HEq.rfl", "id"}
+
+
+def alias_target(decl: str) -> str | None:
+    """The constant a proved leaf merely renames (`theorem l : T := lib_lemma`), or None.
+    Such a leaf is not a lemma of the contribution: it is a second name for one the
+    library or Mathlib already has, which the library's index counts as a duplicate
+    statement (cal-bk-318's `Phi_tendsto_zero_atBot := tendsto_Phi_atBot`). Only a leaf
+    with NO binders qualifies: with binders the body is the constant at those binders,
+    and putting the constant in the leaf's place would apply it to the wrong arguments."""
+    m = _ALIAS.match(decl.strip())
+    if not m:
+        return None
+    target = m.group(1).lstrip("@")
+    return None if target in _NOT_ALIASES else target
+
+
+def inline_aliases(dag: Dag, decls: dict[str, str]) -> tuple[dict[str, str], str]:
+    """Drop the alias leaves, replacing each one's name by its target in the other leaves
+    and in the main proof. Returns `(decls, main_proof)`; the gate re-checks the result."""
+    aliases = {n: t for n, d in decls.items() if (t := alias_target(d))}
+    if not aliases:
+        return decls, dag.main.proof
+    sub = lambda text: re.sub(  # noqa: E731
+        r"(?<![\w.'])(" + "|".join(map(re.escape, aliases)) + r")(?![\w'])",
+        lambda m: aliases[m.group(1)], text)
+    kept = {n: sub(d) for n, d in decls.items() if n not in aliases}
+    return kept, sub(dag.main.proof)
+
+
 def _decompose_module(pack: DomainPack, dag: Dag, blocks: list[str]) -> str:
     """A module assembled from DAG pieces, carrying the target's own context.
 
@@ -408,7 +462,7 @@ def assemble_skeleton(pack: DomainPack, dag: Dag, meta: dict | None = None) -> s
     the pointers it happens to notice (on `cal-bk-69`, one of the target's three), and
     trusting only those drops the rest."""
     return _decompose_module(pack, dag, [
-        f"{n.statement} := {n.proof or 'by sorry'}" if n.is_main
+        _main_block(dag, n.proof or "by sorry") if n.is_main
         else f"{n.statement} := by sorry" for n in topo_order(dag)])
 
 
@@ -508,10 +562,17 @@ def recompose(pack: DomainPack, dag: Dag, proved_leaves: dict, *, check_fn,
     if remainder:
         return {"ok": False, "partial": True, "banked": banked, "remainder": remainder,
                 "deferred": True, "reason": f"leaves not proved: {', '.join(remainder)}"}
-    body = [decls[leaf.name] for leaf in topo_order(dag) if not leaf.is_main]
-    body.append(f"{dag.main.statement} := {dag.main.proof}")
-    module = _decompose_module(pack, dag, body)
-    g = check_fn(module)
+    def assemble(decls: dict[str, str], main_proof: str) -> str:
+        body = [decls[leaf.name] for leaf in topo_order(dag)
+                if not leaf.is_main and leaf.name in decls]
+        return _decompose_module(pack, dag, body + [_main_block(dag, main_proof)])
+    module = assemble(decls, dag.main.proof)
+    inlined = assemble(*inline_aliases(dag, decls))
+    g = check_fn(inlined) if inlined != module else {}
+    if g.get("passed"):
+        module = inlined          # the alias leaves are gone and the module still checks
+    else:
+        g = check_fn(module)
     if g.get("passed"):
         return {"ok": True, "partial": False, "module": module, "banked": banked,
                 "remainder": [], "reason": ""}

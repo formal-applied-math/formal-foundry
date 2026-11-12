@@ -90,7 +90,24 @@ def build_system_prompt(main_repo: str, pack: DomainPack) -> str:
         "summary above wherever they differ.\n\n"
         f"{patterns}\n"
     ) if patterns.strip() else ""
-    return pack.house_doctrine + "\n" + patterns_block + pin_block
+    return pack.house_doctrine + "\n" + patterns_block + pin_block + trunk_block(main_repo, pack)
+
+
+def trunk_block(main_repo: str, pack: DomainPack) -> str:
+    """The library's price table, as a rule the proof must keep. The library refuses an
+    entry whose proof reaches one of these prices without reaching the pricing
+    functional, and the gate now refuses such a proof (cal-bk-318's redraft proved a
+    bound on the Black form through `SVI.blackCall` at a degenerate SVI parameter)."""
+    import library_map
+    tab = library_map.price_table(main_repo, pack.layout.price_table) if main_repo else None
+    if not tab:
+        return ""
+    return ("\n── PRICES (a gate refuses the proof) ──\n"
+            "These declarations are prices the library has not all founded on its pricing "
+            "functional yet. A proof that cites one of them, or a lemma about one, is "
+            "refused unless it also reaches the functional: work with the underlying "
+            "formula or law directly instead.\n"
+            + ", ".join(f"`{n}`" for n in tab["prices"]) + "\n")
 
 
 # --- Drafter (statement) authority --------------------------------------------
