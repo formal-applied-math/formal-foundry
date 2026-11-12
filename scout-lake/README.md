@@ -10,7 +10,7 @@ It is deliberately **separate** from the main repo's `lakefile.lean`: that
 manifest is the verification anchor + the ledger input-hash, so we never add a
 dev-only extractor dependency to it. Here MathFin is a local-path require, so
 its pinned Mathlib + BrownianMotion win, and lean_scout is pinned to an exact
-rev (`289c1f1…`), never `@main`.
+rev (`REV` in `scripts/build-index.sh`, the full sha), never `@main`.
 
 ## Build the index
 
@@ -31,13 +31,15 @@ scripts/build-index.sh          # → index/{types,tactics,const_dep}.jsonl + in
 
 ## Toolchain-compat risk (the one thing that can go wrong)
 
-lean_scout `@289c1f1` may have been built against a different Mathlib than
-MathFin's pin (`81a5d257`). Because MathFin is required last, its pins win — if
+The pinned lean_scout rev may have been built against a different toolchain than
+the library's. Because MathFin is required last, its pins win — if
 lean_scout's own code depends on Mathlib API that moved, `lake build` here will
 error. Fallbacks, in order of preference:
 
-1. Bump the lean_scout `rev` in `lakefile.toml` to a commit that targets Lean
-   `v4.32.0` / Mathlib `81a5d257` (check its `lean-toolchain`).
+1. Bump `REV` in `scripts/build-index.sh` (and `rev` in `lakefile.toml`) to the
+   lean_scout commit whose `lean-toolchain` is the library's. Its history moves one
+   toolchain at a time, so `gh api
+   "repos/mathlib-initiative/lean_scout/commits?path=lean-toolchain"` finds it.
 2. If no compatible rev exists, run lean_scout in *its own* project (its own
    Mathlib) and point `--imports MathFin` at MathFin oleans built against the
    same Mathlib — only viable if the two Mathlibs match.
