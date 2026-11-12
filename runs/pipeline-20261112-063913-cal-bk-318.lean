@@ -1,0 +1,206 @@
+/-
+Copyright (c) 2026 Raphael Coelho. All rights reserved.
+Released under Apache 2.0 license as described in the file LICENSE.
+Authors: Raphael Coelho
+-/
+module
+
+public import Mathlib
+public import MathFin.Models.ModelFree.CallPriceFunction
+public import MathFin.Models.ModelFree.CalendarArbitrage
+
+-- pointers: MathFin/Models/ModelFree/SVI/TailCondition.lean, MathFin/Models/ModelFree/SVI/BlackSmile.lean, MathFin/Models/ModelFree/CallPriceFunction.lean, MathFin/Models/ModelFree/CalendarArbitrage.lean, MathFin/Models/LocalVol/ForwardSmile.lean
+-- main-module: MathFin/Models/ModelFree/LeftWingBound.lean
+-- benchmark: benchmarks/black_scholes.json
+-- benchmark-id: mf-svi-left-wing-bound
+-- source-issue: 318
+-- deferred: general tail lemma C -> 0 iff d_plus -> -infinity for any positive total variance w : R -> R; easy direction of grounding IsNormalizedCallPrice: nonnegative S with E S = 1 gives the structure; mass at zero of the underlying law for the SVI smile; calendar-spread martingale step for any convex payoff via conditional Jensen; t > 0 calendar statements connected to the local-variance characterisation; single (k, w) Black form replacing blackForm, totalVarianceCall and logBlackCall; port hygiene: scope maxHeartbeats, maxRecDepth and open scoped Classical; folding Foundations/NormalTail into its natural homes
+-- blueprint: thm:smile-no-arbitrage
+
+/-!
+# The left-wing slope bound for a normalised SVI call price function
+
+A raw SVI smile with positive variance whose smiled call is a normalised call price function has
+left wing slope b(1 - rho) at most 2.
+
+## Main results
+
+* `svi_left_wing_slope_le_two`: The left-wing slope bound for a normalised SVI call price function
+
+## References
+
+* [Roper, *Arbitrage free implied volatility surfaces*][Roper2010]
+
+## Tags
+
+svi, left wing, moment formula, no-arbitrage, call price function, roper, MSC 91G20
+-/
+
+set_option autoImplicit false
+
+@[expose] public section
+
+namespace MathFin
+
+open MeasureTheory ProbabilityTheory
+
+theorem svi_left_wing_slope_le_two (p : SVI.Params)
+    (hpos : ∀ k : ℝ, 0 < SVI.variance p k)
+    (hC : IsNormalizedCallPrice (SVI.bsSmile p)) :
+    p.b * (1 - p.rho) ≤ 2 := by
+  by_contra hcon
+  have hc2 : 2 < p.b * (1 - p.rho) := not_le.1 hcon
+  have hb : 0 ≤ p.b := by
+    by_contra hb
+    have hb' : p.b < 0 := not_le.1 hb
+    have hρ : 1 < p.rho := by nlinarith
+    set e := -(p.b * (p.rho + 1)) with he
+    have hepos : 0 < e := by rw [he]; nlinarith
+    have hx : (p.m + (|p.a| + 1) / e) - p.m ≤
+        Real.sqrt (((p.m + (|p.a| + 1) / e) - p.m) ^ 2 + p.sigma ^ 2) :=
+      (le_abs_self _).trans (Real.abs_le_sqrt (by nlinarith [sq_nonneg p.sigma]))
+    have het : e * ((|p.a| + 1) / e) = |p.a| + 1 := by field_simp
+    have h0 := hpos (p.m + (|p.a| + 1) / e)
+    have h1 := mul_le_mul_of_nonneg_left
+      (add_le_add_right hx (p.rho * ((p.m + (|p.a| + 1) / e) - p.m))) (by linarith : 0 ≤ -p.b)
+    simp only [SVI.variance] at h0
+    have h2 : p.b * (p.rho * (p.m + (|p.a| + 1) / e - p.m) + (p.m + (|p.a| + 1) / e - p.m))
+        = -(e * ((|p.a| + 1) / e)) := by rw [he]; ring
+    linarith [neg_abs_le p.a, le_abs_self p.a]
+  have hlow (k : ℝ) : p.a + p.b * (1 - p.rho) * (p.m - k) ≤ SVI.variance p k := by
+    have h1 : -(k - p.m) ≤ Real.sqrt ((k - p.m) ^ 2 + p.sigma ^ 2) :=
+      (neg_le_abs _).trans (Real.abs_le_sqrt (by nlinarith [sq_nonneg p.sigma]))
+    have := mul_le_mul_of_nonneg_left (add_le_add_right h1 (p.rho * (k - p.m))) hb
+    simp only [SVI.variance]
+    nlinarith
+  -- the left-wing limit: `-d₋ → ∞`
+  have hmd (R : ℝ) : ∀ᶠ k in Filter.atBot, R ≤ -ForwardSmile.dmi k (SVI.variance p k) := by
+    have hc0 : 0 < p.b * (1 - p.rho) := by linarith
+    have hθ : 0 < 1 / 2 - 1 / (p.b * (1 - p.rho)) := by
+      have : 1 / (p.b * (1 - p.rho)) < 1 / 2 := one_div_lt_one_div_of_lt two_pos hc2
+      linarith
+    set c := p.b * (1 - p.rho) with hcdef
+    set θ := 1 / 2 - 1 / c with hθdef
+    set e := p.m + p.a / c with hedef
+    set r0 := max 1 ((R + |e|) / θ) with hr0def
+    filter_upwards [Filter.eventually_le_atBot (p.m - (r0 ^ 2 - p.a) / c)] with k hk
+    have hr0 : 1 ≤ r0 := le_max_left _ _
+    have hr0' : R + |e| ≤ θ * r0 := by
+      have := (div_le_iff₀ hθ).1 (le_max_right 1 ((R + |e|) / θ))
+      linarith
+    have hkc : (r0 ^ 2 - p.a) / c ≤ p.m - k := by linarith
+    have hk2 : r0 ^ 2 - p.a ≤ (p.m - k) * c := (div_le_iff₀ hc0).1 hkc
+    have hw := hlow k
+    have hr := SVI.rootVariance_pos p k (hpos k)
+    have hr2 := SVI.rootVariance_sq p k (hpos k).le
+    have hrr : r0 ≤ SVI.rootVariance p k := Real.le_sqrt_of_sq_le (by linarith)
+    have hmk : p.m - k ≤ (SVI.variance p k - p.a) / c := (le_div_iff₀ hc0).2 (by linarith)
+    have hkk : θ * SVI.rootVariance p k ^ 2 + e ≤ k + SVI.rootVariance p k ^ 2 / 2 := by
+      rw [hr2]
+      have : (SVI.variance p k - p.a) / c = SVI.variance p k / c - p.a / c := sub_div _ _ _
+      have h3 : θ * SVI.variance p k = SVI.variance p k / 2 - SVI.variance p k / c := by
+        rw [hθdef]; ring
+      rw [hedef]
+      linarith
+    have hid : -ForwardSmile.dmi k (SVI.variance p k) =
+        (k + SVI.rootVariance p k ^ 2 / 2) / SVI.rootVariance p k := by
+      rw [SVI.dmi_eq_rootVariance]; field_simp; ring
+    rw [hid, le_div_iff₀ hr]
+    have hrθ : R + |e| ≤ θ * SVI.rootVariance p k :=
+      hr0'.trans (mul_le_mul_of_nonneg_left hrr hθ.le)
+    have h1r : 1 ≤ SVI.rootVariance p k := hr0.trans hrr
+    nlinarith [mul_nonneg (sub_nonneg.2 h1r) (abs_nonneg e),
+      mul_nonneg hr.le (sub_nonneg.2 hrθ), neg_abs_le e]
+  -- the chord bound from convexity and the value `1` at strike `0`
+  have hk1 : SVI.bsSmile p 1 < 1 := by
+    have h := SVI.blackCall_eq_bsSmile p 1 one_pos (by simpa using hpos 0)
+    rw [← h]
+    simp only [SVI.blackCall, ForwardSmile.blackForm, Real.log_one, Real.exp_zero, one_mul]
+    linarith [(Phi_mem_Ioo (ForwardSmile.dpl 0 (SVI.variance p 0))).2,
+      Phi_pos (ForwardSmile.dmi 0 (SVI.variance p 0))]
+  have hchord (K : ℝ) (hK0 : 0 < K) (hK1 : K < 1) :
+      K * (1 - SVI.bsSmile p 1) ≤ 1 - SVI.bsSmile p K := by
+    have hlim : Filter.Tendsto (fun ε : ℝ ↦ (1 - K) / (1 - ε) * SVI.bsSmile p ε
+        + (K - ε) / (1 - ε) * SVI.bsSmile p 1) (nhdsWithin 0 (Set.Ioi 0))
+        (nhds ((1 - K) / (1 - 0) * 1 + (K - 0) / (1 - 0) * SVI.bsSmile p 1)) := by
+      have hid : Filter.Tendsto (fun ε : ℝ ↦ ε) (nhdsWithin 0 (Set.Ioi 0)) (nhds 0) :=
+        tendsto_nhdsWithin_of_tendsto_nhds Filter.tendsto_id
+      have hd : Filter.Tendsto (fun ε : ℝ ↦ 1 - ε) (nhdsWithin 0 (Set.Ioi 0))
+          (nhds (1 - 0)) := tendsto_const_nhds.sub hid
+      exact ((tendsto_const_nhds.div hd (by norm_num)).mul hC.tendsto_one).add
+        (((tendsto_const_nhds.sub hid).div hd (by norm_num)).mul tendsto_const_nhds)
+    have hev : ∀ᶠ ε in nhdsWithin (0 : ℝ) (Set.Ioi 0), SVI.bsSmile p K ≤
+        (1 - K) / (1 - ε) * SVI.bsSmile p ε + (K - ε) / (1 - ε) * SVI.bsSmile p 1 := by
+      filter_upwards [Ioo_mem_nhdsGT hK0] with ε hε
+      have h1ε : 0 < 1 - ε := by linarith [hε.2]
+      have ha : 0 ≤ (1 - K) / (1 - ε) := div_nonneg (by linarith) h1ε.le
+      have hb : 0 ≤ (K - ε) / (1 - ε) := div_nonneg (by linarith [hε.2]) h1ε.le
+      have hab : (1 - K) / (1 - ε) + (K - ε) / (1 - ε) = 1 := by field_simp; ring
+      have := hC.convexOn.2 (show ε ∈ Set.Ioi 0 from hε.1)
+        (show (1 : ℝ) ∈ Set.Ioi 0 from one_pos) ha hb hab
+      have h1ne : 1 - ε ≠ 0 := h1ε.ne'
+      have e : ((1 - K) / (1 - ε)) • ε + ((K - ε) / (1 - ε)) • (1 : ℝ) = K := by
+        simp only [smul_eq_mul]; field_simp; ring
+      rw [e] at this
+      simpa only [smul_eq_mul] using this
+    have := ge_of_tendsto hlim hev
+    norm_num at this
+    nlinarith
+  -- the Mills bounds
+  obtain ⟨k0, hk0⟩ := Filter.eventually_atBot.1 (hmd (4 / (1 - SVI.bsSmile p 1)))
+  set κ := 1 - SVI.bsSmile p 1 with hκdef
+  have hκ : 0 < κ := by linarith
+  set k := min k0 (-1) with hkdef
+  have hkneg : k < 0 := by
+    have := min_le_right k0 (-1); linarith
+  have hR := hk0 k (min_le_left _ _)
+  set K := Real.exp k with hKdef
+  have hK0 : 0 < K := Real.exp_pos k
+  have hK1 : K < 1 := by rw [hKdef, ← Real.exp_zero]; exact Real.exp_lt_exp.2 hkneg
+  have hch := hchord K hK0 hK1
+  have hlogK : Real.log K = k := Real.log_exp k
+  have hw := hpos k
+  set dm := ForwardSmile.dmi k (SVI.variance p k)
+  set dp := ForwardSmile.dpl k (SVI.variance p k)
+  have hdp : -dm ≤ dp := by
+    have hr := SVI.rootVariance_pos p k hw
+    have h1 : dm = -k / SVI.rootVariance p k - SVI.rootVariance p k / 2 :=
+      SVI.dmi_eq_rootVariance p k
+    have h2 : dp = -k / SVI.rootVariance p k + SVI.rootVariance p k / 2 :=
+      SVI.dpl_eq_rootVariance p k
+    have h3 : k / SVI.rootVariance p k ≤ 0 := div_nonpos_of_nonpos_of_nonneg hkneg.le hr.le
+    have h4 : -k / SVI.rootVariance p k = -(k / SVI.rootVariance p k) := neg_div _ _
+    linarith
+  have hsm : SVI.bsSmile p K = Phi dp - K * Phi dm := by
+    rw [← SVI.blackCall_eq_bsSmile p K hK0 (by rw [hlogK]; exact hw)]
+    simp only [SVI.blackCall, ForwardSmile.blackForm, hlogK]
+    rfl
+  have hmills1 := neg_mul_Phi_le_gaussianPDFReal dm
+  have hmills2 := neg_mul_Phi_le_gaussianPDFReal (-dp)
+  have hev : gaussianPDFReal 0 1 (-dp) = gaussianPDFReal 0 1 dp := by
+    simp [gaussianPDFReal]
+  have hid := ForwardSmile.exp_mul_pdf_dmi (k := k) hw
+  have hφ1 := gaussianPDFReal_zero_one_le_one dm
+  have hΦp := Phi_pos dp
+  have hΦm := Phi_pos dm
+  have hΦn : Phi (-dp) = 1 - Phi dp := Phi_neg dp
+  have hRk : 4 / κ ≤ -dm := hR
+  have hRpos : 0 < 4 / κ := by positivity
+  have hA : 4 / κ * Phi (-dp) ≤ dp * Phi (-dp) := by
+    have := mul_le_mul_of_nonneg_right (hRk.trans hdp) (Phi_pos (-dp)).le
+    linarith [mul_le_mul_of_nonneg_right hRk (Phi_pos (-dp)).le]
+  have hB : 4 / κ * (K * Phi dm) ≤ K := by
+    have h := mul_le_mul_of_nonneg_left (mul_le_mul_of_nonneg_right hRk hΦm.le) hK0.le
+    have h2 := mul_le_mul_of_nonneg_left hmills1 hK0.le
+    nlinarith
+  have hA' : 4 / κ * Phi (-dp) ≤ K := by
+    nlinarith
+  have hsum : 4 / κ * (1 - SVI.bsSmile p K) ≤ 2 * K := by
+    rw [hsm]
+    nlinarith
+  have h4 : 4 / κ * (K * κ) ≤ 2 * K := by
+    nlinarith [mul_le_mul_of_nonneg_left hch hRpos.le]
+  have h5 : 4 / κ * κ = 4 := by field_simp
+  nlinarith
+
+end MathFin

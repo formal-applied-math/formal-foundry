@@ -1,0 +1,64 @@
+{
+  "target": "foundry-canary",
+  "engine": "claude",
+  "model": "claude-sonnet-5-5",
+  "rc": 0,
+  "duration_s": 20.5,
+  "secret_leak": 0,
+  "identical_to_stub": false,
+  "captured_bytes": 163,
+  "transcript": "/home/runner/work/formal-foundry/formal-foundry/runs/pipeline-20261112-063913-foundry-canary.transcript.jsonl",
+  "launcher_log": "/home/runner/work/formal-foundry/formal-foundry/runs/pipeline-20261112-063913-foundry-canary.launcher.log",
+  "mcp_servers": {
+    "lean-lsp": "connected"
+  },
+  "tool_calls": 4,
+  "lean_tool_calls": 1,
+  "result": {
+    "subtype": "success",
+    "is_error": false,
+    "num_turns": 5,
+    "duration_ms": 6902,
+    "total_cost_usd": 0.3676782,
+    "usage": {
+      "input_tokens": 12,
+      "cache_creation_input_tokens": 80749,
+      "cache_read_input_tokens": 383882,
+      "output_tokens": 627,
+      "output_tokens_details": {
+        "thinking_tokens": 64
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 80749,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 157,
+          "cache_read_input_tokens": 93476,
+          "cache_creation_input_tokens": 226,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 226
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard",
+      "fallback_credit": null
+    }
+  },
+  "turns": 5,
+  "cost_usd": 0.3676782,
+  "tokens": 639,
+  "last_text": "I replaced the `sorry` in `foundry_canary` with `Nat.add_comm a b`, which has exactly the goal's type `a + b = b + a`. I couldn't compile-check it: the Lean diagnostics tool reported the file isn't in any Lean project, so it never elaborated. The statement, name and binders are unchanged.",
+  "canary_ok": true,
+  "canary_reason": ""
+}

@@ -1,6 +1,76 @@
 {
   "toolchain": "leanprover/lean4:v4.35.0",
-  "main_commit": "",
-  "targets": [],
+  "main_commit": "db2617452981302a146c54b9e3c691d68a7b1d54",
+  "targets": [
+    {
+      "id": "cal-bk-318",
+      "stream": "backlog",
+      "kind": "prove",
+      "sorry_name": "svi_left_wing_slope_le_two",
+      "file": "cal-bk-318.lean",
+      "pointers": [
+        "MathFin/Models/ModelFree/SVI/TailCondition.lean",
+        "MathFin/Models/ModelFree/SVI/BlackSmile.lean",
+        "MathFin/Models/ModelFree/CallPriceFunction.lean",
+        "MathFin/Models/ModelFree/CalendarArbitrage.lean",
+        "MathFin/Models/LocalVol/ForwardSmile.lean"
+      ],
+      "input_hash": "f4ac6df1d0f72bf866cd9688ac8ea4170e0bbf91ed5ca574abf9a26c625af8be",
+      "main_module": "MathFin/Models/ModelFree/LeftWingBound.lean",
+      "benchmark": "benchmarks/black_scholes.json",
+      "benchmark_id": "mf-svi-left-wing-bound",
+      "source_issue": 318,
+      "deferred": [
+        "general tail lemma C -> 0 iff d_plus -> -infinity for any positive total variance w : R -> R",
+        "easy direction of grounding IsNormalizedCallPrice: nonnegative S with E S = 1 gives the structure",
+        "mass at zero of the underlying law for the SVI smile",
+        "calendar-spread martingale step for any convex payoff via conditional Jensen",
+        "t > 0 calendar statements connected to the local-variance characterisation",
+        "single (k, w) Black form replacing blackForm, totalVarianceCall and logBlackCall",
+        "port hygiene: scope maxHeartbeats, maxRecDepth and open scoped Classical",
+        "folding Foundations/NormalTail into its natural homes"
+      ],
+      "blueprint": [
+        "thm:smile-no-arbitrage"
+      ],
+      "benchmark_entry": {
+        "id": "mf-svi-left-wing-bound",
+        "name": "Smile no-arbitrage: Roper's theorem, the left wing, calendar spreads, one Black form",
+        "description": "A raw SVI smile with positive variance whose smiled call is a normalised call price function has left wing slope b(1 - rho) at most 2.",
+        "domain": "mathematical_finance",
+        "code": {
+          "lean": "import MathFin.Models.ModelFree.LeftWingBound\n\nopen MathFin\nopen MeasureTheory ProbabilityTheory\nopen scoped NNReal ENNReal\n\n/-- A raw SVI smile with positive variance whose smiled call is a normalised call price function has left wing slope b(1 - rho) at most 2. -/\ntheorem mf_svi_left_wing_bound (p : SVI.Params)\n    (hpos : \u2200 k : \u211d, 0 < SVI.variance p k)\n    (hC : IsNormalizedCallPrice (SVI.bsSmile p)) :\n    p.b * (1 - p.rho) \u2264 2 :=\n  MathFin.svi_left_wing_slope_le_two p hpos hC\n"
+        },
+        "metadata": {
+          "chapter": 0,
+          "reference": "Roper, Arbitrage free implied volatility surfaces",
+          "difficulty": "medium",
+          "formalization_status": "full",
+          "formalization_scope": "Full formal proof in MathFin/Models/ModelFree/LeftWingBound.lean (autoformalized statement, machine proof). Re-export from MathFin. Axioms-clean. Faithful SUBSET of issue #318; deferred to follow-up issues: general tail lemma C -> 0 iff d_plus -> -infinity for any positive total variance w : R -> R; easy direction of grounding IsNormalizedCallPrice: nonnegative S with E S = 1 gives the structure; mass at zero of the underlying law for the SVI smile; calendar-spread martingale step for any convex payoff via conditional Jensen; t > 0 calendar statements connected to the local-variance characterisation; single (k, w) Black form replacing blackForm, totalVarianceCall and logBlackCall; port hygiene: scope maxHeartbeats, maxRecDepth and open scoped Classical; folding Foundations/NormalTail into its natural homes.",
+          "provenance": {
+            "statement_source": "autoform",
+            "statement_model": "autoform",
+            "source": "foundry-autoform",
+            "issue": 318,
+            "deferred": [
+              "general tail lemma C -> 0 iff d_plus -> -infinity for any positive total variance w : R -> R",
+              "easy direction of grounding IsNormalizedCallPrice: nonnegative S with E S = 1 gives the structure",
+              "mass at zero of the underlying law for the SVI smile",
+              "calendar-spread martingale step for any convex payoff via conditional Jensen",
+              "t > 0 calendar statements connected to the local-variance characterisation",
+              "single (k, w) Black form replacing blackForm, totalVarianceCall and logBlackCall",
+              "port hygiene: scope maxHeartbeats, maxRecDepth and open scoped Classical",
+              "folding Foundations/NormalTail into its natural homes"
+            ]
+          },
+          "citations": [
+            {
+              "key": "Roper2010"
+            }
+          ]
+        }
+      }
+    }
+  ],
   "quarantined": []
 }
