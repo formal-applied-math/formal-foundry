@@ -187,7 +187,6 @@ def finish_candidate(pack, path, name, r, *, regate_fn, check_fn, main_repo, con
     refuse a proof through a price not yet founded on the pricing functional. A miss
     turns `pass` into `fail_gate` with the reason, before the library build is paid."""
     import library_map
-    from af_gates import trunk_rejection
     from autoformalize import reflow_candidate
     module = open(path, encoding="utf-8").read()
     if chat_fn is None:
@@ -202,12 +201,13 @@ def finish_candidate(pack, path, name, r, *, regate_fn, check_fn, main_repo, con
         module = rf["candidate"]
         with open(path, "w", encoding="utf-8") as f:
             f.write(module)
-    tr = trunk_rejection(pack, module, name,
-                         library_map.price_table(main_repo or "", pack.layout.price_table),
-                         check_fn=check_fn)
-    if tr["off_trunk"]:
+    from prove_session import library_refusal
+    why = library_refusal(pack, module, name,
+                          library_map.price_table(main_repo or "", pack.layout.price_table),
+                          check_fn=check_fn)
+    if why:
         os.remove(path)            # not a candidate open-pr may pick up
-        return {**r, "outcome": "fail_gate", "reason": "off_trunk: " + tr["verdict"][:300]}
+        return {**r, "outcome": "fail_gate", "reason": why}
     return r
 
 

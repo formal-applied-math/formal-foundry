@@ -151,6 +151,10 @@ def classify_refill(rec: dict) -> str:
         return "statement_wrong"
     if out == "budget":
         return "budget"
+    if out == "assembly":
+        return "assembly_refused"      # release.py: redraft, told what the library refused
+    if out == "assembly_parked":
+        return "assembly_parked"       # refused again and again: ordered behind the rest
     if out == "indeterminate" or "indeterminate" in gates:
         return "infra_indeterminate"   # H5: wedged daemon, retryable — not a real verdict
     return "infra"
@@ -326,7 +330,8 @@ def resolve_route(cli_route: str | None, issue: dict, *, def_count: int,
 # fresh issues attempt first; these lemons go to the back of their route group
 # (the first CI run burned ~100k tokens re-attempting #61's empty-reply furnace
 # at position 2 while def-rich #108 sat unattempted at position 6).
-_DEMOTED_FAMILIES = {"undraftable", "fidelity", "statement_wrong", "trivial_restatement"}
+_DEMOTED_FAMILIES = {"undraftable", "fidelity", "statement_wrong", "trivial_restatement",
+                     "assembly_parked"}
 
 
 

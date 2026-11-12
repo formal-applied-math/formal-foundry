@@ -472,6 +472,19 @@ def prover_of(run_dir: str, tag: str, target_id: str, config: str | None = None)
     return {"engine": cfg.engine, "model": cfg.claude_model}
 
 
+def library_refusal(pack, candidate: str, name: str, price_tab, *, check_fn) -> str | None:
+    """The reason the library's build would refuse a module built from this proof, or
+    None. Both checks fail open on a daemon error: an infra hiccup is never a verdict."""
+    from af_gates import shape_rejection, trunk_rejection
+    sh = shape_rejection(pack, candidate, check_fn=check_fn)
+    if sh["refused"]:
+        return "shape: " + sh["verdict"][:400]
+    tr = trunk_rejection(pack, candidate, name, price_tab, check_fn=check_fn)
+    if tr["off_trunk"]:
+        return "off_trunk: " + tr["verdict"][:300]
+    return None
+
+
 def adopt_verified(run_dir: str, target_id: str, tag: str, *, stub: str | None = None,
                    sorry_name: str | None = None) -> str | None:
     """Reuse the newest proof of `target_id` that passed the gate in an earlier run and
@@ -514,6 +527,8 @@ def adopt_verified(run_dir: str, target_id: str, tag: str, *, stub: str | None =
         session = _read_json(os.path.join(run_dir, f"{src}-{target_id}.session.json"))
         if not content or has_sorry(content) or not session:
             continue
+        if os.path.exists(os.path.join(run_dir, f"{src}-{target_id}.refused")):
+            continue                  # the library refused this proof's module (release.py)
         if _probed_signature(content, sorry_name) != want:
             continue                  # a proof of another statement under the same id
         with open(os.path.join(run_dir, f"{tag}-{target_id}.candidate"), "w",
@@ -635,7 +650,6 @@ def _cmd_gate(args) -> int:
     state_cache = _state_cache(run_dir, getattr(args, "config", None))
     memory = _experience_store(run_dir, getattr(args, "config", None))
     summarizer = _summarizer(getattr(args, "config", None)) if memory is not None else None
-    from af_gates import trunk_rejection
     price_tab = library_map.price_table(getattr(args, "main_repo", "") or "",
                                         pack.layout.price_table)
     for target, _root in _iter_targets(args.manifest, args.only):
@@ -675,14 +689,15 @@ def _cmd_gate(args) -> int:
                 summary["outcome"] = "error"      # the daemon could not answer — no verdict
                 summary["error_reason"] = ("the daemon could not gate the candidate: "
                                            + "; ".join(g.get("errors") or [])[:300])
-            elif g["passed"] and (tr := trunk_rejection(
-                    pack, candidate, target["sorry_name"], price_tab,
-                    check_fn=daemon_check))["off_trunk"]:
-                # the library counts an entry by what its proof cites: a proof through a
-                # price not yet founded on the pricing functional is an entry its ratchet
-                # refuses. A verdict now, with the reason in the notebook, not at assembly.
+            elif g["passed"] and (lib_why := library_refusal(
+                    pack, candidate, target["sorry_name"], price_tab, check_fn=daemon_check)):
+                # what the library's build would refuse, asked of the proof NOW: a proof
+                # through a price not yet founded on the pricing functional (the library
+                # counts an entry by what its proof cites), a lemma it already has, a
+                # Mathlib-shaped private, a heartbeat bump. A verdict here, with the
+                # reason in the notebook, instead of a refused assembly after the build.
                 summary["outcome"] = "fail_gate"
-                summary["gate_reason"] = "off_trunk: " + tr["verdict"][:300]
+                summary["gate_reason"] = lib_why
                 append_jsonl(summary_log, summary)
                 print(f"[prove-gate] {target['id']}: fail_gate ({summary['gate_reason']})",
                       flush=True)

@@ -286,26 +286,31 @@ def retire_closed(slug: str, queue_dir: str, *, apply: bool = False, run_fn=None
             continue          # could not confirm: a stub is never retired on a guess
         retired.append(n)
         log(f"#{n} is closed — {'retiring' if apply else 'would retire'} cal-bk-{n}")
-        if apply:
-            for suffix in (".lean", ".entry.json"):
-                try:
-                    os.remove(os.path.join(queue_dir, f"cal-bk-{n}{suffix}"))
-                except OSError:
-                    pass
     if apply and retired:
-        man_path = os.path.join(queue_dir, "manifest.json")
-        try:
-            with open(man_path, encoding="utf-8") as f:
-                man = json.load(f)
-            gone = {f"cal-bk-{n}" for n in retired}
-            man["targets"] = [t for t in man.get("targets", []) if t.get("id") not in gone]
-            man["quarantined"] = [q for q in man.get("quarantined", [])
-                                  if q.get("id") not in gone]
-            with open(man_path, "w", encoding="utf-8") as f:
-                json.dump(man, f, indent=2)
-        except (OSError, ValueError, AttributeError):
-            pass              # no manifest, or not ours to parse: the next build rewrites it
+        retire_stubs(queue_dir, [f"cal-bk-{n}" for n in retired])
     return retired
+
+
+def retire_stubs(queue_dir: str, target_ids: list[str]) -> None:
+    """Delete each target's staged stub, its `.entry.json`, and its manifest row (the row
+    would otherwise name a file that is gone)."""
+    for tid in target_ids:
+        for suffix in (".lean", ".entry.json"):
+            try:
+                os.remove(os.path.join(queue_dir, f"{tid}{suffix}"))
+            except OSError:
+                pass
+    man_path = os.path.join(queue_dir, "manifest.json")
+    try:
+        with open(man_path, encoding="utf-8") as f:
+            man = json.load(f)
+        gone = set(target_ids)
+        man["targets"] = [t for t in man.get("targets", []) if t.get("id") not in gone]
+        man["quarantined"] = [q for q in man.get("quarantined", []) if q.get("id") not in gone]
+        with open(man_path, "w", encoding="utf-8") as f:
+            json.dump(man, f, indent=2)
+    except (OSError, ValueError, AttributeError):
+        pass              # no manifest, or not ours to parse: the next build rewrites it
 
 
 def main(argv: list[str] | None = None) -> int:
