@@ -126,6 +126,9 @@ jobs:
         # W5 spike: the `lean` agent is bundled in mistral-vibe; `/leanstall` only
         # writes installed_agents=["lean"] to the config. vibe runs on the RUNNER
         # (it docker-execs into the lean-lsp container), so no image rebuild is needed.
+        # Only the `leanstral` engine launches vibe; under `[prover] engine = "claude"` a
+        # vibe that will not install must not cost the tick (its endpoint retired 09-30).
+        continue-on-error: true
         run: bash scripts/vibe-setup.sh
 
       # --- embedding-retrieval corpus (Track A) ---------------------------------

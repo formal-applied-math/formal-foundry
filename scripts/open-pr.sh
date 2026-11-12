@@ -131,6 +131,36 @@ transient() {  # infra/transient failure (network, gh, docker pull): no issue, n
   exit 4
 }
 
+pr_unopened() {  # the branch is pushed and green; only `gh pr create` was refused.
+  # From 2026-09-28 to 10-21 this happened thirteen times, each a finished proof nobody
+  # was told about. The work is on the library now, so say where, once: the body is kept,
+  # and one issue HERE carries the link that opens the pull request by hand.
+  local url="https://github.com/$SLUG/pull/new/$BRANCH"
+  local title="autoform-ready: $ID is pushed, its pull request could not be opened"
+  printf '%s\n' "$BODY" > "$FOUNDRY/runs/$TAG-$ID.pr-body.md"
+  echo "::error::[open-pr] $BRANCH is pushed and green but the pull request was refused (does the library token have Pull requests: write?). Open it by hand: $url" >&2
+  if [ -n "${CI:-}" ] && command -v gh >/dev/null 2>&1; then
+    export GH_TOKEN="${FOUNDRY_GH_TOKEN:-${GH_TOKEN:-}}"
+    gh label create autoform-ready --repo "$FOUNDRY_SLUG" --color 0E8A16 \
+      --description "a green autoform branch is waiting for someone to open its pull request" \
+      2>/dev/null || true
+    if [ -z "$(gh issue list --repo "$FOUNDRY_SLUG" --state open --label autoform-ready \
+                 --search "\"$ID\" in:title" --json number --jq '.[].number' 2>/dev/null)" ]; then
+      gh issue create --repo "$FOUNDRY_SLUG" --title "$title" --label autoform-ready \
+        --body "\`$BRANCH\` on $SLUG assembled green and is pushed. \`gh pr create\` was refused, so no pull request exists.
+
+open it: $url
+
+title: \`$PR_TITLE\`
+the body is in \`runs/$TAG-$ID.pr-body.md\` (labels: autoform).
+
+a later tick finds the open pull request by its branch and stops retrying." \
+        2>/dev/null || true
+    fi
+  fi
+  transient "gh pr create failed (candidate is green and pushed — retry next tick)"
+}
+
 # --- 2. branch + place -------------------------------------------------------
 cd "$MAIN"
 # The drafter and the prover worked in scratch modules UNDER the Lake root, and they are
@@ -338,12 +368,32 @@ git -c user.name="${DOMAIN_COMMIT_AUTHOR:-$DOMAIN_NAME-autoform[bot]}" \
 # build runs them — and AFTER the commit, because the attribution gate reads who
 # added each file from git. (They ran before it until 2026-11: the new module was
 # untracked, the gate could not see it, and the first thing the PR's own build would
-# have said is that `<pack>-autoform` is an uncredited contributor.) The tick's
-# preflight proved these gates green pre-placement, so red here is THIS candidate's
-# doing — a deterministic block.
+# have said is that `<pack>-autoform` is an uncredited contributor.)
+#
+# Red here is the candidate's doing ONLY IF the same gates are green on the commit it
+# was placed on. Some of them read live state the contribution does not touch (the
+# blueprint check lists the library's open issues), and a library whose own main is
+# red for an hour must not cost a proof a `fail_assembly` verdict: the second canary
+# run (2026-11-12) was refused for three issues naming labels main retired 20 minutes
+# later. So a red result is re-asked of the base, in a throwaway worktree.
+base_is_red() {
+  local wt rc
+  wt="$(mktemp -d)"
+  git -C "$MAIN" worktree add -q --detach "$wt" HEAD~1 || { rm -rf "$wt"; return 1; }
+  ( cd "$wt" && bash "$PACK_DIR/host-gates.sh" ) >"$FOUNDRY/runs/$TAG-$ID.base-gates.log" 2>&1
+  rc=$?
+  git -C "$MAIN" worktree remove --force "$wt" 2>/dev/null || rm -rf "$wt"
+  [ "$rc" -ne 0 ]
+}
 if [ -f "$PACK_DIR/host-gates.sh" ]; then
-  ( cd "$MAIN" && bash "$PACK_DIR/host-gates.sh" ) \
-    || blocked "the library's host-side gates are red on the committed contribution (domains/$DOMAIN_NAME/host-gates.sh)"
+  if ! ( cd "$MAIN" && bash "$PACK_DIR/host-gates.sh" ); then
+    if base_is_red; then
+      echo "::warning::[open-pr] the library's host-side gates are red on its OWN base commit $(git rev-parse --short HEAD~1) — not this contribution:" >&2
+      tail -n 12 "$FOUNDRY/runs/$TAG-$ID.base-gates.log" >&2 || true
+      transient "the library's base commit fails its own host-side gates (see runs/$TAG-$ID.base-gates.log) — retry when its main is green"
+    fi
+    blocked "the library's host-side gates are red on the committed contribution and green on its base (domains/$DOMAIN_NAME/host-gates.sh)"
+  fi
 else
   python3 -m pip show pytest >/dev/null 2>&1 || python3 -m pip install -q pytest
   ( cd "$MAIN" && python3 -m pytest tests/ -q ) \
@@ -467,9 +517,18 @@ if [ -n "$NEW_DEFS" ]; then
     --description "autoform PR introducing new definitions — review the design, not just the proof" 2>/dev/null || true
   PR_FLAGS+=(--label new-defs)
 fi
-gh pr create --repo "$SLUG" --head "$BRANCH" --label autoform "${PR_FLAGS[@]}" \
-  --title "autoform: $(basename "$MODULE" .lean) $TITLE_SUFFIX" \
-  --body "$BODY" || transient "gh pr create failed (candidate is green — retry next tick)"
+PR_TITLE="autoform: $(basename "$MODULE" .lean) $TITLE_SUFFIX"
+# A pull request already open from this branch (opened by hand after an `autoform-ready`
+# note, or by an earlier tick whose bookkeeping failed) is the deliverable: the push
+# above updated it, and a second one would be refused.
+EXISTING_PR="$(gh pr list --repo "$SLUG" --head "$BRANCH" --state open \
+                 --json number --jq '.[0].number // empty' 2>/dev/null || true)"
+if [ -n "$EXISTING_PR" ]; then
+  echo "[open-pr] pull request #$EXISTING_PR is already open from $BRANCH — updated by the push" >&2
+else
+  gh pr create --repo "$SLUG" --head "$BRANCH" --label autoform "${PR_FLAGS[@]}" \
+    --title "$PR_TITLE" --body "$BODY" || pr_unopened
+fi
 echo "[open-pr] PR opened for $ID ($CLOSE_KW #$ISSUE)" >&2
 
 # The ISSUE is the state machine; move it to `status:review` now that a PR exists.

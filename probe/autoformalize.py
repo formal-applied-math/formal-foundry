@@ -781,7 +781,15 @@ def refill(pack: DomainPack, issues: list[dict], *, reason_fn, prove_fn, check_f
                 # flips the single Lean slot to lean-lsp around it and back to the daemon for the
                 # gates. An infra failure (lean-lsp/flip/docker) or a ClaudeCapError propagates to
                 # the issue-level handler (error/deferred, retryable) — there is no completion path.
-                proactive = proactive_fn(intent["statement"]) if proactive_fn else ""
+                # retrieved premises are an aid to the drafter and never a reason to lose
+                # the issue: an embedding endpoint that is down, or a key that expired,
+                # costs the premises and nothing else (the session still has lean_loogle)
+                try:
+                    proactive = proactive_fn(intent["statement"]) if proactive_fn else ""
+                except Exception as e:      # noqa: BLE001
+                    log(f"#{n}: premise retrieval failed ({type(e).__name__}: "
+                        f"{str(e)[:120]}) — drafting without retrieved premises")
+                    proactive = ""
                 if agentic_formalize_fn is None:
                     raise RuntimeError("refill requires an agentic_formalize_fn (the only drafter)")
                 try:
@@ -986,10 +994,11 @@ def main() -> int:
                    default=None, help="loogle-augmented repair retrieval (default: config)")
     args = ap.parse_args()
 
+    # Mistral is no longer on the critical path: Claude drafts, judges and proves. The key
+    # still buys embedding retrieval and (if switched back on) the kernel probes; without
+    # it the refill runs, with loogle-only retrieval. Checked below, once the config says
+    # whether a probe that needs it is on.
     api_key = os.environ.get("MISTRAL_API_KEY")
-    if not api_key:
-        print("MISTRAL_API_KEY not set", file=sys.stderr)
-        return 2
 
     # pipeline.toml [autoformalize] is authoritative; CLI flags override per-field.
     config_path = args.config or os.path.join(_foundry_root(), "pipeline.toml")
@@ -1009,6 +1018,10 @@ def main() -> int:
     depth_gate = pick(args.depth_gate, cfg.depth_gate)
     triviality_gate = pick(args.triviality_gate, cfg.triviality_gate)
     kernel_probes = pick(args.kernel_probes, cfg.kernel_probes)
+    if kernel_probes and not api_key:
+        print("MISTRAL_API_KEY not set and [autoformalize] kernel_probes is on "
+              "(the probes are run by prover_model)", file=sys.stderr)
+        return 2
     semantic_rounds = pick(args.semantic_rounds, cfg.semantic_rounds)
     formalize_rounds = pick(args.formalize_rounds, cfg.formalize_rounds)
     retrieval = pick(args.retrieval, cfg.retrieval)
@@ -1083,7 +1096,11 @@ def main() -> int:
 
     from scout_index import default_index_dir
     index_dir = default_index_dir()
-    if retrieval:
+    if retrieval and not api_key and cfg.retrieval_backend == "embedding":
+        print("[refill] no MISTRAL_API_KEY — embedding retrieval off (the drafter still "
+              "searches with lean_loogle)", file=sys.stderr)
+        proactive_fn = None
+    elif retrieval:
         # only the PROACTIVE (embedding) half is used — fed to the agentic prompt as premises;
         # the reactive retrieve_fn is gone (agentic searches live via lean_loogle).
         _reactive, proactive_fn = build_retrieve_fns(

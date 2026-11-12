@@ -82,14 +82,14 @@ JSON
 # 5. The house doctrine, injected as a system prompt — the same text leanstral-vibe.sh
 #    prepends to the task. Through the module's CLI (an inline `python3 -c` call is what
 #    broke both launchers on 2026-08-16), and passed as a FILE where the CLI supports it:
-#    the doctrine is ~117 KB, and Linux caps a single argv string at 128 KiB.
+#    Linux caps a single argv string at 128 KiB and the doctrine is larger than that.
 python3 "$FOUNDRY/probe/house_context.py" doctrine --main-repo "$MAIN" \
   --domain "$DOMAIN_NAME" --out "$DOCTRINE_FILE"
-CLAUDE_HELP="$(claude --help 2>&1 || true)"   # captured, not piped into grep -q: under
-case "$CLAUDE_HELP" in                        # pipefail a SIGPIPE'd `claude` fails the test
-  *--append-system-prompt-file*) SYSTEM_ARGS=(--append-system-prompt-file "$DOCTRINE_FILE") ;;
-  *)                             SYSTEM_ARGS=(--append-system-prompt "$(cat "$DOCTRINE_FILE")") ;;
-esac
+# Always as a file. `--append-system-prompt-file` is a print-mode flag that the pinned
+# CLI's `--help` does not list (2.1.322: accepted, unlisted), so an "is it in the help
+# text" test picks the argv fallback — an `Argument list too long` now that the v2
+# library's doctrine is 134 KB (measured 2026-11-12, before a tick paid to find out).
+SYSTEM_ARGS=(--append-system-prompt-file "$DOCTRINE_FILE")
 
 # 6. Run. The tool allow-list is load-bearing: headless `-p` cannot ask for permission,
 #    so any tool not listed here is DENIED — without `mcp__lean-lsp` the prover would run
