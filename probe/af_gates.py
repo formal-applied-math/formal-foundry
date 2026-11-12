@@ -272,8 +272,9 @@ def shape_probe(pack: DomainPack, lean_text: str) -> str:
         "      bad := bad.push s!\"{privateToUserName n} states what {privateToUserName m} states\"\n"
         "    seen := seen.insert h n\n"
         "    if isPrivateName n && !(ci.type.getUsedConstants.any inLib) then\n"
-        "      bad := bad.push s!\"private {privateToUserName n} mentions nothing of the library: \" ++\n"
-        "        \"use the upstream lemma, inline it, or make it public under a name that says what it proves\"\n"
+        "      bad := bad.push (s!\"private {privateToUserName n} mentions nothing of the \" ++\n"
+        "        \"library: use the upstream lemma, inline it, or make it public under a name \" ++\n"
+        "        \"that says what it proves\")\n"
         "  unless bad.isEmpty do\n"
         "    let msg := String.intercalate \"; \" bad.toList\n"
         f'    throwError m!"{_SHAPE_MARKER} {{msg}}"\n'
