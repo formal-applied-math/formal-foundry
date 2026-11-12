@@ -449,6 +449,16 @@ def test_a_module_with_no_library_import_imports_the_conventions_module(repo):
     assert PACK.layout.init_module not in with_ptr
 
 
+def test_the_entry_is_named_for_what_it_proves_not_for_the_issue(repo):
+    """The issue's title names the programme; a subset entry under it overclaims in the
+    published dataset (#500). The drafter's title of the result is the name."""
+    issue = {**_prepared(repo), "title": "Ho–Lee: the bond, the tree, the calibration"}
+    _l, entry, _p = af.emit_target_files(PACK, issue, _STUB, _INTENT)
+    assert entry["name"] == "The Ho–Lee bond price"
+    _l, entry, _p = af.emit_target_files(PACK, issue, _STUB, {**_INTENT, "title": None})
+    assert entry["name"] == "Ho–Lee: the bond, the tree, the calibration"   # nothing better
+
+
 def test_the_queues_bookkeeping_does_not_ship_in_the_module(repo):
     issue = _prepared(repo)
     lean, _e, _p = af.emit_target_files(

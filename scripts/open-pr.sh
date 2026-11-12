@@ -407,14 +407,23 @@ fi
 git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" \
     push -f origin "$BRANCH" || transient "the push of $BRANCH was refused"
 
-TOKENS="$(python3 - "$FOUNDRY/runs/$TAG-summary.jsonl" "$ID" <<'PY'
+# what the proof cost: every row of the target and its leaves this run, and, for a proof
+# reused from an earlier run, that run's session (#500 said "~0 tokens" for a reused one)
+TOKENS="$(python3 - "$FOUNDRY/runs/$TAG-summary.jsonl" "$ID" "$FOUNDRY/runs/$TAG-$ID.session.json" <<'PY'
 import json, sys
 tok = 0
 try:
     for line in open(sys.argv[1]):
         r = json.loads(line)
-        if r.get("target") == sys.argv[2]: tok = r.get("tokens", 0)
-except OSError: pass
+        t = r.get("target") or ""
+        if t == sys.argv[2] or t.startswith(sys.argv[2] + "__"):
+            tok += int(r.get("tokens") or 0)
+except (OSError, ValueError): pass
+try:
+    sess = json.load(open(sys.argv[3]))
+    if sess.get("reused_from"):
+        tok += int(sess.get("original_tokens") or 0)
+except (OSError, ValueError, TypeError): pass
 print(tok)
 PY
 )"
