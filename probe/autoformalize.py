@@ -1876,7 +1876,13 @@ def emit_target_files(pack: DomainPack, issue: dict, stub: str,
         metadata["citations"] = []      # "the source names no work" — the gate wants it said
     entry = {
         "id": benchmark_id,
-        "name": issue.get("title", benchmark_id),
+        # what THIS entry proves: the drafter's title of the result, as in the module
+        # docstring. The issue's title names the whole programme the issue asks for, and
+        # a subset entry under it overclaims in the published dataset (#500: an entry
+        # proving one tail lemma was named "Roper's theorem, the left wing, calendar
+        # spreads, one Black form").
+        "name": " ".join(str(meta.get("title") or issue.get("title")
+                             or benchmark_id).split()).rstrip("."),
         "description": docstring,
         "domain": pack.domain,
         "code": {"lean": reexport},
