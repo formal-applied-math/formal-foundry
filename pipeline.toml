@@ -73,7 +73,7 @@ canary_max_turns = 12
 enabled = true
 budget = 400000
 max_issues = 1
-max_attempt_issues = 3
+max_attempt_issues = 1   # one issue drafted per tick (user, 2026-11-12); a refused one waits for the next tick
 gate_budget = 20000
 kernel_probes = false      # the vacuity (⊢ False) + disproof (⊢ ¬Concl) probes: short proof
                            # attempts by the drafter's Claude. OFF: 0 firings in 34+ drafts (all
