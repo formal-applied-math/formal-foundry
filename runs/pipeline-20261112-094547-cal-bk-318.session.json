@@ -1,0 +1,64 @@
+{
+  "target": "cal-bk-318",
+  "engine": "claude",
+  "model": "claude-sonnet-5-5",
+  "rc": 0,
+  "duration_s": 90.4,
+  "secret_leak": 0,
+  "identical_to_stub": false,
+  "captured_bytes": 6001,
+  "transcript": "/home/runner/work/formal-foundry/formal-foundry/runs/pipeline-20261112-091835-cal-bk-318.transcript.jsonl",
+  "launcher_log": "/home/runner/work/formal-foundry/formal-foundry/runs/pipeline-20261112-091835-cal-bk-318.launcher.log",
+  "mcp_servers": {
+    "lean-lsp": "connected"
+  },
+  "tool_calls": 15,
+  "lean_tool_calls": 2,
+  "result": {
+    "subtype": "success",
+    "is_error": false,
+    "num_turns": 16,
+    "duration_ms": 89084,
+    "total_cost_usd": 0.5031641000000001,
+    "usage": {
+      "input_tokens": 22,
+      "cache_creation_input_tokens": 72377,
+      "cache_read_input_tokens": 1256621,
+      "output_tokens": 8795,
+      "output_tokens_details": {
+        "thinking_tokens": 3612
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 72377,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 627,
+          "cache_read_input_tokens": 144011,
+          "cache_creation_input_tokens": 364,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 364
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard",
+      "fallback_credit": null
+    }
+  },
+  "turns": 16,
+  "cost_usd": 0.5031641000000001,
+  "tokens": 0,
+  "last_text": "→ -∞`:** For a bound `y`, set `δ = Φ(-|y|)`. If `d₊ > y` at some `k` beyond a threshold, then `Φ(d₊) ≥ δ`, and `√w` must exceed `4/δ`. The Mills bound then caps `eᵏΦ(d₋)` at `δ/2`, so `blackForm ≥ δ/2`, which contradicts the limit being 0.\n- **`d₊ → -∞` implies Black form → 0:** `Φ(d₊) → 0`. Since `d₋ = d₊ − √w ≤ d₊`, `-d₋ → ∞`, so `eᵏΦ(d₋) ≤ 1/(-d₋) → 0`. The difference of the two terms then tends to 0.\n\nI changed one line outside the proof: the existing `open MeasureTheory ProbabilityTheory` now also opens `ForwardSmile Filter Topology`. The theorem statement, name and binders are untouched.",
+  "reused_from": "pipeline-20261112-091835",
+  "original_tokens": 8817
+}
