@@ -1,9 +1,1 @@
-{
-  "generation": "v1",
-  "entries": {
-    "issue-186": {
-      "experience": "The attempt bundles two distinct deliverables (martingale fact and PricesGainsAtZero) into one ad-hoc conjunction, failing the \"needs_primitives\" family which requires exposing separate, reusable primitives rather than bundled conjunctions. The compiler/gate objects to unfaithful representation of the issue's acceptance criteria. Approaches ruled out: bundling multiple deliverables into single lemmas/conjunctions; ad-hoc conjunctions that don't expose individual components. Preserved: nothing from previous notebook (empty).",
-      "attempts": 1
-    }
-  }
-}
+{"generation": "v2", "entries": {"issue-61": {"experience": "attempt 1: outcome: elaboration; reason: elaboration; errors: line 96:55: unexpected token '>'; expected ':' or term; notes: family: needs_primitives", "attempts": 1}}}
