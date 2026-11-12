@@ -53,8 +53,28 @@ upstream = "RemyDegenne/brownian-motion"
 
 [repo]
 slug = "formal-applied-math/formal-mathfin"
-benchmark = "benchmarks/mathematical_finance.json"
+# The corpus is one file per area since 2026-11-08; `[layout] benchmarks_dir` picks the
+# file a new entry's neighbours are in. This is only the answer when nothing matches.
+benchmark = "benchmarks/contracts.json"
 domain = "mathematical_finance"
+# The library's attribution gate (tests/test_attribution.py) reads who added a file from
+# git and exempts bots by this suffix. Without it a pipeline commit is a contributor the
+# header does not name and the README does not list, and the PR's build goes red.
+commit_author = "mathfin-autoform[bot]"
+
+# Where the library keeps its own map. `probe/library_map.py` reads these LIVE at tick
+# time, so a reorganisation of the library is followed instead of copied: the v2 move
+# (2026-11-08) left every pointer in every ready issue naming a file that had moved, and
+# the area table below naming directories that were gone.
+[layout]
+taxonomy = "docs/taxonomy.toml"
+bibliography = "docs/references.bib"
+benchmarks_dir = "benchmarks"
+blueprint_nodes = "docs/blueprint_nodes.json"
+blueprint_frontier = "docs/blueprint_frontier.toml"
+init_module = "MathFin.Init"
+doc_standard = true
+shake_exe = "mathfin_shake"
 
 [infra]
 # The lean-lsp-mcp container the agentic drafter and the vibe prover both exec
@@ -100,19 +120,8 @@ Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Raphael Coelho
 -/"""
 
-# issue `area:` label -> `<lake_root>/<Section>/` subdirectory. Areas without a
-# directory yet (fx) map to a new one the umbrella import + lake build absorb;
-# anything unmapped falls back to a CamelCase of the area itself.
+# issue `area:` label -> `<lake_root>/<Section>/` subdirectory, for the labels the
+# taxonomy does not resolve. Since 2026-11-08 the labels ARE taxonomy cells
+# (`area:valuation/term`), and `[layout] taxonomy` answers for them; this table is the
+# last resort, so it stays empty until a label needs it.
 [areas]
-fixed-income = "FixedIncome"
-actuarial = "Actuarial"
-fx = "FX"
-black-scholes = "BlackScholes"
-futures = "Futures"
-binomial = "Binomial"
-portfolio = "Portfolio"
-performance = "Performance"
-risk = "RiskMeasures"
-defi = "DeFi"
-credit = "FixedIncome"
-execution = "Portfolio"

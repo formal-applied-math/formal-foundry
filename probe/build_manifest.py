@@ -51,6 +51,12 @@ _META_KEYS = {
     # backlog S: the issue's `location:` named an EXISTING module, so the candidate's
     # declarations are spliced into it rather than written over it.
     "append": ("append", lambda s: s.strip().lower() in ("1", "true", "yes")),
+    # the program nodes the source issue's `Blueprint:` line names; open-pr records the
+    # entry under each one still on the frontier, and then `refs` the issue
+    "blueprint": ("blueprint", lambda s: [p.strip() for p in s.split(",") if p.strip()]),
+    # the definitions the module introduces — the `new-defs` review class. Carried here
+    # because the placement headers are stripped from the module that ships.
+    "new-defs": ("new_defs", lambda s: [p.strip() for p in s.split(",") if p.strip()]),
 }
 
 

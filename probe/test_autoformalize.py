@@ -541,15 +541,14 @@ def test_explicit_arg_names_none():
 
 # --- section mapping ---------------------------------------------------------
 
-def test_section_for_area_known():
+def test_section_for_area_is_the_last_resort_camelcase():
+    # The pack's static `[areas]` table is empty since the library's labels became
+    # taxonomy cells (2026-11-08): `prepare_issues` reads the directory from the live
+    # taxonomy (test_library_map.py). What is left here is the CamelCase fallback an
+    # issue prepared WITHOUT a checkout gets.
+    assert PACK.areas == {}
     assert PACK.section_for_area("fixed-income") == "FixedIncome"
-    assert PACK.section_for_area("actuarial") == "Actuarial"
-    assert PACK.section_for_area("credit") == "FixedIncome"   # credit lives in FixedIncome
-
-
-def test_section_for_area_new_and_unknown():
-    assert PACK.section_for_area("fx") == "FX"                # new dir, umbrella absorbs
-    assert PACK.section_for_area("stoch-vol") == "StochVol"   # unknown → CamelCase fallback
+    assert PACK.section_for_area("stoch-vol") == "StochVol"
 
 
 # --- emit_target_files -------------------------------------------------------
@@ -571,7 +570,7 @@ def test_emit_stub_headers_and_scaffold():
     lean_text, _entry, _placement = af.emit_target_files(PACK, _ISSUE, _STUB, _META)
     assert "-- source-issue: 67" in lean_text
     assert "-- main-module: MathFin/FixedIncome/FRA.lean" in lean_text
-    assert "-- benchmark: benchmarks/mathematical_finance.json" in lean_text
+    assert f"-- benchmark: {PACK.benchmark}" in lean_text
     assert "-- benchmark-id: mf-fi-fra" in lean_text
     assert ("-- pointers: MathFin/FixedIncome/ForwardRate.lean, "
             "MathFin/FixedIncome/ZCB.lean") in lean_text
@@ -628,7 +627,7 @@ def test_emit_stub_roundtrips_through_build_manifest():
     # the real consumer parses the placement headers + the decl the same way
     meta = bm.parse_meta(lean_text)
     assert meta["main_module"] == "MathFin/FixedIncome/FRA.lean"
-    assert meta["benchmark"] == "benchmarks/mathematical_finance.json"
+    assert meta["benchmark"] == PACK.benchmark
     assert meta["benchmark_id"] == "mf-fi-fra"
     assert meta["source_issue"] == 67
     assert bm.parse_pointers(lean_text) == _ISSUE["pointers"]
@@ -808,7 +807,7 @@ def test_emit_placement_dict():
     _lean, _entry, placement = af.emit_target_files(PACK, _ISSUE, _STUB, _META)
     assert placement == {
         "main_module": "MathFin/FixedIncome/FRA.lean",
-        "benchmark": "benchmarks/mathematical_finance.json",
+        "benchmark": PACK.benchmark,
         "benchmark_id": "mf-fi-fra",
         "source_issue": 67,
         "deferred": [],        # full-issue proof carries an empty deferred list

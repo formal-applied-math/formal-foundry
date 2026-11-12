@@ -175,14 +175,15 @@ def staged_issue_numbers(queue_dir: str) -> set[int]:
 
 
 def claimed_issue_numbers(slug: str, *, run_fn=None) -> set[int] | None:
-    """Issue numbers closed by an OPEN PR — witness for `review`.
+    """Issue numbers claimed by an OPEN PR — witness for `review`.
 
     None (not the empty set) when the lookup failed, because "no PRs" and "could not
     ask" must not reconcile the same way: reading a failed lookup as zero open PRs
     would demote every issue under review back to `in-progress` and re-open it to the
     refill."""
     ok, out = _gh(["pr", "list", "--repo", slug, "--state", "open",
-                   "--json", "number,body,title", "--limit", "200"], run_fn=run_fn)
+                   "--json", "number,body,title,headRefName", "--limit", "200"],
+                  run_fn=run_fn)
     if not ok:
         return None
     try:
@@ -190,10 +191,17 @@ def claimed_issue_numbers(slug: str, *, run_fn=None) -> set[int] | None:
     except ValueError:
         return None
     closes = re.compile(r"(?i)\b(?:closes|fixes|resolves)\s+#(\d+)\b")
+    # The pipeline's OWN PR claims its issue even when it does not close it: a subset
+    # proof, or a proof toward a frontier node, says `refs #N` so that a merge leaves the
+    # issue open for a human. Only on a pipeline branch — anyone's PR may mention an
+    # issue in passing, and that is not a claim.
+    refs = re.compile(r"(?i)\brefs\s+#(\d+)\b")
     nums = set()
     for r in rows:
-        nums |= {int(m) for m in
-                 closes.findall((r.get("body") or "") + " " + (r.get("title") or ""))}
+        text = (r.get("body") or "") + " " + (r.get("title") or "")
+        nums |= {int(m) for m in closes.findall(text)}
+        if str(r.get("headRefName") or "").startswith("autoform/"):
+            nums |= {int(m) for m in refs.findall(text)}
     return nums
 
 
@@ -235,6 +243,68 @@ def reconcile(slug: str, queue_dir: str, *, apply: bool = False, run_fn=None,
     return plan
 
 
+def retire_closed(slug: str, queue_dir: str, *, apply: bool = False, run_fn=None,
+                  log=lambda m: None) -> list[int]:
+    """Retire every staged stub whose source issue is CLOSED. Returns their numbers.
+
+    A stub is a claim that an issue wants a proof. When the issue closes — the library
+    proved it another way, or dropped it — the claim is void, and nothing said so:
+    the flagship closed #129 on 2026-10-08 with its own proof, and the foundry
+    re-gated, rebuilt and pushed its `cal-bk-129` for seven more ticks.
+
+    Retiring is deleting `cal-bk-<N>.lean`, its `.entry.json`, and the target's row in
+    `manifest.json` (the row would otherwise name a file that is gone). Acts only on a
+    COMPLETED lookup: an issue counts as closed when the open-issue list was read and
+    does not contain it AND a direct lookup says `CLOSED`. Read-only unless `apply`."""
+    staged = sorted(staged_issue_numbers(queue_dir))
+    if not staged:
+        return []
+    ok, out = _gh(["issue", "list", "--repo", slug, "--state", "open",
+                   "--json", "number", "--limit", "500"], run_fn=run_fn)
+    if not ok:
+        log("could not list open issues — retiring nothing")
+        return []
+    try:
+        open_nums = {int(r["number"]) for r in json.loads(out.strip() or "[]")}
+    except (ValueError, KeyError, TypeError):
+        log("unparseable issue list — retiring nothing")
+        return []
+    retired = []
+    for n in staged:
+        if n in open_nums:
+            continue
+        ok, out = _gh(["issue", "view", str(n), "--repo", slug, "--json", "state"],
+                      run_fn=run_fn)
+        try:
+            closed = ok and json.loads(out).get("state") == "CLOSED"
+        except (ValueError, AttributeError):
+            closed = False
+        if not closed:
+            continue          # could not confirm: a stub is never retired on a guess
+        retired.append(n)
+        log(f"#{n} is closed — {'retiring' if apply else 'would retire'} cal-bk-{n}")
+        if apply:
+            for suffix in (".lean", ".entry.json"):
+                try:
+                    os.remove(os.path.join(queue_dir, f"cal-bk-{n}{suffix}"))
+                except OSError:
+                    pass
+    if apply and retired:
+        man_path = os.path.join(queue_dir, "manifest.json")
+        try:
+            with open(man_path, encoding="utf-8") as f:
+                man = json.load(f)
+            gone = {f"cal-bk-{n}" for n in retired}
+            man["targets"] = [t for t in man.get("targets", []) if t.get("id") not in gone]
+            man["quarantined"] = [q for q in man.get("quarantined", [])
+                                  if q.get("id") not in gone]
+            with open(man_path, "w", encoding="utf-8") as f:
+                json.dump(man, f, indent=2)
+        except (OSError, ValueError, AttributeError):
+            pass              # no manifest, or not ours to parse: the next build rewrites it
+    return retired
+
+
 def main(argv: list[str] | None = None) -> int:
     """Two modes:
 
@@ -265,9 +335,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.reconcile:
         if args.issue or args.status:
             ap.error("--reconcile takes the whole repo; drop --issue/--status")
+        # first, so the plan below is computed against the stubs that are still claims
+        retired = retire_closed(args.repo, args.queue, apply=args.apply, log=err)
         plan = reconcile(args.repo, args.queue, apply=args.apply, log=err)
         print(json.dumps({"repo": args.repo, "applied": bool(args.apply),
-                          "plan": plan}, indent=2))
+                          "retired": retired, "plan": plan}, indent=2))
         return 0
 
     if not (args.issue and args.status):

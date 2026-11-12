@@ -153,7 +153,13 @@ source issue. That step needs one credential — the only thing granting the
 foundry write access to main:
 
 1. On `formal-applied-math/formal-mathfin`, create a **fine-grained PAT** scoped to
-   that repo with **Contents: read/write** + **Pull requests: read/write**.
+   that repo with **Contents**, **Pull requests** and **Issues**, each *Read and
+   write*. All three are load-bearing: Contents pushes the branch, Pull requests opens
+   the PR, Issues writes the `status:` labels and the PR's `autoform` label. A token
+   with Contents alone fails in the worst way — the branch is pushed and the PR is
+   refused (`Resource not accessible by personal access token (createPullRequest)`).
+   The token set on 2026-09-28 was that token: thirteen ticks proved or re-gated a
+   target, assembled it green and died at the last command.
 2. Store it as the foundry secret (never in argv/logs):
 
    ```bash

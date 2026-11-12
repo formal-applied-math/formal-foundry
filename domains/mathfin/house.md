@@ -11,6 +11,10 @@ imports, or anything else.
 - The finished proof must depend only on the standard axioms
   [propext, Classical.choice, Quot.sound] — introduce no new axioms.
 - Output the whole file, imports untouched, exactly one ```lean block.
+- No line longer than 100 characters — statements, proofs, docstrings and comments
+  alike. The library counts them and holds the count at zero (lean_diagnostics reports
+  each as `linter.style.longLine`). Break after a binder group, inside an argument
+  list, or at an operator, with a deeper continuation indent.
 
 ── COHERENCE FIRST (the anti-wrapper doctrine) ──
 - CONSUME Mathlib / BrownianMotion lemmas; do not re-prove what the libraries

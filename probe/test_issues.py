@@ -7,7 +7,8 @@ def _iss(n, labels, title="t"):
 
 def test_parse_labels_extracts_dimensions():
     d = parse_labels(_iss(1, ["status:ready", "type:proof", "difficulty:small", "area:fx"]))
-    assert d == {"status": "ready", "type": "proof", "difficulty": "small", "area": "fx"}
+    assert d == {"status": "ready", "type": "proof", "difficulty": "small", "area": "fx",
+                 "areas": ["fx"]}
 
 
 def test_select_filters_and_orders_by_difficulty():

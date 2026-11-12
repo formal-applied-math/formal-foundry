@@ -112,7 +112,8 @@ fi
 # 1b. Self-feeding refill: when the queue has no unattempted target, autoformalize
 # one from the next `status:ready`+`type:proof` issue — claude drafts + judges +
 # roundtrips a faithful stub, leanstral runs the kernel gates — then rebuild the
-# manifest and re-plan. Needs the daemon (up) + MISTRAL_API_KEY (sourced above);
+# manifest and re-plan. Needs the daemon (up) and Claude auth; MISTRAL_API_KEY only
+# buys embedding retrieval (absent or dead, the drafter searches with loogle);
 # gated on [autoformalize].enabled. On any failure it falls through to the skip.
 # (not after an infrastructure failure: drafting against a daemon that could not
 # validate the queue spends a Claude session on gates that cannot answer)

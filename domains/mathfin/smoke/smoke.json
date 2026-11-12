@@ -1,0 +1,21 @@
+{
+  "_comment": "The assembly canary: a small, genuine theorem through a program object (`Phi`, the blueprint's `def:standard-normal-cdf`), with its proof. `scripts/assembly-smoke.sh` emits it through the real emitter, places it with the real applier and runs this pack's whole assembly recipe on it, then STOPS before the push. It is never contributed: once it were, it would be a duplicate statement and the canary would (correctly) go red.",
+  "issue": {
+    "number": 0,
+    "title": "assembly canary: a symmetric difference of the standard normal distribution function",
+    "areas": ["probability/gaussian"],
+    "area": "probability/gaussian",
+    "difficulty": "small",
+    "body": "## Pointers\n- `MathFin/Probability/Gaussian/StandardNormal.lean`\n\nBlueprint: def:standard-normal-cdf\n"
+  },
+  "intent": {
+    "module_name": "AssemblyCanary",
+    "benchmark_id": "mf-assembly-canary-phi-symmetric-difference",
+    "docstring": "For every real `x`, the standard normal distribution function satisfies `Phi x - Phi (-x) = 2 * Phi x - 1`, by the reflection `Phi (-x) = 1 - Phi x`.",
+    "title": "A symmetric difference of the standard normal distribution function",
+    "tags": ["standard normal", "distribution function", "reflection"],
+    "citation": {"key": "Hull", "locator": ""},
+    "deferred": [],
+    "definitions": []
+  }
+}

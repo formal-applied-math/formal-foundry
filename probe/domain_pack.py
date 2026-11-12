@@ -44,6 +44,8 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Mapping
 
+from library_map import Layout
+
 __all__ = ["DomainPack", "Dep", "load", "default_pack_root", "available"]
 
 _PLACEHOLDER_RE = re.compile(r"\{\{([a-z_]+)\}\}")
@@ -95,6 +97,13 @@ class DomainPack:
     opens: tuple[str, ...]
     opens_before_namespace: bool
     license: str
+
+    # --- where the library keeps its own map (taxonomy, bibliography, corpus,
+    # blueprint); `library_map` reads it live. Empty for a library with none of it. ---
+    layout: Layout
+    # the committer name of a pipeline contribution (a `[bot]` suffix is how the
+    # flagship's attribution gate tells a machine commit from a contributor's)
+    commit_author: str
 
     # --- vocabulary + prose ---
     areas: Mapping[str, str]
@@ -270,6 +279,9 @@ def export_env(pack: DomainPack, *, quote: bool = True) -> str:
         "DOMAIN_LEAN_LSP_CONTAINER": pack.lean_lsp_container,
         "DOMAIN_VERIFY_IMAGE": pack.verify_image,
         "DOMAIN_SCRATCH_MODULE": pack.scratch_module,
+        "DOMAIN_COMMIT_AUTHOR": pack.commit_author,
+        "DOMAIN_SHAKE_EXE": pack.layout.shake_exe,
+        "DOMAIN_BLUEPRINT_FRONTIER": pack.layout.blueprint_frontier,
     }
     return "".join(f"{k}={q(v)}\n" for k, v in rows.items())
 
@@ -333,6 +345,8 @@ def load(name: str = "mathfin", root: str | None = None) -> DomainPack:
         opens=tuple(module.get("opens") or []),
         opens_before_namespace=bool(module.get("opens_before_namespace", False)),
         license=module["license"],
+        layout=Layout.from_mapping(cfg.get("layout")),
+        commit_author=repo.get("commit_author") or f"{name}-autoform",
         areas=MappingProxyType(dict(cfg.get("areas", {}))),
         exemplars=MappingProxyType(dict(exemplars)),
         prompts=MappingProxyType(prompts),

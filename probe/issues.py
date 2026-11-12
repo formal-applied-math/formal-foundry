@@ -24,11 +24,12 @@ def difficulty_rank(difficulty: str | None) -> int:
 
 
 def parse_labels(issue: dict) -> dict:
-    """Map an issue's label list to its {status, type, difficulty, area} dims.
+    """Map an issue's label list to its {status, type, difficulty, area, areas} dims
+    (`area` is the last `area:` label, `areas` all of them in order).
 
     Recognises the `key:value` label convention plus GitHub's built-in
     "good first issue" label (which maps to difficulty good-first)."""
-    dims = {"status": None, "type": None, "difficulty": None, "area": None}
+    dims = {"status": None, "type": None, "difficulty": None, "area": None, "areas": []}
     for lab in issue.get("labels", []):
         name = lab["name"] if isinstance(lab, dict) else str(lab)
         if name == _GOOD_FIRST_TITLE:
@@ -38,6 +39,10 @@ def parse_labels(issue: dict) -> dict:
             prefix = key + ":"
             if name.startswith(prefix):
                 dims[key] = name[len(prefix):]
+                if key == "area":
+                    # an issue whose nodes sit in two cells carries two `area:` labels;
+                    # placement tries each, in label order
+                    dims["areas"].append(name[len(prefix):])
     return dims
 
 
@@ -53,7 +58,7 @@ def _rank(issue: dict) -> int | None:
 def select_issues(raw: list[dict], *, max_difficulty: str = "medium") -> list[dict]:
     """`status:ready` + `type:proof` issues up to `max_difficulty`, ordered
     good-first → small → medium then by issue number. Each returned dict is
-    {number, title, area, difficulty}."""
+    {number, title, area, areas, difficulty}."""
     cap = _DIFF_RANK.get(max_difficulty, 2)
     scored = []
     for issue in raw:
@@ -63,7 +68,7 @@ def select_issues(raw: list[dict], *, max_difficulty: str = "medium") -> list[di
         d = parse_labels(issue)
         scored.append((r, issue["number"], {
             "number": issue["number"], "title": issue.get("title", ""),
-            "area": d["area"], "difficulty": d["difficulty"],
+            "area": d["area"], "areas": d["areas"], "difficulty": d["difficulty"],
         }))
     scored.sort(key=lambda t: (t[0], t[1]))
     return [s[2] for s in scored]

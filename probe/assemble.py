@@ -179,6 +179,68 @@ def splice_into_module(pack, existing: str, candidate: str) -> str | None:
     return out[:end.start()].rstrip("\n") + "\n\n" + body + "\n\n" + out[end.start():]
 
 
+# The stub's placement headers (`-- pointers:`, `-- main-module:`, `-- deferred:` …) are
+# the QUEUE's bookkeeping. They used to ship inside the library module, where a
+# `-- deferred:` line listing three follow-up facts ran to 250 characters — over the
+# target's line limit, and nothing a reader of the library needs.
+_PLACEMENT_HEADER_RE = re.compile(
+    r"(?m)^--[ \t]*(?:pointers|main-module|benchmark|benchmark-id|source-issue|append|"
+    r"deferred|new-defs|blueprint):.*\n|^--[ \t]*decompose[ \t]*\n")
+
+
+def strip_placement_headers(code: str) -> str:
+    """The module as the library should see it: no queue bookkeeping comments, and no
+    blank-line pile-up where they were."""
+    out = _PLACEMENT_HEADER_RE.sub("", code)
+    return re.sub(r"\n{3,}", "\n\n", out)
+
+
+_MODULE_DOC_RE = re.compile(r"/-!.*?-/", re.DOTALL)
+
+
+def ensure_module_doc(candidate: str, stub: str | None) -> str:
+    """Give a candidate that has no module docstring the one its queue stub was emitted
+    with. The plain prove path edits the stub in place and keeps it; the decompose path
+    REBUILDS the module around its lemma-DAG (`decompose._module_text`) and drops it, and
+    a library with a documentation standard refuses a module without one. The stub is
+    the source of record for it either way: emitted once, from the gated intent."""
+    if _MODULE_DOC_RE.search(candidate):
+        return candidate
+    doc = _MODULE_DOC_RE.search(stub or "")
+    imports = list(_IMPORT_RE.finditer(candidate))
+    if not doc or not imports:
+        return candidate
+    at = imports[-1].end()
+    return candidate[:at] + "\n\n" + doc.group(0) + candidate[at:]
+
+
+def record_frontier_core(main_repo: str, frontier_rel: str, labels: list[str],
+                         entry_id: str) -> list[str]:
+    """Record `entry_id` in the `core` list of each of `labels` that is still a frontier
+    node in THIS checkout — the library's way of saying a corpus entry proves part of a
+    result that is not yet delivered. Returns the labels written (the caller then
+    `refs` the issue instead of closing it: whether the node is delivered is a human's
+    call, made by tagging it in the blueprint and deleting the frontier entry)."""
+    import library_map
+    if not frontier_rel or not labels:
+        return []
+    path = os.path.join(main_repo, frontier_rel)
+    try:
+        text = open(path, encoding="utf-8").read()
+    except OSError:
+        return []
+    done = []
+    for label in labels:
+        new = library_map.add_core(text, label, entry_id)
+        if new is not None:
+            text = new
+            done.append(label)
+    if done:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+    return done
+
+
 def apply_contribution(pack, candidate_code: str, target: dict, benchmark_entry: dict,
                        main_repo: str) -> list[str]:
     """Write the proven candidate to `target['main_module']` and append
@@ -214,6 +276,7 @@ def apply_contribution(pack, candidate_code: str, target: dict, benchmark_entry:
                 "not a recognisable `namespace … end` module. Refusing "
                 "rather than overwriting.")
         candidate_code = merged
+    candidate_code = strip_placement_headers(candidate_code)
     os.makedirs(os.path.dirname(mod_abs), exist_ok=True)
     with open(mod_abs, "w", encoding="utf-8") as f:
         f.write(candidate_code if candidate_code.endswith("\n") else candidate_code + "\n")

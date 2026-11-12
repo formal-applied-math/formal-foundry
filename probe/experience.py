@@ -39,7 +39,7 @@ import os
 
 # Lessons name Mathlib lemmas and tactic behaviour, so they go stale on a pin bump
 # exactly like the gate/state caches. Bump to drop the store wholesale.
-EXPERIENCE_GENERATION = "v1"
+EXPERIENCE_GENERATION = "v2"   # v2: notebooks written against the pre-layer library name paths that are gone
 
 # Cap on the rendered block. Chosen to sit well under the context pack's share of
 # the prompt: a memory that outgrows the premises it is meant to help apply has

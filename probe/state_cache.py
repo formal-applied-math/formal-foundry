@@ -23,7 +23,7 @@ import os
 # Bump on a Mathlib/Lean pin change: a tactic that closed a goal under the old pin is
 # not guaranteed to close it under the new one, and a stale suggestion is worse than
 # none. Mirrors gate_cache.CACHE_GENERATION.
-CACHE_GENERATION = "v1"
+CACHE_GENERATION = "v2"   # v2: the flagship moved to Lean v4.35 and reorganised into layers (2026-11)
 
 # A suggestion block large enough to be useful and small enough not to crowd the
 # context pack that carries the pointer signatures.

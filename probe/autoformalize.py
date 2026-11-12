@@ -32,6 +32,7 @@ import issue_state
 from domain_pack import DomainPack
 from house_context import (build_drafter_prompt, build_system_prompt,
                            extract_signatures)
+import library_map
 from issues import difficulty_rank, select_issues
 from pipeline_lib import AutoformalizeConfig, DrafterConfig
 from gate_cache import GateCache
@@ -156,7 +157,10 @@ def agentic_formalize(pack: DomainPack, intent: dict, *, issue: dict, main_repo:
     `{ok, stub, lean_text, entry, meta, tokens, reason}`."""
     meta = {"module_name": intent["module_name"], "benchmark_id": intent["benchmark_id"],
             "docstring": intent.get("docstring", ""),
-            "definitions": intent.get("definitions") or [], "deferred": intent.get("deferred")}
+            "definitions": intent.get("definitions") or [], "deferred": intent.get("deferred"),
+            # the doc-standard fields (a library that gates its module docstrings)
+            "title": intent.get("title"), "tags": intent.get("tags") or [],
+            "citation": intent.get("citation")}
     scratch_rel = scratch_rel if scratch_rel is not None else pack.scratch_module
     scaffold, _e0, _p0 = emit_target_files(
         pack, issue, f"theorem {_PLACEHOLDER} : True := by sorry", meta)
@@ -230,6 +234,18 @@ def agentic_formalize(pack: DomainPack, intent: dict, *, issue: dict, main_repo:
                 "meta": meta, "tokens": tokens,
                 "reason": f"the theorem kept the scaffold's placeholder name `{_PLACEHOLDER}`; "
                           "name it for the result it states"}
+    if core:
+        # A name the library already uses elaborates here (the module imports only its
+        # pointers) and clashes in the umbrella build, after the proof is paid for.
+        for decl in [split_statement(core)[0], *drafted_def_names(core)]:
+            home = library_map.declared_in_library(main_repo, pack.lake_root, decl,
+                                                   exclude=(scratch_rel,))
+            if home:
+                return {"ok": False, "stub": None, "lean_text": lean_final, "entry": None,
+                        "meta": meta, "tokens": tokens,
+                        "reason": f"`{decl}` is already declared in {home}; if that is "
+                                  "this result, the issue is already served — state a "
+                                  "fact it does not, under a name of its own"}
     if core:                                        # canonicalise via emit → consistent entry
         # emit rebuilds the imports from the issue's pointers; keep any import of an
         # EXISTING library module the drafter added (cal-bk-116 used Ito's
@@ -395,30 +411,96 @@ def prepare_issues(pack: DomainPack, raw: list[dict], *, main_repo: str | None =
     `status:ready`+`type:proof` queue (via `issues.select_issues`) and enrich each
     with its `body` + extracted `pointers` for drafting.
 
-    With `main_repo`, a pointer path that does NOT exist in the checkout is dropped.
-    A pointer names a module to CONSUME; an issue writing "New module suggestion:
-    `<LakeRoot>/Foo/Bar.lean`" is naming a module to CREATE, and the regex cannot
-    tell them apart. Left in, emit imports the phantom, the drafter names its new
-    module the same thing, and the collision check refuses — a module cannot import
-    itself. #71 failed that way seven times without ever reaching an obstruction
-    report. Filtering here rather than in `extract_pointers` keeps extraction a pure
-    parser; this is validation, and it belongs where the checkout is known."""
+    With `main_repo`, every fact about WHERE things live is read from the checkout
+    (`library_map`), never from a copy:
+
+    - a pointer that does not exist is healed by basename (the module moved) and
+      dropped only when that fails. A pointer names a module to CONSUME; an issue
+      writing "New module suggestion: `<LakeRoot>/Foo/Bar.lean`" is naming a module to
+      CREATE, and the regex cannot tell them apart. Left in, emit imports the phantom,
+      the drafter names its new module the same thing, and the collision check refuses
+      — a module cannot import itself. #71 failed that way seven times without ever
+      reaching an obstruction report;
+    - `directory`, `benchmark`, `subjects`: where the new module and its corpus entry
+      go, from the library's taxonomy and the corpus files its neighbours are in;
+    - `blueprint` / `frontier`: the program nodes the issue's `Blueprint:` line names,
+      and which of them are not yet formalized;
+    - `citable` / `bibliography`: the works a module docstring and an entry may cite;
+    - an issue the corpus already holds a pipeline contribution for is skipped — it is
+      open because a human has yet to split or close it, not because it is undrafted."""
     by_num = {r.get("number"): r for r in raw}
+    layout = pack.layout
+    tax = bib = bp = None
+    served: set[int] = set()
+    taken: set[str] = set()
+    if main_repo:
+        tax = library_map.Taxonomy.load(main_repo, layout.taxonomy)
+        bib = library_map.Bibliography.load(main_repo, layout.bibliography)
+        bp = library_map.Blueprint.load(main_repo, layout)
+        served = library_map.served_issues(main_repo, layout.benchmarks_dir)
+        taken = library_map.corpus_ids(main_repo, layout.benchmarks_dir)
     out = []
     for s in select_issues(raw, max_difficulty=max_difficulty):
-        body = by_num.get(s["number"], {}).get("body") or ""
+        n = s["number"]
+        if n in served:
+            log(f"#{n}: the corpus already holds a pipeline contribution for it — "
+                "skipped until a human splits or closes the issue")
+            continue
+        body = by_num.get(n, {}).get("body") or ""
         pointers = extract_pointers(pack, body)
+        issue = {**s, "body": body}
         if main_repo:
-            live = [p for p in pointers if os.path.isfile(os.path.join(main_repo, p))]
-            phantom = [p for p in pointers if p not in live]
-            if phantom:
+            pointers, notes = library_map.heal_pointers(main_repo, pack.lake_root, pointers)
+            moved = [f"{x['pointer']} → {x['to']}" for x in notes if x["how"] == "moved"]
+            lost = [f"{x['pointer']} ({x['how']})" for x in notes if x["how"] != "moved"]
+            if moved:
+                log(f"#{n}: pointer(s) moved in the library, followed: {moved}")
+            if lost:
                 # Loud on purpose: silently dropping a pointer would hide a
                 # mis-written issue just as effectively as silently keeping one.
-                log(f"#{s['number']}: dropped pointer(s) not in the checkout "
-                    f"{phantom} — a pointer names a module to CONSUME; a module to "
-                    f"CREATE belongs in `location:` or in the task prose")
-            pointers = live
-        out.append({**s, "body": body, "pointers": pointers})
+                log(f"#{n}: dropped pointer(s) not in the checkout {lost} — a pointer "
+                    "names a module to CONSUME; a module to CREATE belongs in "
+                    "`location:` or in the task prose")
+            loc = extract_location(pack, body)
+            if loc:
+                healed, _ = library_map.heal_pointers(main_repo, pack.lake_root, [loc])
+                # a `location:` that no longer resolves is not honoured: writing it as
+                # spelled would create a module outside the library's layers
+                issue["location"] = healed[0] if healed else None
+            directory = ((tax.directory_for(main_repo, s.get("areas") or
+                                            ([s["area"]] if s.get("area") else []))
+                          if tax else None)
+                         or (library_map.pointer_directory(pointers) if tax else None))
+            if directory:
+                issue["directory"] = directory
+                issue["subjects"] = tax.subjects_of_module(
+                    directory.replace("/", ".") + ".X")
+            if layout.benchmarks_dir:
+                issue["benchmark"] = library_map.benchmark_for(
+                    main_repo, layout.benchmarks_dir,
+                    directory or library_map.pointer_directory(pointers) or "",
+                    fallback=pack.benchmark)
+            nodes = library_map.named_nodes(body)
+            if nodes:
+                issue["blueprint"] = nodes
+                issue["frontier"] = bp.frontier_of(nodes)
+                core = {e for x in issue["frontier"]
+                        for e in (bp.frontier[x].get("core") or [])}
+                issue["blueprint_note"] = bp.note(nodes, library_map.entry_descriptions(
+                    main_repo, layout.benchmarks_dir, core))
+            if bp.proved:
+                # every declaration the program map tags: the map gate requires the
+                # drafted statement to reach one of them
+                issue["map_anchors"] = sorted({n["name"] for n in bp.proved.values()
+                                               if n.get("name")})
+                issue["map_hint"] = bp.hint(nodes)
+            if bib:
+                issue["citable"] = bib.catalogue()
+                issue["bibliography"] = {k: {"bullet": bib.bullet(k),
+                                             "reference": bib.reference(k)}
+                                         for k in bib.entries}
+            issue["taken_ids"] = sorted(taken)
+        out.append({**issue, "pointers": pointers})
     return out
 
 
@@ -480,6 +562,17 @@ def semantic_verdict(pack: DomainPack, *, lean_text: str, stub: str, name: str,
             return {"gate": "indeterminate", "detail": dep.get("verdict", "")}, tokens
         if dep["shallow"]:
             return {"gate": "depth", "detail": dep.get("verdict", "")}, tokens
+    # the program map: active whenever `prepare_issues` attached the map's tagged names
+    # (a library with a blueprint, an issue prepared against a checkout)
+    mp = map_rejection(pack, lean_text, name, issue.get("map_anchors") or [],
+                       check_fn=check_fn)
+    if mp.get("indeterminate"):
+        return {"gate": "indeterminate", "detail": mp.get("verdict", "")}, tokens
+    if mp["off_map"]:
+        hint = issue.get("map_hint") or ""
+        return {"gate": "off_map",
+                "detail": mp.get("verdict", "") + (f" Program objects to state it "
+                                                   f"through: {hint}" if hint else "")}, tokens
     if triviality_gate:
         triv = triviality_rejection(lean_text, check_fn=check_fn)
         tokens += triv["tokens"]
@@ -688,7 +781,15 @@ def refill(pack: DomainPack, issues: list[dict], *, reason_fn, prove_fn, check_f
                 # flips the single Lean slot to lean-lsp around it and back to the daemon for the
                 # gates. An infra failure (lean-lsp/flip/docker) or a ClaudeCapError propagates to
                 # the issue-level handler (error/deferred, retryable) — there is no completion path.
-                proactive = proactive_fn(intent["statement"]) if proactive_fn else ""
+                # retrieved premises are an aid to the drafter and never a reason to lose
+                # the issue: an embedding endpoint that is down, or a key that expired,
+                # costs the premises and nothing else (the session still has lean_loogle)
+                try:
+                    proactive = proactive_fn(intent["statement"]) if proactive_fn else ""
+                except Exception as e:      # noqa: BLE001
+                    log(f"#{n}: premise retrieval failed ({type(e).__name__}: "
+                        f"{str(e)[:120]}) — drafting without retrieved premises")
+                    proactive = ""
                 if agentic_formalize_fn is None:
                     raise RuntimeError("refill requires an agentic_formalize_fn (the only drafter)")
                 try:
@@ -798,8 +899,11 @@ def refill(pack: DomainPack, issues: list[dict], *, reason_fn, prove_fn, check_f
 # --- CLI (the refill entrypoint pipeline-tick.sh calls) -----------------------
 
 def _fetch_issues(slug: str) -> list[dict]:
+    # `gh` lists newest first and stops at its limit. At 100 the refill saw the newest
+    # 100 of the flagship's 156 open issues, so the OLDEST — the small, well-scoped ones
+    # the queue is ordered to try first — were never candidates.
     out = subprocess.run(
-        ["gh", "issue", "list", "--repo", slug, "--state", "open", "--limit", "100",
+        ["gh", "issue", "list", "--repo", slug, "--state", "open", "--limit", "1000",
          "--json", "number,title,labels,body"],
         capture_output=True, text=True, check=True).stdout
     return json.loads(out)
@@ -890,10 +994,11 @@ def main() -> int:
                    default=None, help="loogle-augmented repair retrieval (default: config)")
     args = ap.parse_args()
 
+    # Mistral is no longer on the critical path: Claude drafts, judges and proves. The key
+    # still buys embedding retrieval and (if switched back on) the kernel probes; without
+    # it the refill runs, with loogle-only retrieval. Checked below, once the config says
+    # whether a probe that needs it is on.
     api_key = os.environ.get("MISTRAL_API_KEY")
-    if not api_key:
-        print("MISTRAL_API_KEY not set", file=sys.stderr)
-        return 2
 
     # pipeline.toml [autoformalize] is authoritative; CLI flags override per-field.
     config_path = args.config or os.path.join(_foundry_root(), "pipeline.toml")
@@ -913,6 +1018,10 @@ def main() -> int:
     depth_gate = pick(args.depth_gate, cfg.depth_gate)
     triviality_gate = pick(args.triviality_gate, cfg.triviality_gate)
     kernel_probes = pick(args.kernel_probes, cfg.kernel_probes)
+    if kernel_probes and not api_key:
+        print("MISTRAL_API_KEY not set and [autoformalize] kernel_probes is on "
+              "(the probes are run by prover_model)", file=sys.stderr)
+        return 2
     semantic_rounds = pick(args.semantic_rounds, cfg.semantic_rounds)
     formalize_rounds = pick(args.formalize_rounds, cfg.formalize_rounds)
     retrieval = pick(args.retrieval, cfg.retrieval)
@@ -987,7 +1096,11 @@ def main() -> int:
 
     from scout_index import default_index_dir
     index_dir = default_index_dir()
-    if retrieval:
+    if retrieval and not api_key and cfg.retrieval_backend == "embedding":
+        print("[refill] no MISTRAL_API_KEY — embedding retrieval off (the drafter still "
+              "searches with lean_loogle)", file=sys.stderr)
+        proactive_fn = None
+    elif retrieval:
         # only the PROACTIVE (embedding) half is used — fed to the agentic prompt as premises;
         # the reactive retrieve_fn is gone (agentic searches live via lean_loogle).
         _reactive, proactive_fn = build_retrieve_fns(
@@ -1328,6 +1441,56 @@ def golf_candidate(pack: DomainPack, candidate: str, *, chat_fn, regate_fn,
 
 
 
+def _code_fingerprint(text: str) -> str:
+    """The file with its line comments and ALL whitespace removed: what a reformatting
+    must leave untouched."""
+    return re.sub(r"\s+", "", re.sub(r"(?m)--.*$", "", text))
+
+
+def reflow_candidate(pack: DomainPack, candidate: str, *, chat_fn, regate_fn,
+                     limit: int = library_map.LINE_LIMIT, log=lambda m: None) -> dict:
+    """Break the lines of an ACCEPTED proof that run past the library's line limit.
+
+    The target's ratchet counts every source line over the limit and holds the count at
+    zero, so a proof with one long `nlinarith [...]` is a candidate its own build will
+    refuse. A prover is told the limit and mostly keeps it; this is for when it did not.
+
+    A reformatting is the one edit that can be checked EXACTLY: the result must be the
+    same file once line comments and whitespace are removed (`_code_fingerprint`), so it
+    cannot have touched a statement, a name or a tactic. Lean is indentation-sensitive,
+    so it must also pass the full gate again. Any miss keeps the original (fail-open) and
+    the caller decides what a still-too-long candidate means. Returns
+    `{candidate, reflowed, long}` — `long` the line numbers still over the limit."""
+    from assemble import strip_placement_headers
+    over = lambda c: library_map.long_lines(strip_placement_headers(c), limit)  # noqa: E731
+    if not over(candidate):
+        return {"candidate": candidate, "reflowed": False, "long": []}
+    prompt = pack.prompts.get("reflow-system")
+    if not prompt:
+        return {"candidate": candidate, "reflowed": False, "long": over(candidate)}
+    try:
+        content, _tk = chat_fn([{"role": "system", "content": prompt},
+                                {"role": "user", "content": f"```lean\n{candidate}\n```"}])
+    except Exception:  # noqa: BLE001 — formatting is never worth losing the proof
+        return {"candidate": candidate, "reflowed": False, "long": over(candidate)}
+    flowed = extract_lean_code(content or "")
+    if not flowed or _code_fingerprint(flowed) != _code_fingerprint(candidate):
+        log("reflow: the reply changed more than line breaks — rejected before re-gating")
+        return {"candidate": candidate, "reflowed": False, "long": over(candidate)}
+    if over(flowed):
+        log(f"reflow: line(s) {over(flowed)} still over {limit} characters")
+        return {"candidate": candidate, "reflowed": False, "long": over(candidate)}
+    g = regate_fn(flowed)
+    if not (isinstance(g, dict) and g.get("passed")):
+        log(f"reflow: re-gate failed ({(g or {}).get('reason')}); keeping the original")
+        return {"candidate": candidate, "reflowed": False, "long": over(candidate)}
+    log("reflow: accepted (whitespace-only edit, full gate green)")
+    return {"candidate": flowed if flowed.endswith("\n") else flowed + "\n",
+            "reflowed": True, "long": []}
+
+
+
+
 def _protected_from_strip(binders: str, body: str, drop: list[str]) -> set[str]:
     """Flagged-unused binders the strengthen pass must NOT strip — pure-parse
     pre-checks that avoid a wasted re-gate round / a broken PR before the full
@@ -1529,7 +1692,8 @@ def emit_target_files(pack: DomainPack, issue: dict, stub: str,
     docstring = (meta.get("docstring") or "").strip()
     deferred = normalize_deferred(meta.get("deferred"))
     pointers = issue.get("pointers", [])
-    new_defs = [str(d) for d in (meta.get("definitions") or [])]
+    new_defs = [str(d.get("name") if isinstance(d, dict) else d)
+                for d in (meta.get("definitions") or [])]
     stub = _prelint_stub(stub)   # A5 modifier-order fix + A7 Σ/Π-identifier reject
     name, binders, concl = split_statement(stub)
 
@@ -1546,28 +1710,43 @@ def emit_target_files(pack: DomainPack, issue: dict, stub: str,
     # imports as a pointer; heal deterministically by naming the module for the object
     # it introduces (def `upCapture` -> module `UpCapture`), and reject loudly if it
     # still collides (a module cannot import itself).
+    #
+    # WHERE the new module goes is the library's answer, not ours: `prepare_issues`
+    # read `issue["directory"]` from the library's taxonomy (the issue's `area:` label
+    # names a cell, the cell names its directory). The pack's static `[areas]` table is
+    # what is left when the library declares no taxonomy.
+    directory = issue.get("directory")
+
+    def place(mod: str) -> str:
+        return f"{directory}/{mod}.lean" if directory else pack.main_module(section, mod)
+
     append = False
-    location = extract_location(pack, issue.get("body") or "")
+    # `prepare_issues` resolves the location against the checkout (None = it named a
+    # path that no longer exists, and is not honoured); a caller that did not prepare
+    # the issue gets the line as written.
+    location = (issue["location"] if "location" in issue
+                else extract_location(pack, issue.get("body") or ""))
     module_name = meta["module_name"]
     if location:
         main_module, append = location, True
         module_name = os.path.basename(location)[:-len(".lean")]
     else:
-        main_module = pack.main_module(section, module_name)
+        main_module = place(module_name)
         if main_module in pointers:
             primary = new_defs[0].split(".")[-1].strip() if new_defs else ""
             if primary:
                 module_name = primary[:1].upper() + primary[1:]
-                main_module = pack.main_module(section, module_name)
+                main_module = place(module_name)
             if main_module in pointers:
                 raise ValueError(
                     f"main-module {main_module} collides with a pointer import; a "
                     "new-object contribution must create a fresh module named for the "
                     "object it introduces (set meta.definitions / meta.module_name).")
+    benchmark = issue.get("benchmark") or pack.benchmark
     header_lines = [
         f"-- pointers: {', '.join(pointers)}",
         f"-- main-module: {main_module}",
-        f"-- benchmark: {pack.benchmark}",
+        f"-- benchmark: {benchmark}",
         f"-- benchmark-id: {benchmark_id}",
         f"-- source-issue: {n}",
     ]
@@ -1585,22 +1764,66 @@ def emit_target_files(pack: DomainPack, issue: dict, stub: str,
         # this module INTRODUCES definitions (the defs route) — open-pr labels the
         # PR `new-defs`, the architecture-heavy review class.
         header_lines.append(f"-- new-defs: {', '.join(new_defs)}")
+    if issue.get("blueprint"):
+        # the program nodes the issue's `Blueprint:` line names. open-pr decides, against
+        # the checkout it is assembling into, which are still on the frontier.
+        header_lines.append(f"-- blueprint: {', '.join(issue['blueprint'])}")
     headers = "\n".join(header_lines)
     # coherence-first: import the pointer modules so the drafted statement can
     # consume existing library defs (a path '<LakeRoot>/FixedIncome/ZCB.lean' becomes
     # 'public import <Namespace>.FixedIncome.ZCB'). An unused pointer import is NOT
     # harmless (it adds a spurious cross-module edge) — trim_unused_imports drops any
     # the proved candidate does not need, post-proof.
+    #
+    # `public import Mathlib` is a DRAFTING convenience, not what ships: the drafter and
+    # the prover need the whole library in scope to search it, and the target's ratchet
+    # holds whole-Mathlib imports at zero. open-pr narrows the import list to what the
+    # proved module uses (`[layout] shake_exe`) before it builds.
+    pointer_imports = [pack.import_line(p) for p in pointers if p.endswith(".lean")]
+    init = pack.layout.init_module
     imports = "\n".join(
         ["public import Mathlib"]
-        + [pack.import_line(p) for p in pointers if p.endswith(".lean")]
+        + pointer_imports
+        # every library module imports the conventions module, directly when it imports
+        # no other library module
+        + ([f"public import {init}"] if init and not pointer_imports else [])
     )
+
+    # The module docstring. A library with a documentation standard gates it (a title,
+    # Main definitions / Main results, References keyed to its bibliography, Tags with
+    # the cell's subject codes), so the emitter writes that layout from the intent's
+    # meta instead of leaving a one-line summary a gate will reject.
+    cite = meta.get("citation") if isinstance(meta.get("citation"), dict) else {}
+    cite_key = str(cite.get("key") or "").strip()
+    cite_loc = " ".join(str(cite.get("locator") or "").split())
+    cited = (issue.get("bibliography") or {}).get(cite_key)
+    if pack.layout.doc_standard:
+        defs_rows = []
+        for d in (meta.get("definitions") or []):
+            if isinstance(d, dict) and d.get("name"):
+                defs_rows.append((str(d["name"]).rsplit(".", 1)[-1], str(d.get("meaning") or "")))
+            elif isinstance(d, str) and d.strip():
+                defs_rows.append((d.strip().rsplit(".", 1)[-1], ""))
+        references = []
+        if cited:
+            references.append(cited["bullet"] + (f", {cite_loc}" if cite_loc else ""))
+        # the summary carries the statement in prose; the result's bullet names it by the
+        # title, so the same sentence is not printed twice ten lines apart
+        doc_title = " ".join(str(meta.get("title") or issue.get("title")
+                                 or module_name).split()).rstrip(".")
+        module_doc = library_map.module_doc(
+            title=doc_title,
+            summary=docstring, definitions=defs_rows, results=[(name, doc_title)],
+            references=references, tags=list(meta.get("tags") or []),
+            subjects=list(issue.get("subjects") or []))
+    else:
+        module_doc = docstring
     lean_text = (
         f"{pack.license}\n"
         "module\n\n"
         f"{imports}\n\n"
         f"{headers}\n\n"
-        f"/-!\n{docstring}\n-/\n\n"
+        f"/-!\n{module_doc}\n-/\n\n"
         # The house preamble is the PACK's — pinned options, `@[expose] public
         # section`, the namespace, and the house opens on whichever side of it this
         # library puts them. Two facts it carries, both learned the hard way:
@@ -1631,7 +1854,9 @@ def emit_target_files(pack: DomainPack, issue: dict, stub: str,
     # proof had passed every gate — the first proof in two months, blocked at assembly.
     reexport_opens = "\n".join([f"open {pack.namespace}", *pack.opens])
     reexport = (
-        f"import {pack.namespace}.{section}.{module_name}\n\n"
+        # the module's own name, from its path: a section is a PATH since the library
+        # grew layers (`Models/Rates`), and a `location:` module is not in the section
+        f"import {pack.module_of(main_module)}\n\n"
         f"{reexport_opens}\n\n"
         f"/-- {docstring} -/\n"
         f"theorem {mf_name} {binders.strip()} :{concl.rstrip()} :=\n"
@@ -1659,24 +1884,32 @@ def emit_target_files(pack: DomainPack, issue: dict, stub: str,
     if new_defs:
         scope += f" Introduces definitions: {', '.join(new_defs)} (new-defs review class)."
         provenance["new_defs"] = new_defs
+    metadata = {
+        "chapter": 0,
+        # the SOURCE the result is stated in, and its bibliography key — the corpus and
+        # the module docstring share one bibliography, and the target gates both
+        "reference": ((cited["reference"] + (f", {cite_loc}" if cite_loc else ""))
+                      if cited else issue.get("title", "")),
+        "difficulty": issue.get("difficulty", "medium"),
+        "formalization_status": "full",
+        "formalization_scope": scope,
+        "provenance": provenance,
+    }
+    if cited:
+        metadata["citations"] = [{"key": cite_key, **({"locator": cite_loc} if cite_loc else {})}]
+    elif pack.layout.bibliography:
+        metadata["citations"] = []      # "the source names no work" — the gate wants it said
     entry = {
         "id": benchmark_id,
         "name": issue.get("title", benchmark_id),
         "description": docstring,
         "domain": pack.domain,
         "code": {"lean": reexport},
-        "metadata": {
-            "chapter": 0,
-            "reference": issue.get("title", ""),
-            "difficulty": issue.get("difficulty", "medium"),
-            "formalization_status": "full",
-            "formalization_scope": scope,
-            "provenance": provenance,
-        },
+        "metadata": metadata,
     }
     placement = {
         "main_module": main_module,
-        "benchmark": pack.benchmark,
+        "benchmark": benchmark,
         "benchmark_id": benchmark_id,
         "source_issue": n,
         "deferred": deferred,
