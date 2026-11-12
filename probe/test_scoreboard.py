@@ -15,7 +15,7 @@ def test_ab_row_validates_arm_and_shape():
                ts="2026-07-18T00:00:00", leaves_total=3, leaves_closed=3, tokens=120000)
     assert r["arm"] == "decompose" and r["leaves_closed"] == 3
     assert r["refinery_minutes"] is None            # hand-filled at merge, not by the machine
-    with pytest.raises(ValueError):                 # no centaur/claude arm — Mistral-only
+    with pytest.raises(ValueError):                 # an arm is cron or decompose, never a model
         ab_row(target="x", arm="claude", outcome="pass", ts="t")
 
 
@@ -112,9 +112,9 @@ def test_the_engine_is_recorded_beside_the_arm():
     assert r["arm"] == "cron" and r["engine"] == "claude"
 
 
-def test_the_engine_defaults_to_the_incumbent_so_old_rows_read_unchanged():
+def test_the_engine_defaults_to_the_one_prover():
     from scoreboard import ab_row
-    assert ab_row(target="t", arm="cron", outcome="pass", ts="x")["engine"] == "leanstral"
+    assert ab_row(target="t", arm="cron", outcome="pass", ts="x")["engine"] == "claude"
 
 
 def test_an_unknown_engine_is_rejected():
@@ -133,10 +133,22 @@ def test_an_unknown_arm_is_still_rejected():
         ab_row(target="t", arm="nonsense", outcome="pass", ts="x")
 
 
-def test_a_legacy_row_without_an_engine_renders_as_the_incumbent():
-    """Every row on disk predates this field; none of them may render blank, or the
-    table would imply the engine was unknown when it is the only one that ever ran."""
+def test_a_row_renders_the_engine_it_records_and_never_a_guess():
+    """The rows on disk each name the engine that ran them (the pre-field ones were
+    back-filled once, in `runs/ab-decomposer.jsonl`). A row that names none renders a
+    dash: the table does not guess."""
     from scoreboard import render_scoreboard
-    md = render_scoreboard([{"target": "t", "arm": "decompose", "outcome": "max_rounds",
-                             "ts": "2026-08-31T14:03:08", "tokens": 0}])
-    assert "leanstral" in md
+    md = render_scoreboard([
+        {"target": "t", "arm": "decompose", "outcome": "max_rounds",
+         "ts": "2026-08-31T14:03:08", "tokens": 0, "engine": "leanstral"},
+        {"target": "u", "arm": "cron", "outcome": "pass", "ts": "2026-11-12T00:00:00",
+         "tokens": 0}])
+    assert "leanstral" in md and "—" in md
+
+
+def test_every_row_on_disk_names_its_engine():
+    import json, os
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "runs", "ab-decomposer.jsonl")
+    rows = [json.loads(l) for l in open(path) if l.strip()]
+    assert rows and all(r.get("engine") for r in rows)

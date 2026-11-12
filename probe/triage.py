@@ -2,7 +2,7 @@
 
 Makes "why did the tick not produce a PR?" answerable at a glance instead of by
 re-reading raw logs — the cheapest, highest-information thing to add given a
-zero-PR streak (ML4TP harvest R5). Stdlib only; reads the vibe harness's
+zero-PR streak (ML4TP harvest R5). Stdlib only; reads the prove session's
 `runs/<tag>-summary.jsonl` rows (one per target).
 
 v1 classifies on `outcome` (+ `gate_reason`). A finer `missing_premise` split of
@@ -43,7 +43,7 @@ def classify(row: dict) -> str:
 
 FAMILY_HINT = {
     "solved": "candidate produced (expect runs/<tag>-<id>.lean)",
-    "infra": "daemon/lean-lsp/vibe failure or no capture — retryable; check the flip + READY wait",
+    "infra": "daemon/lean-lsp/launcher failure or no capture — retryable; check the flip + READY wait",
     "prover_gave_up": "hit max_turns with a sorry left — raise --max-turns, or the target is too big (decompose)",
     "used_forbidden_tactic": "banned tactic (native_decide/exact?/…) — strengthen the task's values gate",
     "axiom_dirty": "proof leans on a disallowed axiom — reject + reprompt",

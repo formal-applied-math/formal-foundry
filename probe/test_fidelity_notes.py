@@ -21,11 +21,11 @@ def test_includes_issue_claim_pointers_and_provenance():
         target_id="cal-x-2", lean_statement=STMT, issue_number=108,
         issue_title="interest parity", issue_task="Prove covered interest parity.",
         pointers=["MathFin.zcb", "MathFin.forwardRate"],
-        provenance={"source": "leanstral-autoform", "model": "labs-leanstral-1-5"})
+        provenance={"source": "foundry-autoform", "model": "claude-sonnet-5-5"})
     assert "#108" in md and "interest parity" in md
     assert "Prove covered interest parity." in md
     assert "`MathFin.zcb`" in md and "`MathFin.forwardRate`" in md
-    assert "leanstral-autoform" in md and "labs-leanstral-1-5" in md
+    assert "foundry-autoform" in md and "claude-sonnet-5-5" in md
     assert "scout, not author" in md
 
 

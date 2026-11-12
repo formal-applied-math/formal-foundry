@@ -77,7 +77,7 @@ doc_standard = true
 shake_exe = "mathfin_shake"
 
 [infra]
-# The lean-lsp-mcp container the agentic drafter and the vibe prover both exec
+# The lean-lsp-mcp container the agentic drafter and the prover both exec
 # into, and the GHCR image carrying this library's oleans. Runbook 06 lifts the
 # shell scripts and workflows onto these same two values.
 lean_lsp_container = "mathfin-lean-lsp"

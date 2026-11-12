@@ -29,7 +29,6 @@ import autoformalize
 import domain_pack
 from build_manifest import parse_meta, parse_pointers
 from pipeline_lib import ProverConfig
-from vibe_prove import LEANSTRAL_MODEL
 
 SMOKE_ID = "cal-smoke-1"
 
@@ -92,8 +91,7 @@ def main(argv: list[str] | None = None) -> int:
     config = os.path.join(root, "pipeline.toml")
     pack = domain_pack.load(args.domain or domain_pack.name_from_config(config))
     cfg = ProverConfig.load(config)
-    prover = {"engine": cfg.engine,
-              "model": cfg.claude_model if cfg.engine == "claude" else LEANSTRAL_MODEL}
+    prover = {"engine": cfg.engine, "model": cfg.claude_model}
     target = stage(pack, args.main_repo, args.run_dir or os.path.join(root, "runs"), args.tag,
                    prover=prover)
     print(json.dumps({"id": target["id"], "main_module": target["main_module"],

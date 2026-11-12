@@ -46,14 +46,14 @@ def test_draft_seed_with_empty_history_yields_a_record(tmp_path):
 
 def test_prove_records_from_summary(tmp_path):
     _write(tmp_path, "pipeline-20260717-summary.jsonl", [
-        {"target": "cal-bk-88", "outcome": "pass", "model": "labs-leanstral-1-5",
-         "tokens": 1234, "harness": "vibe", "ts": "2026-07-17T19:00:00", "rounds": 3}])
+        {"target": "cal-bk-88", "outcome": "pass", "model": "claude-sonnet-5-5",
+         "tokens": 1234, "harness": "agentic", "ts": "2026-07-17T19:00:00", "rounds": 3}])
     recs = [r for r in pv.iter_run_records(str(tmp_path)) if r["stage"] == "prove"]
     assert len(recs) == 1
     r = recs[0]
     assert r["target"] == "cal-bk-88" and r["issue"] == 88
-    assert r["outcome"] == "pass" and r["model"] == "labs-leanstral-1-5"
-    assert r["tokens"] == 1234 and r["attempt"] == 3 and r["harness"] == "vibe"
+    assert r["outcome"] == "pass" and r["model"] == "claude-sonnet-5-5"
+    assert r["tokens"] == 1234 and r["attempt"] == 3 and r["harness"] == "agentic"
 
 
 def test_record_id_stable_and_distinct():

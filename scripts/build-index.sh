@@ -75,10 +75,9 @@ EOF
 # 2. Slice to the library + the Mathlib neighborhoods it actually reaches.
 #    `--imports <Namespace>` extracts the whole transitive closure (~771k records /
 #    ~850 MB, mostly Mathlib/core internals). This step used to keep ONLY
-#    own-namespace decls only (~2.8k, a 275x shrink) for a 0.03s load — but the
-#    embedding retrieval in probe/embed.py reads types.jsonl, so that filter is
-#    why the drafter's semantic search had never seen a Mathlib lemma, leaving
-#    an off-pin public loogle as its only Mathlib channel. index_filter keeps
+#    own-namespace decls only (~2.8k, a 275x shrink) for a 0.03s load — which left
+#    the index without a single Mathlib lemma, though the library's proofs rest on
+#    them and the context packs render dependency signatures. index_filter keeps
 #    the middle: ours in full, plus every Mathlib module hosting a constant a
 #    library proof depends on. See probe/index_filter.py for the reasoning.
 # --domain is REQUIRED, not decorative: without it index_filter falls back to the

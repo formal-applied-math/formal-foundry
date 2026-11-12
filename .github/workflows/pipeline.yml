@@ -1,14 +1,14 @@
 name: autoformalizer pipeline
 
-# One token-paced tick every 2 days: pick a queued target, prove it with
-# Leanstral, and on a pass open a ready-for-review PR on the TARGET LIBRARY that
+# One token-paced tick every 2 days: pick a queued target (drafting one from the next
+# ready issue when the queue is empty), prove it, and on a pass open a ready-for-review PR on the TARGET LIBRARY that
 # closes the source issue (fully hands-off; R reviews + merges).
 #
 # Which library is the `domain` input (runbook 06): it names a pack under
 # `domains/`, and `probe/domain_pack.py --export-env` resolves it into the DOMAIN_*
 # env every step below reads. The scheduled run always ticks the flagship.
 # Secrets:
-#   MISTRAL_API_KEY  — the Leanstral endpoint.
+#   CLAUDE_CODE_OAUTH_TOKEN — the drafter, the judge and the prover (`claude -p`).
 #   MAIN_PR_TOKEN    — fine-grained PAT on the target library: Contents, Pull requests
 #                      and Issues, each Read and write. WITHOUT it the tick falls back to
 #                      candidate-notify and opens NO PR. With Contents alone it pushes
@@ -57,7 +57,7 @@ concurrency:
 jobs:
   tick:
     runs-on: ubuntu-latest
-    # A full tick is: index + embeddings on a pin change (~40 min), three cold daemon
+    # A full tick is: the scout index on a pin change (~40 min), three cold daemon
     # loads, a draft session, a prove session, then the library's whole CI in the image
     # (build, shake, lint, regen, ledger, declaration index). 120 was sized for a tick
     # that reused a proof; the repo is public, so the minutes are not metered.
@@ -117,29 +117,20 @@ jobs:
       - name: Pull the pinned verify image
         run: docker pull "$DOMAIN_VERIFY_IMAGE"
 
-      - name: Setup Python                # needed by build-embeddings (host-side) + the tick
+      - name: Setup Python                # the tick is host-side Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Setup vibe                  # host-side CLI + the bundled lean agent
-        # W5 spike: the `lean` agent is bundled in mistral-vibe; `/leanstall` only
-        # writes installed_agents=["lean"] to the config. vibe runs on the RUNNER
-        # (it docker-execs into the lean-lsp container), so no image rebuild is needed.
-        # Only the `leanstral` engine launches vibe; under `[prover] engine = "claude"` a
-        # vibe that will not install must not cost the tick (its endpoint retired 09-30).
-        continue-on-error: true
-        run: bash scripts/vibe-setup.sh
-
-      # --- embedding-retrieval corpus (Track A) ---------------------------------
+      # --- the lean_scout index (context packs, feasibility census) -------------
       # index/ is a gitignored build artifact, so CI rebuilds it here and caches it
       # by the LIBRARY source + pin — the key hashes the pack's own Lake root, not a
       # hardcoded `main/<Flagship>/**` that a second library would not have. On a
       # cache HIT (the common case) these steps are a fast restore; only a pin bump
-      # or a library change rebuilds. Both builds
-      # run BEFORE the daemon starts (build-index loads the Lean env in its own
-      # container — one Lean process at a time) and are NON-FATAL: any failure
-      # leaves index/ absent and retrieval falls open to loogle (no tick regression).
+      # or a library change rebuilds. The build runs BEFORE the daemon starts (it loads
+      # the Lean env in its own container — one Lean process at a time) and is NON-FATAL:
+      # a failure leaves index/ absent, the context packs fall back to reading the pointer
+      # files, and the feasibility census fails open.
       - name: Restore lean_scout index (per-pin)
         id: index-cache
         uses: actions/cache@v4
@@ -150,7 +141,7 @@ jobs:
             index/PIN
           # Keyed on the PINS and the ISO week, not on every library source file: the
           # library lands commits daily, so a key over its sources missed on every tick
-          # and each tick spent ~36 minutes rebuilding a retrieval index that was at
+          # and each tick spent ~36 minutes rebuilding an index that was at
           # most a few modules stale. A pin bump still rebuilds at once; otherwise the
           # index is refreshed weekly.
           key: ${{ env.DOMAIN_NAME }}-index-v2-${{ hashFiles('main/lean-toolchain', 'main/lake-manifest.json') }}-${{ env.ISO_WEEK }}
@@ -162,25 +153,6 @@ jobs:
           MAIN_REPO: ${{ github.workspace }}/main
           VERIFY_CPUSET: "0-1"        # GitHub runners are 2-core; the local default 0-3 → docker exit 125
         run: bash scripts/build-index.sh
-
-      - name: Restore embedding cache (per-pin, mistral-embed)
-        id: embed-cache
-        uses: actions/cache@v4
-        with:
-          path: index/embeddings-mistral-embed.json
-          key: ${{ env.DOMAIN_NAME }}-embeddings-mistral-embed-v3-${{ hashFiles('main/lean-toolchain', 'main/lake-manifest.json') }}-${{ env.ISO_WEEK }}
-
-      - name: Build embedding cache (cache miss only; non-fatal)
-        if: steps.embed-cache.outputs.cache-hit != 'true'
-        continue-on-error: true
-        env:
-          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
-        run: |
-          if [ -f index/types.jsonl ]; then
-            bash scripts/build-embeddings.sh
-          else
-            echo "no index/types.jsonl (index build skipped/failed) → embedding retrieval falls open to loogle"
-          fi
 
       - name: Place the lean-lsp compose in the main checkout
         # its bind mounts are relative, so it must sit in main/docker/ beside the
@@ -241,7 +213,6 @@ jobs:
       - name: Run one pipeline tick (prove → on pass, open the PR)
         if: ${{ !inputs.mtest_only }}   # mtest_only dispatch validates item M then stops
         env:
-          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
           MAIN_PR_TOKEN: ${{ secrets.MAIN_PR_TOKEN }}
           # this repository's own token, for the `autoform-blocked` issue open-pr files
           # HERE: MAIN_PR_TOKEN is scoped to the library and has no rights on the foundry
@@ -253,7 +224,7 @@ jobs:
           FOUNDRY_REPO: ${{ github.repository }}
           FORCE: ${{ inputs.force && '1' || '' }}
           DECOMPOSE_FORCE: ${{ inputs.decompose && '1' || '' }}   # one-shot: force the decompose path
-          COMPOSE_PROJECT_NAME: docker    # the tick's daemon<->lean-lsp flip + leanstral-vibe.sh
+          COMPOSE_PROJECT_NAME: docker    # the tick's daemon<->lean-lsp flip
           VERIFY_CPUSET: "0-1"            # share the 2-core cpuset with the daemon step
         run: bash scripts/pipeline-tick.sh
 
@@ -265,7 +236,6 @@ jobs:
         env:
           MAIN_PR_TOKEN: ${{ secrets.MAIN_PR_TOKEN }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |

@@ -13,12 +13,12 @@ There are two repos:
 - **`formal-mathfin`** (public) — a Lean 4 library of ~324 formally verified
   theorems in mathematical finance. This is *the artifact*. A theorem is "done"
   only when Lean's kernel accepts a proof with zero gaps.
-- **`formal-foundry`** (private, this repo) — a two-engine, self-feeding
+- **`formal-foundry`** (public, this repo) — a two-stage, self-feeding
   autoformalization pipeline. From an open proof *issue* it drafts a Lean
   *statement* (Anthropic's **Claude** — specify the intent, then write the Lean
-  agentically against the lean-lsp — faithfulness-gated), then proves it (Mistral's
-  **Leanstral**), checks both against Lean's kernel, and surfaces the good ones for
-  a human to refine and merge into `formal-mathfin`.
+  agentically against the lean-lsp — faithfulness-gated), then proves it in a
+  second, separate Claude session, checks both against Lean's kernel, and surfaces
+  the good ones for a human to refine and merge into `formal-mathfin`.
 
 If you've built agentic coding loops, you already understand the foundry. It is
 an agent proposing code (a Lean proof) into a **compiler-feedback repair loop** —
@@ -97,13 +97,13 @@ Read roughly in this order:
 ## Part 2 — The autoformalization (`formal-foundry`): how proofs get drafted
 
 The pipeline is a metered repair loop. Full ASCII/Mermaid diagram in
-`docs/leanstral-architecture.md`; the compact version:
+`docs/architecture.md`; the compact version:
 
 ```
  TARGET            a Lean stub `theorem … := by sorry` + pointers. When the queue
  (from an issue)   is empty the tick SELF-FEEDS: Claude drafts the stub agentically
                    from the next ready issue and the semantic gates validate it
-                   (elaborate · depth · triviality · ⊢False · ⊢¬Concl · Claude judge)
+                   (elaborate · depth · map · triviality · Claude judge)
                    before it is queued — `probe/autoformalize.py`.
         │
         ▼
@@ -113,9 +113,9 @@ The pipeline is a metered repair loop. Full ASCII/Mermaid diagram in
                    per-target context pack (signatures of the modules to reuse)
         │
         ▼
- LEANSTRAL         Mistral's Lean-4 prover. Drives the live goal state through the
- (the prover)      vibe ⇄ lean-lsp-mcp harness — one deep agentic session per target
-        │  ▲       (turns 60), the loop it was trained for.
+ CLAUDE            A separate headless session (`claude -p`) that never sees the
+ (the prover)      issue. Drives the live goal state through lean-lsp-mcp — one deep
+        │  ▲       agentic session per target (turns 60).
         ▼  │ goal states + compiler errors
  LEAN ENVIRONMENT  Docker, memory-capped, ONE Lean process at a time
  (checks it)       (a persistent REPL daemon XOR the lean-lsp server)
@@ -137,12 +137,11 @@ is true, in the house idiom, before it merges. An opaque 20-premise discharge is
 ### The knobs (this is where the ML-systems intuition pays off)
 
 `pipeline.toml` configures a **depth-over-breadth** harness. Per proof task the
-prover runs one deep `vibe ⇄ lean-lsp-mcp` session bounded by `max_turns` (60) —
+prover runs one deep `claude -p ⇄ lean-lsp-mcp` session bounded by `max_turns` (60) —
 more turns is more repair depth in a single session, the live realization of the
 research finding baked in: **tokens-per-attempt is the dominant lever** — a bigger
-per-attempt reasoning budget beats more small attempts (Leanstral's own
-PutnamBench curve climbs 44 → 587 solves as the per-problem budget goes
-50k → 4M tokens). A monthly token allowance caps spend; a target the plain session
+per-attempt reasoning budget beats more small attempts (the survey in
+`docs/research/` has the curves). A monthly token allowance caps spend; a target the plain session
 can't close escalates to the **decompose** path. (This replaced an earlier pass@k
 text-loop of `fanout` parallel whole-proof samples + `repair_rounds`.)
 
@@ -243,9 +242,7 @@ definitional layer so the depth gate has something real to check.
 **What is still open.** The acceptance criterion runbook 06 actually sets is a live
 artifact, not a green test suite: a ready-for-review PR opened by the pipeline on the
 second library, plus an unregressed flagship tick beside it. Neither has run, and
-neither can from the dev box — the prove path needs `MISTRAL_API_KEY` (Leanstral is
-the prover *and* the vacuity/disproof kernel gates) and the `econometrics-verify`
-image has never been published; the workflow exists, nobody has dispatched it.
+neither can yet — the `econometrics-verify` image has never been published; the workflow exists, nobody has dispatched it.
 
 What HAS been observed is everything up to the first Lean call, against the live
 repo: pack → slug → `gh issue list` → select → pointers → route → context pack → the
@@ -296,18 +293,19 @@ auto-PR. Details in `docs/PROVER_SETUP.md`.
 ### Where to read next (inside `formal-foundry`)
 
 1. `README.md` — the operational hard-rules and repo layout.
-2. `docs/leanstral-architecture.md` — the full pipeline diagram.
+2. `docs/architecture.md` — the full pipeline diagram.
 3. `docs/PROVER_SETUP.md` — how the prover agents are equipped (the system
    prompt, the per-target context pack, the loop, the lean-lsp-mcp harness, the
    PR activation).
 4. `docs/research/2026-07-11-world-class-autoformalization-survey.md` — how the
    top labs run Lean autoformalization and why *our* shape is the validated one.
    The single best doc for the research context; read it after Part 3's papers.
-5. The code: `probe/probe.py` (the repair loop), `probe/pipeline.py` +
+5. The code: `probe/prove_session.py` (the prove session and its gate),
+   `probe/autoformalize.py` (the issue → stub refill), `probe/pipeline.py` +
    `pipeline_lib.py` (cadence + budgeting), `probe/house_context.py` (the system
    prompt assembly), `scripts/open-pr.sh` (the assemble-and-PR path).
-6. `docs/superpowers/specs/2026-07-08-leanstral-foundry-design.md` — the
-   design-of-record (mission, posture, the decision log).
+6. `docs/research/` — the postmortems, newest first. They are where the pipeline's
+   current shape is argued from what failed.
 
 ---
 
@@ -432,11 +430,6 @@ by every state-of-the-art open prover. The full, adversarially-verified survey i
 internal — `docs/research/2026-07-11-world-class-autoformalization-survey.md` — and
 these are the papers behind it:
 
-- **[Leanstral 1.5 — Mistral](https://mistral.ai/news/leanstral-1-5/)**
-  ([weights](https://huggingface.co/mistralai/Leanstral-1.5-119B-A6B)) — our
-  prover. 119B MoE (6.5B active), Apache-2.0, trained for a multiturn
-  compiler-feedback loop and an in-repo code-agent mode, and officially supports
-  `lean-lsp-mcp`. Released 2026-07-02.
 - **[Goedel-Prover-V2](https://arxiv.org/abs/2508.03613)** — the clearest writeup
   of verifier-guided **self-correction** (feed compile errors back, ~2 rounds).
   Shows repair is *causal* and not substitutable by more parallel samples — the
@@ -444,7 +437,7 @@ these are the papers behind it:
 - **[Kimina-Prover](https://arxiv.org/abs/2504.11354)** — whole-proof generation,
   no tree search; documents the **pass@k sample-efficiency knee** (~most of the
   value by 32 samples) that set the retired pass@k harness's `fanout` (now a single
-  deep vibe session — depth over breadth).
+  deep agentic session — depth over breadth).
 - **[DeepSeek-Prover-V2](https://arxiv.org/abs/2504.21801)** — **subgoal
   decomposition**: a big model splits a hard theorem into lemmas a small prover
   can close. Now live as our **decompose** path (Claude splits ≤3 leaves + main).
@@ -454,7 +447,7 @@ these are the papers behind it:
   don't chase it.
 - **[lean-lsp-mcp](https://github.com/oOo0oOo/lean-lsp-mcp)** — the MCP server that
   exposes the Lean language server's live goal states/diagnostics/search as agent
-  tools. The harness Leanstral is trained to drive.
+  tools. Both the drafter and the prover drive it.
 
 ### The stack it's built on
 
@@ -482,7 +475,7 @@ these are the papers behind it:
 2. Play the [Natural Number Game](https://adam.math.hhu.de/#/g/leanprover-community/NNG4)
    to level ~4. You now understand the tactic loop.
 3. Read `formal-mathfin/docs/mathematical-architecture.md` for the *what*.
-4. Read `formal-foundry/docs/leanstral-architecture.md` for the *how*.
+4. Read `formal-foundry/docs/architecture.md` for the *how*.
 5. Pull the pinned Docker image and run one `lake build` end to end
    (`CONTRIBUTING.md` has the commands) so the toolchain is real to you.
 6. Read one pipeline tick's telemetry in `runs/` against `probe/probe.py`.

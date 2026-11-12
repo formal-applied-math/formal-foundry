@@ -2,10 +2,10 @@
 
 Turns the next `status:ready`+`type:proof` GitHub issue into a *validated* queue
 target (stub `.lean` + `.entry.json` + manifest row) so the existing prover always
-has something to prove. Two engines: Claude drafts the statement, formalizes it
-agentically (`claude -p` + the lean-lsp MCP, self-validating to elaboration), and
-judges faithfulness; the Leanstral leaf-prover runs the kernel gates
-(hypothesis-rejection, disproof) and the proof itself.
+has something to prove. Claude drafts the statement, formalizes it agentically
+(`claude -p` + the lean-lsp MCP, self-validating to elaboration) and judges
+faithfulness; the configured prover (`[prover]`) writes the proof. The two optional
+kernel probes (hypothesis-rejection, disproof) are run by the same Claude chat adapter.
 
 Design of record: docs/superpowers/specs/2026-07-12-issue-to-stub-autoformalizer-design.md,
 extended by 2026-07-17-semantic-repair-cascade-design.md (semantic gate rejections feed a
@@ -26,7 +26,6 @@ import subprocess
 import sys
 import time
 
-import embed as _embed
 import domain_pack
 import issue_state
 from domain_pack import DomainPack
@@ -34,9 +33,10 @@ from house_context import (build_drafter_prompt, build_system_prompt,
                            extract_signatures)
 import library_map
 from issues import difficulty_rank, select_issues
+from assemble import PIPELINE_SOURCE, PROVER_PLACEHOLDER
 from pipeline_lib import AutoformalizeConfig, DrafterConfig
 from gate_cache import GateCache
-from probe import daemon_check, mistral_chat, run_target
+from probe import daemon_check, run_target
 from prose_slop import prose_slop_report
 from probe_lib import DEF_RE, append_jsonl, extract_lean_code, lint_violations
 
@@ -54,14 +54,14 @@ from af_gates import *  # noqa: F401,F403 — re-export the extracted gates
 
 # --- item I phase 2: the agentic drafter (claude -p + lean-lsp MCP) ------------
 # When [drafter] mode="agentic", the FORMALIZE stage becomes ONE `claude -p` session
-# wired to the same lean-lsp MCP the vibe harness gives Leanstral: Claude drafts the
+# wired to the lean-lsp MCP the prover also gets: Claude drafts the
 # stub to a scratch file, self-validates against Lean (lean_diagnostics / lean_goal),
 # and iterates until it elaborates — its OWN tool loop instead of the fixed round-based
 # completion repair. Needs the lean-lsp container up + the daemon down (one Lean
 # process; the tick flips the slot). Design: 2026-07-24-frontier-drafter-design.md.
 def _lean_lsp_mcp_config(container: str, project: str = "/app") -> dict:
     """The `claude --mcp-config` JSON for the lean-lsp MCP — the SAME server (docker exec,
-    stdio) the vibe harness wires for Leanstral (scripts/vibe-setup.sh)."""
+    stdio) the prover launcher wires (scripts/claude-prove.sh)."""
     return {"mcpServers": {"lean-lsp": {
         "command": "docker",
         "args": ["exec", "-i", container, "lean-lsp-mcp", "--lean-project-path", project]}}}
@@ -91,13 +91,11 @@ _PLACEHOLDER = "_agentic_placeholder"
 
 
 def _agentic_formalize_prompt(pack: DomainPack, intent: dict, scaffold_module: str,
-                              scratch_rel: str,
-                              premises: str = "") -> str:
+                              scratch_rel: str) -> str:
     """The task prompt for the agentic formalize session: write the module realizing `intent`
     to `scratch_rel`, using the given scaffold, and self-validate to elaboration via the
-    lean-lsp tools (leaving the theorem's `sorry`). `premises` are embedding-retrieved
-    likely-relevant declarations (whole-corpus semantic recall, complementing the live
-    lean_loogle name search)."""
+    lean-lsp tools (leaving the theorem's `sorry`). The session finds the declarations it
+    needs itself, with the live lean_loogle search and the library checkout."""
     stmt = intent.get("statement", "")
     defs = [d for d in (intent.get("definitions") or []) if isinstance(d, dict)]
     defspec = "\n".join(
@@ -106,8 +104,6 @@ def _agentic_formalize_prompt(pack: DomainPack, intent: dict, scaffold_module: s
         "Formalize the following into Lean 4 (Mathlib) and make it ELABORATE cleanly.\n\n"
         f"INTENDED STATEMENT:\n{stmt}\n\n"
         + (f"NEW DEFINITIONS TO INTRODUCE:\n{defspec}\n\n" if defspec else "")
-        + (f"LIKELY-RELEVANT PREMISES (embedding recall; verify they elaborate under our pin):\n"
-           f"{premises}\n\n" if premises else "")
         + f"Write the COMPLETE module to the file `{scratch_rel}` (relative to the project root), "
         "using EXACTLY this scaffold — replace only the body between the `open` lines and "
         f"`end {pack.namespace}` with the definition(s) and the single theorem "
@@ -146,7 +142,7 @@ def _extract_core_stub(pack: DomainPack, lean_text: str) -> str:
 
 def agentic_formalize(pack: DomainPack, intent: dict, *, issue: dict, main_repo: str,
                       check_fn=None, model: str = "",
-                      run_fn=None, mcp_config_path: str | None = None, premises: str = "",
+                      run_fn=None, mcp_config_path: str | None = None,
                       scratch_rel: str | None = None, log=lambda m: None) -> dict:
     """Item I phase 2: ONE agentic `claude -p` session (lean-lsp MCP) drafts the module for
     `intent` to `scratch_rel` (under `main_repo`, bind-mounted into the lean-lsp container),
@@ -190,7 +186,7 @@ def agentic_formalize(pack: DomainPack, intent: dict, *, issue: dict, main_repo:
                                   env=agent_env("claude"),
                                   timeout=1800, cwd=cwd)
     argv = _agentic_formalize_args(mcp_config_path, model=model)
-    prompt = _agentic_formalize_prompt(pack, intent, scaffold, scratch_rel, premises)
+    prompt = _agentic_formalize_prompt(pack, intent, scaffold, scratch_rel)
     try:
         res = run_fn(argv, prompt, main_repo)
     finally:
@@ -287,7 +283,7 @@ def _added_library_imports(pack: DomainPack, lean_text: str, main_repo: str, *,
 
 
 
-# --- kernel-grade faithfulness gates (labs-leanstral via run_target) ----------
+# --- kernel-grade faithfulness gates (a chat fn driving run_target) ------------
 
 # Lightened gates. Each faithfulness-gate attempt is a Lean daemon elaboration, and
 # the two gates were the bulk of an issue's daemon load (fanout 2 x 2 rounds each ≈ 8
@@ -515,8 +511,8 @@ def semantic_verdict(pack: DomainPack, *, lean_text: str, stub: str, name: str,
                      kernel_probes: bool = True) -> tuple[dict | None, int]:
     """Run the semantic gate battery on an ELABORATING draft, cheapest-first:
     depth (theorem route) / defs consumption+grounding (defs route) → triviality
-    (structural, zero tokens) → hypothesis-rejection → disproof (kernel,
-    leanstral) → issue-faithfulness (Claude judge).
+    (structural, zero tokens) → hypothesis-rejection → disproof (kernel
+    probes, optional) → issue-faithfulness (Claude judge).
     Returns `(failure, tokens)`: failure is None when every gate passes, else
     `{gate, detail}` for `render_gate_feedback`. The battery's DIVERSITY is the
     anti-Goodhart defense of the repair loop: a re-draft that games one gate still
@@ -682,7 +678,7 @@ def refill(pack: DomainPack, issues: list[dict], *, reason_fn, prove_fn, check_f
            agentic_formalize_fn=None, slot_switch_fn=None,
            queue_dir: str, budget: int, max_issues: int = 1,
            max_attempt_issues: int = 3, gate_budget: int = 20_000, formalize_rounds: int = 3,
-           proactive_fn=None, depth_gate: bool = True, triviality_gate: bool = True,
+           depth_gate: bool = True, triviality_gate: bool = True,
            semantic_rounds: int = 2, system_prompt=None, kernel_probes: bool = True,
            feasibility_fn=None, gate_cache=None, experience=None, summarize_fn=None,
            issue_slug: str | None = None, log=lambda m: None) -> dict:
@@ -692,8 +688,8 @@ def refill(pack: DomainPack, issues: list[dict], *, reason_fn, prove_fn, check_f
     SPECIFIES the statement) → agentic formalize (`agentic_formalize_fn`, Claude +
     the lean-lsp MCP writes elaborating Lean, self-validating to elaboration — the
     only drafter) → the semantic gate battery (`semantic_verdict`: depth →
-    triviality → vacuity → disproof → judge, leanstral proving the
-    kernel gates). A gate rejection is NOT terminal: it becomes a
+    triviality → vacuity → disproof → judge; `prove_fn` is the chat fn
+    that attempts the two kernel probes). A gate rejection is NOT terminal: it becomes a
     `render_gate_feedback` block and the issue is RE-DRAFTED — both stages see the
     verdict — up to `semantic_rounds` total attempts (the repair cascade; design:
     2026-07-17-semantic-repair-cascade). `semantic_rounds=1` is the old single-shot
@@ -726,7 +722,7 @@ def refill(pack: DomainPack, issues: list[dict], *, reason_fn, prove_fn, check_f
             if _nb:
                 lesson_note = f"{lesson_note}\n{_nb}" if lesson_note else _nb
         history, feedback, staged = [], None, False
-        tele = {"advised_bundle": False, "lint_repaired": 0, "retrieval_backend": None,
+        tele = {"advised_bundle": False, "lint_repaired": 0,
                 "prose_slop": 0}  # H11; prose_slop (SP4): AI-slop markers in the drafted docstring
         # A transient error on ONE issue (e.g. an HTTP 429 that exhausts retries,
         # a daemon hiccup, a malformed draft) must not kill the tick — log it and
@@ -781,21 +777,12 @@ def refill(pack: DomainPack, issues: list[dict], *, reason_fn, prove_fn, check_f
                 # flips the single Lean slot to lean-lsp around it and back to the daemon for the
                 # gates. An infra failure (lean-lsp/flip/docker) or a ClaudeCapError propagates to
                 # the issue-level handler (error/deferred, retryable) — there is no completion path.
-                # retrieved premises are an aid to the drafter and never a reason to lose
-                # the issue: an embedding endpoint that is down, or a key that expired,
-                # costs the premises and nothing else (the session still has lean_loogle)
-                try:
-                    proactive = proactive_fn(intent["statement"]) if proactive_fn else ""
-                except Exception as e:      # noqa: BLE001
-                    log(f"#{n}: premise retrieval failed ({type(e).__name__}: "
-                        f"{str(e)[:120]}) — drafting without retrieved premises")
-                    proactive = ""
                 if agentic_formalize_fn is None:
                     raise RuntimeError("refill requires an agentic_formalize_fn (the only drafter)")
                 try:
                     if slot_switch_fn is not None:
                         slot_switch_fn("lean-lsp")
-                    fr = agentic_formalize_fn(intent, ctx, issue, premises=proactive)
+                    fr = agentic_formalize_fn(intent, ctx, issue)
                 finally:
                     if slot_switch_fn is not None:
                         try:
@@ -807,8 +794,6 @@ def refill(pack: DomainPack, issues: list[dict], *, reason_fn, prove_fn, check_f
                 if fr.get("advised_bundle"):
                     tele["advised_bundle"] = True
                 tele["lint_repaired"] += fr.get("lint_repaired", 0)
-                if fr.get("retrieval_backend"):
-                    tele["retrieval_backend"] = fr["retrieval_backend"]
                 if not fr["ok"]:
                     fail = {"gate": "formalize",
                             "detail": fr.get("reason")
@@ -929,35 +914,6 @@ def _foundry_root() -> str:
 
 
 
-def build_retrieve_fns(*, backend, main_repo, index_dir, k, embed_model, api_key):
-    """(reactive_retrieve_fn, proactive_fn). Embedding backend ranks the whole
-    premise corpus — the target library, its vendored deps, and the Mathlib
-    neighbourhoods it reaches (`index_filter`); proactive_fn retrieves on the intent
-    STATEMENT. Falls open to loogle (reactive only) when the cache is absent.
-
-    LOADS a cache, never builds one: an absent cache degrades to loogle rather
-    than silently spending an embed run on ~68k premises."""
-    loogle_fn = lambda nm: loogle_candidates(nm, main_repo=main_repo)  # noqa: E731
-    loogle_fn.backend = "loogle"   # H11 telemetry label
-    if backend != "embedding":
-        return loogle_fn, None
-    premises = _embed.load_premises(index_dir)
-    cache = _embed.cache_path(index_dir, embed_model)
-    idx = _embed.EmbeddingIndex.load(cache, premises, embed_model) if premises else None
-    if idx is None:
-        return loogle_fn, None   # fails-open — no index/cache ⇒ loogle
-    embed_fn = lambda texts: _embed.mistral_embed(texts, api_key=api_key, model=embed_model)  # noqa: E731
-    reactive = _embed.make_embedding_retrieve_fn(idx, k, embed_fn)
-    try:
-        reactive.backend = "embedding"   # H11 telemetry label (skip if not settable)
-    except (AttributeError, TypeError):
-        pass
-    proactive = lambda stmt: idx.retrieve(stmt, k, embed_fn)  # noqa: E731
-    return reactive, proactive
-
-
-
-
 def main() -> int:
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -978,7 +934,6 @@ def main() -> int:
     p.add_argument("--max-issues", type=int, default=None)
     p.add_argument("--max-attempt-issues", type=int, default=None)
     p.add_argument("--gate-budget", type=int, default=None)
-    p.add_argument("--prover-model", default=None)   # leanstral: the gate battery
     p.add_argument("--formalize-rounds", type=int, default=None)
     p.add_argument("--depth-gate", dest="depth_gate", action=argparse.BooleanOptionalAction,
                    default=None, help="pointers-scoped depth gate (default: config)")
@@ -987,18 +942,10 @@ def main() -> int:
                    help="rfl/simp triviality gate (default: config)")
     p.add_argument("--kernel-probes", dest="kernel_probes",
                    action=argparse.BooleanOptionalAction, default=None,
-                   help="the prover-run vacuity/disproof probes (default: config)")
+                   help="the vacuity/disproof kernel probes (default: config)")
     p.add_argument("--semantic-rounds", type=int, default=None,
                    help="total draft attempts per issue incl. feedback re-drafts (default: config)")
-    p.add_argument("--retrieval", dest="retrieval", action=argparse.BooleanOptionalAction,
-                   default=None, help="loogle-augmented repair retrieval (default: config)")
     args = ap.parse_args()
-
-    # Mistral is no longer on the critical path: Claude drafts, judges and proves. The key
-    # still buys embedding retrieval and (if switched back on) the kernel probes; without
-    # it the refill runs, with loogle-only retrieval. Checked below, once the config says
-    # whether a probe that needs it is on.
-    api_key = os.environ.get("MISTRAL_API_KEY")
 
     # pipeline.toml [autoformalize] is authoritative; CLI flags override per-field.
     config_path = args.config or os.path.join(_foundry_root(), "pipeline.toml")
@@ -1014,17 +961,11 @@ def main() -> int:
     max_issues = pick(args.max_issues, cfg.max_issues)
     max_attempt = pick(args.max_attempt_issues, cfg.max_attempt_issues)
     gate_budget = pick(args.gate_budget, cfg.gate_budget)
-    prover_model = pick(args.prover_model, cfg.prover_model)   # leanstral: the gate battery
     depth_gate = pick(args.depth_gate, cfg.depth_gate)
     triviality_gate = pick(args.triviality_gate, cfg.triviality_gate)
     kernel_probes = pick(args.kernel_probes, cfg.kernel_probes)
-    if kernel_probes and not api_key:
-        print("MISTRAL_API_KEY not set and [autoformalize] kernel_probes is on "
-              "(the probes are run by prover_model)", file=sys.stderr)
-        return 2
     semantic_rounds = pick(args.semantic_rounds, cfg.semantic_rounds)
     formalize_rounds = pick(args.formalize_rounds, cfg.formalize_rounds)
-    retrieval = pick(args.retrieval, cfg.retrieval)
 
     queue_dir = args.queue_dir or os.path.join(_foundry_root(), "targets", "queue")
 
@@ -1060,12 +1001,8 @@ def main() -> int:
     # refill, not a module global, so a second domain in this process cannot inherit it.
     drafter_preamble = build_drafter_prompt(args.main_repo, pack)
 
-    def prove_fn(msgs):   # leanstral: the kernel gate battery (vacuity / disproof)
-        return mistral_chat(msgs, api_key=api_key, model=prover_model,
-                            reasoning_effort="high")
-
     # the drafter: ONE claude does intent + agentic formalize + the faithfulness/intent-
-    # fidelity JUDGE; leanstral PROVES. no magistral, no completion mode, no fallback drafter.
+    # fidelity JUDGE; `[prover]` proves. no completion mode, no fallback drafter.
     drafter = DrafterConfig.load(args.config or os.path.join(_foundry_root(), "pipeline.toml"))
     if not claude_auth_present():
         print("[refill] no Claude auth (CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_API_KEY / "
@@ -1073,15 +1010,18 @@ def main() -> int:
     claude_fn = claude_chat_fn(drafter)      # intent draft + judge (one claude, one model)
     draft_intent_fn = claude_fn
     judge_fn = claude_fn
+    # the two kernel probes (vacuity ⊢ False, disproof ⊢ ¬Concl), when switched on, are
+    # short pass@1 proof attempts by the same chat adapter
+    prove_fn = claude_fn
     print(f"[refill] drafter=claude model={drafter.claude_model} mode=agentic | judge=claude",
           file=sys.stderr)
 
     # FORMALIZE is always the agentic claude -p + lean-lsp session (self-validates to
     # elaboration); the tick flips the single Lean slot to lean-lsp around it and back to the
     # daemon for the gates. check_fn=None defers the elaboration check to the gate battery.
-    def agentic_fn(intent, ctx, issue, premises=""):
+    def agentic_fn(intent, ctx, issue):
         return agentic_formalize(pack, intent, issue=issue, main_repo=args.main_repo,
-                                 model=drafter.claude_model, check_fn=None, premises=premises,
+                                 model=drafter.claude_model, check_fn=None,
                                  log=lambda m: print(f"[agentic] {m}", file=sys.stderr))
 
     _slot_script = os.path.join(_foundry_root(), "scripts", "slot-switch.sh")
@@ -1096,19 +1036,6 @@ def main() -> int:
 
     from scout_index import default_index_dir
     index_dir = default_index_dir()
-    if retrieval and not api_key and cfg.retrieval_backend == "embedding":
-        print("[refill] no MISTRAL_API_KEY — embedding retrieval off (the drafter still "
-              "searches with lean_loogle)", file=sys.stderr)
-        proactive_fn = None
-    elif retrieval:
-        # only the PROACTIVE (embedding) half is used — fed to the agentic prompt as premises;
-        # the reactive retrieve_fn is gone (agentic searches live via lean_loogle).
-        _reactive, proactive_fn = build_retrieve_fns(
-            backend=cfg.retrieval_backend, main_repo=args.main_repo, index_dir=index_dir,
-            k=cfg.retrieval_k, embed_model=cfg.embed_model, api_key=api_key)
-    else:
-        proactive_fn = None
-
     # H12 feasibility census: does a named own-namespace primitive exist? scout index
     # first (authoritative), then a grep of the main-repo library sources. Fail-open
     # (return True) whenever neither can confidently decide, so the census only ever
@@ -1143,10 +1070,10 @@ def main() -> int:
     if cfg.experience:
         from experience import ExperienceStore
         experience = ExperienceStore(os.path.join(_foundry_root(), "runs", "experience.json"))
-        if os.environ.get("EXPERIENCE_LLM", "1") != "0" and os.environ.get("MISTRAL_API_KEY"):
-            _key = os.environ["MISTRAL_API_KEY"]
-            summarize_fn = lambda msgs: mistral_chat(  # noqa: E731
-                msgs, api_key=_key, max_tokens=800, temperature=0.2)
+        # one short Claude call per failed attempt folds it into the notebook; any failure
+        # of that call (a cap, no auth) falls through to the mechanical summary
+        if os.environ.get("EXPERIENCE_LLM", "1") != "0" and claude_auth_present():
+            summarize_fn = claude_fn
         print("[refill] experience memory ON", file=sys.stderr)
 
     res = refill(pack, issues, reason_fn=judge_fn, intent_fn=draft_intent_fn,
@@ -1155,7 +1082,7 @@ def main() -> int:
                  agentic_formalize_fn=agentic_fn, slot_switch_fn=slot_switch_fn, check_fn=daemon_check,
                  context_fn=context_fn, queue_dir=queue_dir, budget=budget,
                  max_issues=max_issues, max_attempt_issues=max_attempt, gate_budget=gate_budget,
-                 formalize_rounds=formalize_rounds, proactive_fn=proactive_fn,
+                 formalize_rounds=formalize_rounds,
                  depth_gate=depth_gate, triviality_gate=triviality_gate,
                  kernel_probes=kernel_probes,
                  semantic_rounds=semantic_rounds, system_prompt=prove_system,
@@ -1207,7 +1134,7 @@ def explicit_arg_names(binders: str) -> list[str]:
 # --- strengthen: post-proof unused-hypothesis stripping ------------------------
 # 2/2 production PRs shipped a hypothesis the finished proof never used (#123
 # hTn, #124 hσ_eq). Unused-ness is a property of the PROOF, so it is only
-# knowable after the vibe prover closes the goal (Lean suppresses the
+# knowable after the prover closes the goal (Lean suppresses the
 # unusedVariables linter under `sorry`) — hence a gate-time transform, not a
 # draft-time gate. Dropping an unused hypothesis can only STRENGTHEN the
 # theorem, so the fidelity direction is safe by construction; the full kernel
@@ -1216,7 +1143,7 @@ def explicit_arg_names(binders: str) -> list[str]:
 
 def _locate_named(text: str, name: str) -> tuple[int, int, int]:
     """`_locate` spans `(bstart, sep, end)` for the SPECIFIC decl `name` — the
-    proved candidate may hold vibe-added helper lemmas before the main theorem.
+    proved candidate may hold prover-added helper lemmas before the main theorem.
 
     Declaration modifiers (`private`, `protected`, `nonrec`) are accepted. Without them
     the locator raises "not found" on a perfectly ordinary declaration, and every caller
@@ -1625,8 +1552,8 @@ _SIGMA_PI_IDENT_RE = re.compile(r"[A-Za-z0-9_'][ΣΠ]|[ΣΠ][A-Za-z0-9_']")
 
 def _prelint_stub(stub: str) -> str:
     """Emit-time deterministic fixes on a drafted stub, before assembly:
-    - A13: STRIP any model-emitted `import` line. Leanstral (RL-trained on complete
-      files) prepends `import Mathlib`; but `emit_target_files` inserts the stub AFTER
+    - A13: STRIP any model-emitted `import` line. A model trained on complete files
+      prepends `import Mathlib`; but `emit_target_files` inserts the stub AFTER
       the module header's own imports, so a stub import lands mid-file and the module
       system rejects it (`invalid 'import' command, it must be used in the beginning of
       the file` — recurred live on #109/#60, 2026-07-19). The header already imports
@@ -1864,16 +1791,16 @@ def emit_target_files(pack: DomainPack, issue: dict, stub: str,
     )
     scope = (
         f"Full formal proof in {main_module} (autoformalized statement, "
-        f"leanstral proof). Re-export from {pack.namespace}. Axioms-clean."
+        f"{PROVER_PLACEHOLDER} proof). Re-export from {pack.namespace}. Axioms-clean."
     )
-    # drafter-agnostic provenance: the statement drafter is not named (it's Claude, and
-    # Claude is never attributed per the repo's attribution rule); the PROVER stays
-    # credited (leanstral).
+    # drafter-agnostic provenance: the statement drafter is not named. The PROVER is not
+    # known yet — nothing has been proved — so `model` is absent here and the scope prose
+    # carries a placeholder; `assemble.stamp_prover` writes both from the session that
+    # ran, and an entry cannot be placed without it. `source` names the pipeline.
     provenance = {
         "statement_source": "autoform",
         "statement_model": "autoform",
-        "source": "leanstral-autoform",
-        "model": "labs-leanstral-1-5",
+        "source": PIPELINE_SOURCE,
         "issue": n,
     }
     if deferred:

@@ -108,8 +108,8 @@ def _mechanical_summary(prior: str, attempt: dict, *, index: int) -> str:
 def summarize(prior: str, attempt: dict, *, index: int, summarize_fn=None) -> str:
     """Roll `prior` + `attempt` into the new notebook.
 
-    `summarize_fn(messages) -> (text, tokens)` matches `probe.mistral_chat`'s contract so
-    either chat backend drops in. Anything falsy, raising, or returning an empty body
+    `summarize_fn(messages) -> (text, tokens)` is the pipeline's chat contract
+    (`af_drafting.claude_chat_fn`). Anything falsy, raising, or returning an empty body
     falls through to `_mechanical_summary` — the caller cannot tell, by design.
     """
     if summarize_fn is not None:

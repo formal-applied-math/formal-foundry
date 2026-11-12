@@ -1,7 +1,7 @@
 """Acceptance gate: forbidden-tactic screen + compiles-clean + axiom whitelist.
 
 Extracted from `probe.run_target`'s accept path (probe.py) so every harness — the
-retired text-loop AND the vibe ⇄ lean-lsp-mcp harness — enforces the identical bar.
+chat-driven prove loop AND the agentic prove session — enforces the identical bar.
 `check_fn` is the daemon check (`probe.daemon_check`), injected so this module is
 pure and unit-testable without a live Lean process.
 

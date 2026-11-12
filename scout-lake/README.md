@@ -3,8 +3,8 @@
 A throwaway Lake project whose only job is to run
 [`lean_scout`](https://github.com/mathlib-initiative/lean_scout) over the
 `MathFin` library and emit the JSONL index the foundry's context packs consume
-(`house_context` → `scout_index.ScoutIndex`) and the drafter searches
-semantically (`embed.load_premises`).
+(`house_context` → `scout_index.ScoutIndex`) and the intent stage's feasibility
+census reads.
 
 It is deliberately **separate** from the main repo's `lakefile.lean`: that
 manifest is the verification anchor + the ledger input-hash, so we never add a
@@ -66,23 +66,14 @@ narrows that, via `probe/index_filter.py`, to:
 
 Until 2026-08-14 this step was a `grep '"module":"MathFin'` keeping ONLY
 `MathFin.*` (~2.8k records, a 275x shrink, 0.03s adapter load). That was chosen
-for load time, but it had an uncosted consequence: `embed.py` embeds
-`types.jsonl`, so the drafter's semantic retrieval had never seen a Mathlib
-lemma, and its only Mathlib channel was `af_drafting.loogle_candidates` — a
-syntactic query against a public instance tracking a *newer* Mathlib than the
-pin, which its own docstring marks UNVERIFIED. A drafter held to a
-coherence-first, anti-wrapper contract could not look up the lemma it was
-supposed to consume.
+for load time, and it left the context pack blind to Mathlib: a drafter held to a
+coherence-first, anti-wrapper contract could not see the lemma it was supposed
+to consume.
 
-Keeping everything is not the fix either: the corpus size is a latency and
-memory budget, not just a disk number. Measured here at 1024 dims and 50k
-premises, the pure-Python cosine scan costs ~2.1s per query (fine, once per
-draft), but inline JSON vectors would be ~1.0 GB on disk, ~8s to parse, and
-~1.2 GB resident as Python floats. Hence the flat float32 sidecar in
-`embed.vectors_path` — ~205 MB, one read.
+Keeping everything is not the fix either: the slice is loaded on every tick, so
+its size is a latency and memory budget, not just a disk number.
 
-Size the corpus before paying to embed it:
-
-```bash
-cd probe && python3 embed.py --dry-run        # composition by namespace, no API calls
-```
+From 2026-07 to 2026-11-12 the slice was also embedded for semantic premise
+retrieval, through a vendor the pipeline no longer uses. The drafter's Mathlib
+channel is now the live one: `lean_loogle` and `lean_leansearch` in its own
+lean-lsp session, against the pinned environment.

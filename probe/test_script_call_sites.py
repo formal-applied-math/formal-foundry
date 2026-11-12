@@ -10,9 +10,9 @@ stub, and five weeks of ticks were scored as failed proofs.
 Two defences, both cheap:
   1. every Python call embedded in `scripts/*.sh` (heredocs and `python3 -c`) is resolved
      through the snippet's OWN imports and bound against the current signature;
-  2. both launchers are executed end to end with fake `docker` / `claude` / `vibe`
-     binaries on PATH, so the doctrine they build and the argv they hand the model are
-     real outputs of the real scripts.
+  2. the prover launcher is executed end to end with fake `docker` / `claude`
+     binaries on PATH, so the doctrine it builds and the argv it hands the model are
+     real outputs of the real script.
 """
 from __future__ import annotations
 
@@ -138,7 +138,7 @@ def _exe(path, body):
 
 @pytest.fixture
 def sandbox(tmp_path):
-    """A fake target repo and a PATH whose docker/claude/vibe record what they were given."""
+    """A fake target repo and a PATH whose docker/claude record what they were given."""
     main = tmp_path / "main"
     (main / "docs").mkdir(parents=True)
     (main / "docker").mkdir()
@@ -162,7 +162,6 @@ for a in "$@"; do
 done
 echo '{{"type":"result","subtype":"success","is_error":false,"num_turns":1}}'
 ''')
-    _exe(fake / "vibe", f'printf "%s\\n" "$@" > "{log}/vibe.argv"\n')
     env = {"PATH": f"{fake}:{os.path.dirname(sys.executable)}:/usr/bin:/bin",
            "MAIN_REPO": str(main), "HOME": str(tmp_path), "LANG": "C.UTF-8"}
     return {"main": main, "log": log, "env": env}
@@ -189,15 +188,8 @@ def test_claude_prove_hands_claude_the_doctrine_the_tools_and_a_transcript(sandb
     assert '"type":"result"' in r.stdout                        # the transcript reaches stdout
 
 
-def test_leanstral_vibe_prepends_the_doctrine_to_the_task(sandbox):
-    r = _launch("leanstral-vibe.sh", sandbox, ("MISTRAL_API_KEY", "x"))
-    assert r.returncode == 0, r.stderr
-    argv = (sandbox["log"] / "vibe.argv").read_text()
-    assert "── PINS" in argv and "TASK: prove it" in argv
-
-
 def test_every_prover_launcher_is_executable():
-    """`vibe_prove.py` runs the launcher as argv[0]. `claude-prove.sh` was committed
+    """`prove_session.py` runs the launcher as argv[0]. `claude-prove.sh` was committed
     100644, so the Claude arm could not have started even had anything called it."""
     from pipeline_lib import PROVER_LAUNCHERS
     for launcher in PROVER_LAUNCHERS.values():

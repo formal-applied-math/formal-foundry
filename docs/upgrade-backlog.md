@@ -1,5 +1,15 @@
 # Autoformalizer upgrade backlog
 
+> **2026-11-12: one model vendor.** The items below are dated, and many were written
+> when Mistral's Leanstral was the prover (driven through the `vibe` CLI) and
+> `mistral-embed` served premise retrieval. Leanstral was retired by its vendor on
+> 2026-09-30 and the rest of that stack left this repo on 2026-11-12: the launcher,
+> `probe/embed.py`, the embedding cache and the key. Read "Leanstral", "vibe" and
+> "the prover's key" in an older item as the pipeline at that item's date. What it
+> changes in the list: **E** and **W** (embedding retrieval) are removed, not landed;
+> the drafter grounds itself in the checkout, the pointer signatures and `lean_loogle`.
+> The two kernel probes of **C** run on the Claude chat adapter and are off by default.
+
 Derived from the 2026-07-11 research survey
 (`docs/research/2026-07-11-world-class-autoformalization-survey.md`), the
 architecture + technical-blog reading catalogued in `docs/overview.md`, and a
@@ -268,7 +278,7 @@ no sample-level fan-out at all — parallelism in builds, not in sampling, is th
 same call we made ([harvest](research/2026-08-06-axiomatic-harvest.md)).
 This entry was missing its LANDED marker until that harvest; the code predates it.
 
-### E. Learned premise retrieval [LANDED — `probe/embed.py`, `retrieval_backend = "embedding"`]
+### E. Learned premise retrieval [LANDED 2026-07, REMOVED 2026-11-12 with the embedding vendor]
 
 The current packs use static `const_dep` graph closure. A BM25/embedding retriever
 over `index/types.jsonl` would surface library lemmas R *didn't* name in a target's
@@ -772,7 +782,7 @@ what the drafter's statement stage should be aiming at.
 
 ---
 
-### W. The retrieval corpus excluded Mathlib [BUILT 2026-08-14]
+### W. The retrieval corpus excluded Mathlib [BUILT 2026-08-14, REMOVED 2026-11-12 with E]
 
 `scripts/build-index.sh` extracts the full transitive closure (~771k records,
 ~850 MB) and then, in step 2, kept only `MathFin.*` — ~2.8k records, a 275x

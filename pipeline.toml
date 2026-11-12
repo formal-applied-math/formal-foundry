@@ -11,7 +11,7 @@
 # binds and the cadence can be revisited once the loop is producing again.
 # Sizing: allowance 8M / cap 500k → ≤16 issues/month. Tokens are real now: with
 # `[prover] engine = "claude"` the prove session's transcript is parsed and its
-# uncached input + output tokens are charged (cache reads are not — see vibe_prove.py);
+# uncached input + output tokens are charged (cache reads are not — see prove_session.py);
 # the dollar cost is recorded beside them in each summary row.
 # difficulty:hard issues escalate to escalate_hard_cap.
 
@@ -35,12 +35,12 @@ escalate_hard_cap = 2000000
 max_issues_per_tick = 1
 reasoning_effort = "high"
 
-# vibe ⇄ lean-lsp-mcp harness (the cron prove path since 2026-07-17): one deep
+# The prove path (an agent ⇄ lean-lsp-mcp session, since 2026-07-17): one deep
 # headless agentic session per target, bounded by TURNS (depth over breadth).
-# Leanstral drives lean_goal / lean_multi_attempt / search itself, so more turns
+# The prover drives lean_goal / lean_multi_attempt / search itself, so more turns
 # = more repair depth. (This lever replaced the retired text-loop's
 # fanout × tokens_per_attempt budget.)
-# Phase 3.2 depth retune (2026-07-18): the vibe path already IS the depth side of the
+# Phase 3.2 depth retune (2026-07-18): this path already IS the depth side of the
 # Delta/Numina depth>breadth finding (fanout=1, all budget in one deep session). The
 # live realization of "more depth at equal total spend" is more TURNS under the same
 # per-issue token ceiling (tokens_per_issue_cap, unchanged): 40 -> 60. Watched via the
@@ -49,11 +49,9 @@ reasoning_effort = "high"
 # pool on a big box, so it is a CI-only experiment, not a local flip — see upgrade-backlog.)
 max_turns = 60
 
-# Which model proves. Both engines run the same contract: one headless agentic session per
-# target, the same lean-lsp MCP server, the same house doctrine; only the model differs.
-#   claude    — scripts/claude-prove.sh (`claude -p`, CLAUDE_CODE_OAUTH_TOKEN or an API key)
-#   leanstral — scripts/leanstral-vibe.sh (Mistral vibe + `labs-leanstral-1-5`, which
-#               Mistral retires 2026-09-30; keep only if a live endpoint replaces it)
+# Which model proves: one headless agentic session per target, with the lean-lsp MCP
+# server and the house doctrine.
+#   claude — scripts/claude-prove.sh (`claude -p`, CLAUDE_CODE_OAUTH_TOKEN or an API key)
 # The prover had not run since 2026-07-28 when this block was added: the launcher crashed
 # before starting on every tick from 2026-08-19 and each crash was scored `max_rounds`.
 # `canary` proves a trivial theorem through the real path first and turns the tick RED
@@ -66,8 +64,8 @@ canary_max_turns = 12
 
 # Issue -> stub autoformalizer (the self-feeding refill phase). When the queue has
 # no unattempted target, the tick drafts one from the next `status:ready`+`type:proof`
-# issue: claude drafts+judges+roundtrips a faithful stub, leanstral runs the
-# kernel gates (hypothesis-rejection + disproof), the existing prover proves it.
+# issue: claude drafts and judges a faithful stub, the gate battery vets it, and the
+# prover proves it.
 # `enabled = false` reverts to a hand-seeded queue. `budget` caps the claude +
 # gate tokens per refill; `max_attempt_issues` bounds skip-to-next on rejects.
 # Design: docs/superpowers/specs/2026-07-12-issue-to-stub-autoformalizer-design.md.
@@ -77,24 +75,16 @@ budget = 400000
 max_issues = 1
 max_attempt_issues = 3
 gate_budget = 20000
-prover_model = "labs-leanstral-1-5"   # leanstral: the kernel gate battery (vacuity / disproof)
-kernel_probes = false      # the vacuity (⊢ False) + disproof (⊢ ¬Concl) probes, run by
-                           # prover_model. OFF: 0 firings in 34+ drafts (all 54 cached verdicts
-                           # negative; the Claude judge caught both false drafts), and
-                           # prover_model retires 2026-09-30 — after which every probe call
-                           # raises and the refill could never stage a draft again.
+kernel_probes = false      # the vacuity (⊢ False) + disproof (⊢ ¬Concl) probes: short proof
+                           # attempts by the drafter's Claude. OFF: 0 firings in 34+ drafts (all
+                           # 54 cached verdicts negative; the Claude judge caught both false
+                           # drafts), and each costs a model call per draft.
 formalize_rounds = 3       # round-count cited in formalize-miss telemetry (agentic self-iterates)
-retrieval = true           # feed embedding-retrieved premises into the agentic drafter prompt
 depth_gate = true          # pointers-scoped depth gate: reject a true-but-shallow stub whose
                            # TYPE consumes no def from its `-- pointers:` MathFin modules (a
                            # Mathlib identity in domain clothing — cal-bk-67 inlined the forward
                            # rate as `let`s over raw reals instead of consuming MathFin.zcb).
                            # No pointers ⇒ inapplicable ⇒ skipped.
-retrieval_backend = "embedding"  # "embedding" (pin-accurate types.jsonl cosine, whole-corpus
-                           # semantic reach) | "loogle" (name-based reactive only). Falls open to
-                           # loogle when the embedding cache is absent.
-retrieval_k = 8            # top-k premises surfaced per query (formalize grounding + prove context)
-embed_model = "mistral-embed"    # Mistral /v1/embeddings model id (build cache: scripts/build-embeddings.sh)
 # semantic repair cascade (docs/superpowers/specs/2026-07-17-semantic-repair-cascade-design.md):
 # a semantic-gate rejection (shallow / trivial / vacuous / false / unfaithful) is fed
 # back — rejected stub + gate verdict + repair direction — and the issue is RE-DRAFTED, both
@@ -114,7 +104,7 @@ state_cache = true         # the same content-addressing one level DOWN: record 
                            # runs/proof-states.jsonl. Consumption is self-gating — suggestions()
                            # renders only states two DIFFERENT targets reached, so until that
                            # number is nonzero the prover's prompt is unchanged. Read it with
-                           # `python3 vibe_prove.py states`. If cross-target recurrence stays 0
+                           # `python3 prove_session.py states`. If cross-target recurrence stays 0
                            # after a few ticks, this is ceremony and comes back out.
 gate_cache = true          # item L: content-address the adversarial gate goals (vacuity/disproof)
                            # and substitute the cached verdict on a hit — 0 tokens, no daemon
@@ -132,14 +122,14 @@ experience = true          # item K: a per-target rolling notebook of FAILED att
                            # (4000 chars) instead of crowding out the context pack. Fail-open at
                            # every step: no key / a raising model / a corrupt store all degrade to
                            # a mechanical digest or to no memory, never to a red tick. ON here to
-                           # MEASURE. Read it with `python3 vibe_prove.py experience`: if
+                           # MEASURE. Read it with `python3 prove_session.py experience`: if
                            # `retried targets` stays 0, no attempt has ever read a notebook and
                            # this is write-only ceremony that comes back out.
 
 # Lemma-DAG decomposition (Phase 2 — docs/superpowers/specs/2026-07-18-decomposer-design.md).
 # The drafter (Claude) SPLITS a hard target into a few named leaf lemmas + a
 # main theorem applying them; a Lean-side skeleton gate rejects a bad split for one
-# elaboration's cost BEFORE any leaf gets proving budget; leaves reuse the vibe prover
+# elaboration's cost BEFORE any leaf gets proving budget; leaves reuse the prover
 # verbatim as ordinary single-sorry targets; a recomposition gate assembles the whole.
 # `enabled` gates the whole path. When ON, the tick routes to decompose in three ways:
 #   1. a workflow_dispatch `decompose=true` one-shot (forces the CI-selected target);
@@ -151,11 +141,11 @@ experience = true          # item K: a per-target rolling notebook of FAILED att
 [decompose]
 enabled = true
 max_leaves = 3             # tight splits first; a DAG wanting more is usually mis-shaped (raise on evidence)
-leaf_max_turns = 40        # vibe turns per leaf (leaves are individually short by design)
+leaf_max_turns = 40        # prover turns per leaf (leaves are individually short by design)
 max_reask = 1              # bounded re-decompose rounds on a malformed DAG or a failed skeleton gate
 
 # the drafter: Claude drafts the intent, formalizes agentically (claude -p + lean-lsp),
-# and judges; `[prover]` picks who proves. No magistral, no completion path. Needs
+# and judges; `[prover]` picks who proves. No completion path. Needs
 # CLAUDE_CODE_OAUTH_TOKEN (or ANTHROPIC_API_KEY / a local ~/.claude login); with no auth
 # the drafts defer. The only knob is which Claude model drafts. The staged text is now
 # elaborated by the daemon before any other gate (it never was: `check_fn=None`), which is

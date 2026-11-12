@@ -1,4 +1,4 @@
-# Mem-capped Lean LSP service for the lean-lsp-mcp harness (Leanstral / vibe).
+# Mem-capped Lean LSP service for the lean-lsp-mcp harness (the agentic drafter and prover).
 #
 # FOUNDRY COPY: kept in sync with the main repo's docker/docker-compose.lean-lsp.yml.
 # pipeline.yml copies this into the main checkout (main/docker/) before the tick, so
@@ -31,12 +31,12 @@ services:
       - lake_build_cache:/app/.lake
     working_dir: /app
     # lean-lsp-mcp is not in the image; install it once at start, then idle.
-    # docker exec spawns the actual stdio MCP per vibe session.
+    # docker exec spawns the actual stdio MCP per agent session.
     #
     # PINNED: this container holds RW mounts on the library and the lakefile, so an
     # unpinned install would give whatever PyPI serves that day write access to
     # the Lean sources. 0.28.1 is the version the harness was validated against.
-    # Bump deliberately, after a vibe session against the new version.
+    # Bump deliberately, after a prove session against the new version.
     entrypoint: ["sh", "-c"]
     command:
       - >-

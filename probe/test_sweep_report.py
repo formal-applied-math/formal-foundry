@@ -45,7 +45,7 @@ def test_refined_defects_are_pulled_from_provenance(tmp_path):
     import json
     (tmp_path / "d.json").write_text(json.dumps({"description": "d", "theorems": [
         {"id": "x", "code": {"lean": "theorem t : True := trivial"},
-         "metadata": {"provenance": {"source": "leanstral-autoform", "issue": 161,
+         "metadata": {"provenance": {"source": "foundry-autoform", "issue": 161,
                                      "refined": "spurious guard dropped"}}},
         {"id": "y", "code": {"lean": "theorem u : True := trivial"}, "metadata": {}},
     ]}), encoding="utf-8")

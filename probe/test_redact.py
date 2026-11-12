@@ -14,15 +14,16 @@ def test_an_agent_keeps_only_its_own_credential():
     env = {"PATH": "/bin", "HOME": "/h", "DOMAIN_NAME": "mathfin",
            "MAIN_PR_TOKEN": GH, "GH_TOKEN": GH, "GITHUB_TOKEN": "x" * 20,
            "CLAUDE_CODE_OAUTH_TOKEN": ANT, "ANTHROPIC_API_KEY": "k" * 20,
-           "MISTRAL_API_KEY": "m" * 32, "GHCR_TOKEN": "g" * 20, "SOME_SECRET": "s" * 20}
+           "OTHER_VENDOR_API_KEY": "m" * 32, "GHCR_TOKEN": "g" * 20, "SOME_SECRET": "s" * 20}
     claude = redact.agent_env("claude", env)
     assert claude["CLAUDE_CODE_OAUTH_TOKEN"] == ANT and "ANTHROPIC_API_KEY" in claude
-    for gone in ("MAIN_PR_TOKEN", "GH_TOKEN", "GITHUB_TOKEN", "MISTRAL_API_KEY",
+    for gone in ("MAIN_PR_TOKEN", "GH_TOKEN", "GITHUB_TOKEN", "OTHER_VENDOR_API_KEY",
                  "GHCR_TOKEN", "SOME_SECRET"):
         assert gone not in claude, gone
     assert claude["PATH"] == "/bin" and claude["DOMAIN_NAME"] == "mathfin"
-    vibe = redact.agent_env("leanstral", env)
-    assert "MISTRAL_API_KEY" in vibe and "CLAUDE_CODE_OAUTH_TOKEN" not in vibe
+    # an agent this module does not know gets no credential at all
+    unknown = redact.agent_env("someone-else", env)
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in unknown and "ANTHROPIC_API_KEY" not in unknown
 
 
 def test_findings_name_the_kind_never_the_value():
@@ -31,14 +32,14 @@ def test_findings_name_the_kind_never_the_value():
     assert kinds == ["anthropic-key", "github-pat", "github-token", "token-in-url"]
     assert all(GH not in k for k in kinds)
     assert redact.secret_findings("theorem t (hintS2 : P) : P := hintS2") == []
-    assert redact.secret_findings("a Mistral key abcd1234abcd1234", ["abcd1234abcd1234"]) == [
+    assert redact.secret_findings("an unprefixed key abcd1234abcd1234", ["abcd1234abcd1234"]) == [
         "known-secret-value"]                      # no prefix: caught by value
 
 
 def test_redact_replaces_values_and_shapes(tmp_path):
-    mistral = "M" * 32
-    text, n = redact.redact(f"env: MISTRAL_API_KEY={mistral} and {GH}", [mistral])
-    assert mistral not in text and GH not in text and n == 2
+    opaque = "M" * 32
+    text, n = redact.redact(f"env: SOME_API_KEY={opaque} and {GH}", [opaque])
+    assert opaque not in text and GH not in text and n == 2
     assert "[REDACTED:known-secret-value]" in text and "[REDACTED:github-token]" in text
     p = tmp_path / "runs" / "t.transcript.jsonl"
     p.parent.mkdir()

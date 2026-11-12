@@ -1,6 +1,6 @@
 """Decompose-path tick orchestration (Phase 2, Task 2.8).
 
-`scripts/decompose-tick.sh` owns the docker daemon<->lean-lsp flips and the per-leaf vibe
+`scripts/decompose-tick.sh` owns the docker daemon<->lean-lsp flips and the per-leaf prove
 loop; this module owns the python/daemon/API steps around them, as two functions the shell
 calls between flips:
 
@@ -101,7 +101,7 @@ def do_draft(pack, tid, tag, runs_dir, *, target_text, context_pack, drafter_pre
 
 
 def do_recompose(pack, tid, tag, runs_dir, *, check_fn) -> dict:
-    """Gather the proved leaf modules vibe wrote, assemble them + the main, run the full
+    """Gather the proved leaf modules the prover wrote, assemble them + the main, run the full
     gate. On pass write `<tag>-<id>.lean` (the candidate open-pr reads). Outcomes: `pass`,
     `partial` (proved leaves banked, the rest a declared remainder), `fail_gate` (all leaves
     proved but the composition failed)."""
@@ -142,7 +142,7 @@ def _cmd_draft(args) -> int:
     from probe import daemon_check
     from autoformalize import claude_draft_fn
     cfg = DecomposeConfig.load(args.config)
-    drafter = DrafterConfig.load(args.config)      # claude splits the target (leanstral proves the leaves)
+    drafter = DrafterConfig.load(args.config)      # claude splits the target (the prover proves the leaves)
     target = _read_target(args.queue, args.id)
     qroot = os.path.dirname(os.path.abspath(args.queue))
     target_text = open(os.path.join(qroot, target["file"]), encoding="utf-8").read()

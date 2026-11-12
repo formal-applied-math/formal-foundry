@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 # Flip the single Lean slot to <daemon|lean-lsp>. Item I phase 2: the autonomous agentic
 # tick needs lean-lsp for the agentic formalize (claude self-validates via lean-lsp MCP),
-# then the daemon for the gate battery (the prover-based vacuity/disproof gates need the
-# fast persistent server). `refill`'s injected slot_switch_fn calls this around the
+# then the daemon for the gate battery (which needs the fast persistent server). `refill`'s injected slot_switch_fn calls this around the
 # agentic formalize. Memory doctrine: ONE Lean process — stop the other slot; `stop` not
 # `down` (preserve the 7878 network for the daemon's later restart). Mirrors the flip in
-# scripts/leanstral-vibe.sh.
+# scripts/claude-prove.sh.
 #
 #   scripts/slot-switch.sh daemon      # gates / build_manifest / ledger
 #   scripts/slot-switch.sh lean-lsp    # agentic formalize (claude + lean-lsp MCP)

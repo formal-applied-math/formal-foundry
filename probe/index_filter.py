@@ -4,16 +4,15 @@
 ~850 MB, overwhelmingly Mathlib and core internals. Until 2026-08-14 step 2 of
 that script kept only own-namespace decls (~2.8k records, a 275x shrink) so the adapter
 would load in ~0.03s. That was a load-time decision, but it had a consequence
-nobody costed: the embedding retrieval in `embed.py` runs over `types.jsonl`, so
-**the drafter's semantic retrieval had never seen a single Mathlib lemma**. Its
-only Mathlib channel was `af_drafting.loogle_candidates` — syntactic, and
-pointed at a PUBLIC instance tracking a newer Mathlib than the pin, which its
-own docstring marks UNVERIFIED. A drafter held to a coherence-first,
-anti-wrapper contract could not actually look up the lemma it was supposed to
-consume.
+nobody costed: **nothing that read the index had ever seen a single Mathlib
+lemma**. The only Mathlib channel left was `af_drafting.loogle_candidates` —
+syntactic, and pointed at a PUBLIC instance tracking a newer Mathlib than the
+pin, which its own docstring marks UNVERIFIED. A drafter held to a
+coherence-first, anti-wrapper contract could not actually look up the lemma it
+was supposed to consume.
 
-Keeping everything is not the fix either: `embed.top_k` is a pure-Python O(n·d)
-cosine scan, so the corpus size is a latency budget, not just a disk number.
+Keeping everything is not the fix either: every reader loads `types.jsonl` whole,
+so the corpus size is a latency budget, not just a disk number.
 
 So we keep a principled middle: the pack's OWN namespaces in full,
 plus every ALLOWED external module that an own declaration actually reaches

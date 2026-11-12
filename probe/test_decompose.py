@@ -171,12 +171,12 @@ def test_manifest_accepts_dag_leaf_targets(tmp_path):
     for t in man["targets"]:
         assert t["parent"] == "main_thm" and t["kind"] == "prove"
         assert t["parent_id"] == "cal-bk-99"
-        # the per-leaf stub is an ordinary single-sorry target vibe_prove reads verbatim
+        # the per-leaf stub is an ordinary single-sorry target prove_session reads verbatim
         stub = (tmp_path / t["file"]).read_text(encoding="utf-8")
         assert stub.count("sorry") == 1
         assert f"theorem {t['sorry_name']}" in stub and ":= by sorry" in stub
         assert t["input_hash"]
-    # the manifest is the shape vibe_prove._iter_targets consumes
+    # the manifest is the shape prove_session._iter_targets consumes
     assert man["toolchain"] == "leanprover/lean4:v4.31.0" and man["main_commit"] == "deadbeef"
     assert (tmp_path / "manifest.json").exists()
 
@@ -344,7 +344,7 @@ def test_applied_to_roundtrips_and_surfaces_as_prove_hint(tmp_path):
     # round-trips through the persisted DAG shape
     again = parse_dag(dag_to_dict(dag))
     assert again.leaves[0].applied_to == ["mul_self_nonneg", "le_total"]
-    # the per-leaf stub carries the hint as a comment the vibe prover reads,
+    # the per-leaf stub carries the hint as a comment the prover reads,
     # while staying an ordinary single-sorry target
     man = build_leaf_manifest(PACK, dag, {"id": "t1"}, str(tmp_path))
     stub = (tmp_path / man["targets"][0]["file"]).read_text(encoding="utf-8")
@@ -519,7 +519,7 @@ def _targeted_dag():
 
 
 def test_leaf_stub_carries_the_targets_definitions(tmp_path):
-    """A leaf statement refers to what the TARGET defines. Without it the stub vibe_prove
+    """A leaf statement refers to what the TARGET defines. Without it the stub prove_session
     receives cannot elaborate, and the leaf fails for a reason unrelated to its proof."""
     from decompose import build_leaf_manifest
     man = build_leaf_manifest(PACK, _targeted_dag(), {"id": "t"}, str(tmp_path))
@@ -648,7 +648,7 @@ def test_skeleton_carries_the_house_opens():
 
 
 def test_leaf_stub_carries_the_house_opens(tmp_path):
-    """The stub vibe_prove receives is assembled the same way and needs the same opens."""
+    """The stub prove_session receives is assembled the same way and needs the same opens."""
     from decompose import build_leaf_manifest
     man = build_leaf_manifest(PACK, _measure_dag(), {"id": "t"}, str(tmp_path))
     stub = (tmp_path / man["targets"][0]["file"]).read_text(encoding="utf-8")

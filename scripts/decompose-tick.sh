@@ -8,11 +8,11 @@
 # Flow (one Lean process at a time throughout; daemon UP on entry):
 #   1. draft  (daemon up): Claude splits the target; the skeleton gate accepts/rejects
 #              the split (one bounded re-decompose) BEFORE any leaf gets proving budget.
-#   2. leaves (one flip pair): lean-lsp UP → vibe proves ALL leaves → flip back to the
+#   2. leaves (one flip pair): lean-lsp UP → the prover proves ALL leaves → flip back to the
 #              daemon → gate them. (Leaves are independent in the common flat split; deep
 #              depends_on chains that need keep-and-revise inlining are a later refinement.)
 #   3. recompose (daemon up): assemble proved leaves + main, run the FULL gate → candidate.
-#   4. record a vibe-style summary row + the A/B scoreboard row, and refresh the scoreboard.
+#   4. record a prove-style summary row + the A/B scoreboard row, and refresh the scoreboard.
 set -euo pipefail
 FOUNDRY="$(cd "$(dirname "$0")/.." && pwd)"
 
@@ -39,7 +39,7 @@ SUMMARY="$RUNS/$TAG-summary.jsonl"
 LEAFMAN="$RUNS/$TAG-$ID-leaves/manifest.json"
 jout() { printf '%s' "$1" | python3 -c "import sys,json;print(json.load(sys.stdin).get('$2',''))" 2>/dev/null || true; }
 
-# summary row (vibe-shaped) so pipeline-tick step 3 reads the outcome; ab scoreboard row
+# summary row (prove_session-shaped) so pipeline-tick step 3 reads the outcome; ab scoreboard row
 # + md refresh (Task 2.6). $1=outcome $2=tokens $3=leaves_total $4=leaves_closed $5=reason
 #
 # $5 is why this outcome happened, and it is not optional. `do_draft` computes a `reason`
@@ -57,7 +57,7 @@ sys.path.insert(0, ".")
 from scoreboard import ab_row, append_ab_row, update_scoreboard_md
 summ, runs, tid, outcome, tok, lt, lc, md = sys.argv[1:9]
 reason = (sys.argv[9] if len(sys.argv) > 9 else "").strip()
-engine = (sys.argv[10] if len(sys.argv) > 10 else "") or "leanstral"
+engine = (sys.argv[10] if len(sys.argv) > 10 else "") or "claude"
 tok, lt, lc = int(tok), int(lt), int(lc)
 ts = time.strftime("%Y-%m-%dT%H:%M:%S")
 with open(summ, "a", encoding="utf-8") as f:
@@ -94,7 +94,7 @@ if [ "$DOUT" != "drafted" ]; then
 fi
 
 # 2. prove ALL leaves in one flip pair (mirrors pipeline-tick.sh step 2, leaf manifest).
-echo "[decompose] proving leaves via vibe ⇄ lean-lsp-mcp (max_turns=$TURNS)…" >&2
+echo "[decompose] proving leaves via the prover ⇄ lean-lsp-mcp (max_turns=$TURNS)…" >&2
 # The plain attempt this tick escalated from already proved the canary; a forced
 # decompose has not, so its leaf run proves it first.
 CANARY_ARGS=()
@@ -103,7 +103,7 @@ if python3 -c "import json,sys; sys.exit(0 if json.load(open(sys.argv[1])).get('
   CANARY_ARGS=(--no-canary)
 fi
 set +e
-python3 vibe_prove.py run --manifest "$LEAFMAN" --arm decompose "${CANARY_ARGS[@]}" \
+python3 prove_session.py run --manifest "$LEAFMAN" --arm decompose "${CANARY_ARGS[@]}" \
   --max-turns "$TURNS" --run-tag "$TAG" --main-repo "$MAIN" --config "$CFG"
 RUN_RC=$?
 echo "[decompose] flipping the Lean slot back to the daemon for the leaf gates…" >&2
@@ -125,7 +125,7 @@ if [ "$DAEMON_RC" != 0 ]; then
   exit 0
 fi
 set +e
-python3 vibe_prove.py gate --manifest "$LEAFMAN" --arm decompose \
+python3 prove_session.py gate --manifest "$LEAFMAN" --arm decompose \
   --run-tag "$TAG" --main-repo "$MAIN" --config "$CFG"
 set -e
 

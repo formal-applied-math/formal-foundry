@@ -1,6 +1,6 @@
 """House context / values / idioms / pins for the formalization (prover) agents.
 
-This is the reusable "setup" layer that equips a Leanstral (or any) prover agent
+This is the reusable "setup" layer that equips a prover agent
 with the same standards a library author works to: the toolchain/dependency pins
 it must target, the values contract its output is held to, and the distilled
 house Lean idioms that make a proof idiomatic instead of a kernel-green blob.

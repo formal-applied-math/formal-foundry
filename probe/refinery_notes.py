@@ -64,7 +64,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="first-pass refinery punch list (markdown) for a PR")
     ap.add_argument("--lean-file", required=True)
     ap.add_argument("--out", default=None, help="write here instead of stdout")
-    ap.add_argument("--model", default=os.environ.get("REFINERY_MODEL", "claude-sonnet-5"))
+    ap.add_argument("--model", default=os.environ.get("REFINERY_MODEL", "claude-sonnet-5-5"))
     ap.add_argument("--domain", default=None, help="domain pack name")
     args = ap.parse_args()
     import domain_pack
@@ -76,16 +76,10 @@ def main() -> int:
         _ = e
     if not text:
         md = "_(first-pass refinery notes skipped: empty candidate)_"
-    elif args.model.startswith("claude"):   # default: claude (mistral remains selectable via --model)
+    else:
         from autoformalize import claude_draft_fn   # lazy: only when a real call is made
         md = refinery_notes(pack, text,
                             chat_fn=lambda msgs: claude_draft_fn(msgs, model=args.model))
-    elif not os.environ.get("MISTRAL_API_KEY"):
-        md = "_(first-pass refinery notes skipped: no MISTRAL_API_KEY for a mistral --model)_"
-    else:
-        from probe import mistral_chat   # lazy: only when a real call is made
-        md = refinery_notes(pack, text, chat_fn=lambda msgs: mistral_chat(
-            msgs, api_key=os.environ["MISTRAL_API_KEY"], model=args.model))
     if args.out:
         with open(args.out, "w", encoding="utf-8") as f:
             f.write(md + "\n")

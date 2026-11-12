@@ -7,7 +7,7 @@
   "additionalProperties": false,
   "properties": {
     "record_id": {"type": "string", "description": "sha256[:16] of the identifying tuple (stage, issue, target, attempt, outcome, gate, ts, source_file); stable across rebuilds and the dedup key"},
-    "stage": {"enum": ["draft", "prove"], "description": "draft = refill (magistral intent + leanstral/claude formalize); prove = vibe/text-loop"},
+    "stage": {"enum": ["draft", "prove"], "description": "draft = refill (intent + agentic formalize); prove = the prove session"},
     "issue": {"type": ["integer", "null"], "description": "the source-issue number"},
     "target": {"type": ["string", "null"], "description": "the queue target id, e.g. cal-bk-88"},
     "attempt": {"type": "integer", "description": "draft = the refill-history attempt index; prove = the prover round count"},
@@ -20,7 +20,7 @@
     "model": {"type": ["string", "null"], "description": "the prover model (prove summary); null for draft (not recorded per-stage today)"},
     "tokens": {"type": ["integer", "null"], "description": "tokens for this record; prove summary carries it, draft rows do not (aggregate lives on the tick)"},
     "arch": {"type": ["string", "null"], "description": "the routing architecture stamp (draft)"},
-    "harness": {"type": ["string", "null"], "description": "the prove harness (vibe / text-loop)"},
+    "harness": {"type": ["string", "null"], "description": "the prove harness (`agentic`; records from before 2026-11-12 carry the launcher name of their day)"},
     "arm": {"type": ["string", "null"], "description": "the A/B scoreboard arm (cron / decompose)"},
     "ts": {"type": "string", "description": "ISO-8601 timestamp from the source record"},
     "source_file": {"type": "string", "description": "basename of the jsonl this record was derived from"}

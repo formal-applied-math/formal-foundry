@@ -200,6 +200,19 @@ def test_served_issues_are_the_pipelines_own_contributions(repo):
     assert "mf-risk-a" in lm.corpus_ids(repo, "benchmarks")
 
 
+def test_an_issue_is_served_under_either_pipeline_marker(tmp_path):
+    """The library's corpus holds entries from before the marker named the pipeline
+    (`leanstral-autoform`) beside the ones stamped since (`assemble.PIPELINE_SOURCE`).
+    Both are this pipeline's, and both mark their issue served."""
+    import assemble
+    root = str(tmp_path)
+    _write(root, "benchmarks/a.json", json.dumps({"theorems": [
+        _entry("mf-old", "MathFin.A", source="leanstral-autoform", issue=66),
+        _entry("mf-new", "MathFin.A", source=assemble.PIPELINE_SOURCE, issue=70),
+        _entry("mf-human", "MathFin.A", source="afp", issue=71)]}))
+    assert lm.served_issues(root, "benchmarks") == {66, 70}
+
+
 def test_declared_in_library_finds_a_name_and_skips_the_scratch(repo):
     assert lm.declared_in_library(repo, "MathFin", "MathFin.zcb").startswith("MathFin/")
     assert lm.declared_in_library(repo, "MathFin", "zcb_positive") is None   # a prefix is not it

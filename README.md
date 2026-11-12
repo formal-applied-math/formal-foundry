@@ -2,11 +2,11 @@
 
 The autoformalization foundry for the
 [`formal-applied-math`](https://github.com/formal-applied-math) program. It runs a
-two-engine, self-feeding loop that turns an open proof *issue* in one of the domain
-libraries into a ready-for-review PR: a frontier reasoner (Anthropic's **Claude**) drafts and
+two-stage, self-feeding loop that turns an open proof *issue* in one of the domain
+libraries into a ready-for-review PR: Anthropic's **Claude** drafts and
 faithfulness-gates a Lean *statement* from the issue — specifying the intent, then
-writing the Lean **agentically** against the lean-lsp — and a leaf-prover (Mistral's
-**Leanstral**) proves it — both checked against Lean's kernel, both **scouts, not
+writing the Lean **agentically** against the lean-lsp — and a second, separate Claude
+session proves it — both checked against Lean's kernel, both **scouts, not
 authors**. If you've built agentic coding loops, this is two of them chained: a
 model proposing code (a Lean statement, then its proof) into compiler-feedback
 repair loops, where "compile passes" means a proof kernel certified a gap-free
@@ -35,11 +35,10 @@ been committed.
 > **Status 2026-09-27 — read this first.** The prover did not run from 2026-07-28 to
 > 2026-09-27: the queue was blocked, then the launcher crashed before starting on every
 > tick and each crash was scored as a failed proof, with every CI run green
-> ([postmortem](docs/research/2026-09-27-prover-outage-postmortem.md)). Mistral retires the
-> Leanstral endpoint on 2026-09-30, so the prover is now `[prover] engine` in
-> `pipeline.toml` — Claude by default, Leanstral selectable — and where this README says
-> "Leanstral proves", read "the configured prover". A canary proves a trivial theorem
-> through the real path before every run, and a tick whose prover did not run goes red.
+> ([postmortem](docs/research/2026-09-27-prover-outage-postmortem.md)). The prover is
+> `[prover] engine` in `pipeline.toml`, and Claude is the only one. A canary proves a
+> trivial theorem through the real path before every run, and a tick whose prover did not
+> run goes red.
 
 > **Status 2026-11-12.** No PR was opened from 2026-07-27 to 2026-11-12, for two more
 > reasons after the one above ([postmortem](docs/research/2026-11-12-v2-retarget-postmortem.md)).
@@ -50,18 +49,25 @@ been committed.
 > assembly runs the library's own CI from the pack (`domains/<name>/regen.sh`), and an
 > **assembly canary** exercises that path on a runner without a model call.
 
+> **Status 2026-11-12, one model vendor.** The first prover, Mistral's Leanstral, was
+> retired by its vendor on 2026-09-30; its launcher, the embedding retrieval that used
+> the same key, and the key itself are gone from this repo. Entries the pipeline
+> contributes are marked `provenance.source = "foundry-autoform"`, with the model that
+> proved each in `provenance.model`. The four entries merged before this carry
+> `leanstral-autoform`, which is what proved them. The dated documents under
+> `docs/research/` and `docs/superpowers/` describe the pipeline as it was when written.
+
 > **New here?** Read [`docs/overview.md`](docs/overview.md) first — the full map of
-> both repos, the pipeline, and the outside reading to get fluent. Design of
-> record: `formal-mathfin docs/superpowers/specs/2026-07-08-leanstral-foundry-design.md`.
+> both repos, the pipeline, and the outside reading to get fluent.
 
 ## The pipeline at a glance
 
 ```
  SELF-FEED  (when the queue has no unattempted target)
-   ISSUE → CLAUDE specifies intent → CLAUDE formalizes agentically ⇄ lean-lsp → depth gate → triviality → kernel gates (vacuity·disproof, Leanstral) → judge (Claude) → STUB
+   ISSUE → CLAUDE specifies intent → CLAUDE formalizes agentically ⇄ lean-lsp → depth gate → map gate → triviality → judge (Claude) → STUB
  PROVE + SHIP
-   STUB → HOUSE DOCTRINE (+ LIVE docs/patterns.md) → LEANSTRAL ⇄ LEAN ENV → GATE → REFINERY → PR
-          (system prompt)                             (the prover)  (checks it) (kernel)  (human)  (human-merged)
+   STUB → HOUSE DOCTRINE (+ LIVE docs/patterns.md) → CLAUDE ⇄ LEAN-LSP → GATE → ASSEMBLY → PR
+          (system prompt)                             (the prover)        (kernel) (the library's CI) (human-merged)
 ```
 
 **Self-feed (the refill phase, `probe/autoformalize.py`).** When the queue is empty,
@@ -75,12 +81,13 @@ faithfulness before any proving budget is spent: elaboration, a **structural dep
 (a `run_cmd` meta check requiring the statement's TYPE to consume a def from its
 `-- pointers:` MathFin modules — else it is a Mathlib identity in domain clothing, like
 cal-bk-67 inlining the forward rate over raw reals instead of consuming `MathFin.zcb`;
-pointers-scoped, so it skips when the issue cites none), a **triviality** check, two
-kernel-grade **Leanstral** probes (**hypothesis-rejection** ⊢ False and **disproof**
-⊢ ¬Concl → retire if provable), and a **Claude faithfulness judge**. A rejection feeds
+pointers-scoped, so it skips when the issue cites none), a **triviality** check, and a
+**Claude faithfulness judge**. Two kernel probes (**hypothesis-rejection** ⊢ False and
+**disproof** ⊢ ¬Concl → retire if provable) are available and off
+(`[autoformalize].kernel_probes`): each is a model call per draft. A rejection feeds
 its verdict back and re-drafts (semantic-repair cascade, ×2). A passing draft is staged
 as a validated target; a rejected issue stays `status:ready`, never auto-closed. Honest
-caveat: elaboration, the depth gate, and the Leanstral probes are *independent,
+caveat: elaboration, the depth gate and the map gate are *independent,
 elaborator/kernel-grade* checks; the judge is a *soft Claude self-check* (statement vs
 issue), not a faithfulness guarantee — the real authority is the human review at merge.
 
@@ -96,18 +103,19 @@ recorded under the node's `core` and the PR `refs` the issue.
 **Prove + ship.** A queued target is a stub plus pointers to the modules it should
 reuse. The house doctrine — values gate · **the live `docs/patterns.md` injected in
 full (a first-class requirement)** · exact pins · "consume Mathlib/Degenne, don't
-reprove" · a per-target context pack — is the system prompt. Leanstral emits a
-candidate; on failure it is re-fed the compiler errors and resends the whole file.
+reprove" · a per-target context pack — is the system prompt. The prover is one headless
+`claude -p` session wired to the lean-lsp MCP: it edits the stub in place against live
+goals and diagnostics until the file checks or its turn budget ends.
 A candidate passes the gate only with no errors, no `sorry`, axioms ⊆
 `{propext, Classical.choice, Quot.sound}`, and no forbidden tactics. It is then a
 *candidate*, not a contribution — the refinery rewrites it to the
 conceptually-right proof under the 8-lens bar before a human merges it.
 
 **Two proving paths (Phase 2).** The scheduled cron's stated job is **calibration +
-easy-harvest** — it proves targets a single vibe session can close and keeps the pipeline
+easy-harvest** — it proves targets a single prove session can close and keeps the pipeline
 honest against the live queue. A **hard** target instead takes the **lemma-DAG path**:
 **Claude splits** it into a few leaf lemmas + a main theorem, a skeleton gate rejects a
-bad split for one elaboration's cost, the same vibe prover (Leanstral) proves the leaves,
+bad split for one elaboration's cost, the same prover proves the leaves,
 and a recomposition gate assembles the whole. The path is **on**
 (`pipeline.toml [decompose] enabled`), routed by the `decompose` tag, a
 `workflow_dispatch` flag, or **autonomous escalation** — a plain attempt that can't close
@@ -139,7 +147,7 @@ content-addressed, the third keyed by target):
   hits). This is currently a **measurement**: consumption is self-gating, since only
   states reached by two *different* targets are ever offered to the prover, so until
   cross-target recurrence is nonzero the prompt is unchanged. Read it with
-  `python3 vibe_prove.py states`; if the number stays zero, the feature is ceremony and
+  `python3 prove_session.py states`; if the number stays zero, the feature is ceremony and
   comes back out.
 - `experience.json` (`[autoformalize].experience`) — a per-target **rolling notebook** of
   FAILED attempts (item K). The cron already retries a target across ticks, but each retry
@@ -148,8 +156,8 @@ content-addressed, the third keyed by target):
   attempt into the target's notebook — feeding the summariser the prior notebook plus the
   new attempt and taking its reply as the REPLACEMENT, so the block stays bounded instead
   of growing into the prompt — and the next tick renders it into the prover task, last,
-  behind the premises, with a rotating diversity instruction. Silent on a cold store, and
-  fail-open at every step (no key, a raising model, a corrupt file all degrade to a
+  behind the context pack, with a rotating diversity instruction. Silent on a cold store, and
+  fail-open at every step (no Claude auth, a raising model, a corrupt file all degrade to a
   mechanical digest), because this hangs off the failure path and must never *be* a
   failure. **Both phases write it**: the refill phase keys failed issues `issue-<n>`
   (where 19 of 22 live obstructions are), the prove gate keys targets by id. On the
@@ -158,10 +166,10 @@ content-addressed, the third keyed by target):
   half, and cedes the diversity rotation to it. Shape adapted from Axiomatic AI's
   `ExperienceProcessor`
   ([harvest](docs/research/2026-08-06-axiomatic-harvest.md)). Also a measurement: read it
-  with `python3 vibe_prove.py experience`; if `retried targets` stays zero then no attempt
+  with `python3 prove_session.py experience`; if `retried targets` stays zero then no attempt
   has ever read a notebook and it comes back out.
 
-Full diagram: [`docs/leanstral-architecture.md`](docs/leanstral-architecture.md).
+Full diagram: [`docs/architecture.md`](docs/architecture.md).
 How the prover agents are equipped (context pack, loop, lean-lsp-mcp harness, PR
 activation): [`docs/PROVER_SETUP.md`](docs/PROVER_SETUP.md). Why this shape is the
 validated one: [`docs/research/2026-07-11-world-class-autoformalization-survey.md`](docs/research/2026-07-11-world-class-autoformalization-survey.md).
@@ -174,12 +182,12 @@ Decomposition mechanics: [`docs/superpowers/specs/2026-07-18-decomposer-design.m
   ready-for-review PR** (a branch, with `MAIN_PR_TOKEN`) but **never merges**: every
   PR is human-reviewed (refinery + 8-lens) and R owns the merge. Nothing reaches
   `main` without a human.
-- API traffic (Claude, Mistral, or any prover) carries only public-corpus statements
+- API traffic (to Claude, or to any model added later) carries only public-corpus statements
   and fresh textbook statements. Never held-out eval content (`formal-mathfin-evals`),
   never DMW/Dalang-named material.
-- `MISTRAL_API_KEY` (Leanstral + `mistral-embed` retrieval) and
-  `CLAUDE_CODE_OAUTH_TOKEN` (the Claude drafter) live in `.env` (gitignored) or the
-  shell env. Never committed. With no Claude auth the drafts defer (no fallback drafter).
+- `CLAUDE_CODE_OAUTH_TOKEN` (the drafter, the judge and the prover) lives in `.env`
+  (gitignored) or the shell env. Never committed. With no Claude auth the drafts defer
+  (no fallback drafter).
 - Machine proofs are scouts, not authors: nothing merges to main without the
   refinery (conceptually-right refactor + house idiom + 8-lens bar).
 - **One Lean-loaded process at a time** (~10 GB box, ~4–5 GB per Mathlib env). REPL
@@ -189,14 +197,14 @@ Decomposition mechanics: [`docs/superpowers/specs/2026-07-18-decomposer-design.m
 
 | Path | What |
 |---|---|
-| `probe/` | the pipeline (its unit tests are all daemon-free): `library_map.py` (the target library's own map, read live: pointer healing, taxonomy placement, bibliography, blueprint) · `probe.py` (metered prover loop) · `vibe_prove.py` (the live prove path: headless vibe ⇄ lean-lsp, then the daemon-phase gate) · `autoformalize.py` + `af_parse`/`af_prompts`/`af_routing`/`af_drafting`/`af_gates` (the issue→stub refill, split into focused modules re-exported through `autoformalize`) · `decompose.py` + `decompose_tick.py` (the lemma-DAG path) · `gate.py` (the kernel-grade candidate gate) · `strengthen.py` (drop hypotheses the theorem does not need) · `gate_cache.py` · `state_cache.py` + `proof_states.py` (proof-state addressing + recurrence measurement) · `experience.py` (the cross-tick rolling notebook of failed attempts) · `pipeline.py` + `pipeline_lib.py` (cadence + token budgeting) · `house_context.py` (system-prompt assembly, injects the live `docs/patterns.md`) · `build_manifest.py` (elaborate-with-sorry target validation) · `assemble.py` (corpus entry assembly) · `scout_index.py` + `embed.py` (declaration index + embedding retrieval) · `issues.py` (issue sync) |
-| `scripts/` | shell entrypoints: `pipeline-tick.sh` (the cron prove step) · `decompose-tick.sh` (the lemma-DAG tick) · `open-pr.sh` (assemble with the pack's recipe + open the PR) · `assembly-smoke.sh` (the assembly canary: the same path on a fixture, no push) · `contribute.sh` (manual contribution packet) · `leanstral-vibe.sh` (hands-on vibe + lean-lsp path) · `slot-switch.sh` (the daemon ⇄ lean-lsp flip) · `build-index.sh` / `build-embeddings.sh` (scout index + embedding cache) |
+| `probe/` | the pipeline (its unit tests are all daemon-free): `library_map.py` (the target library's own map, read live: pointer healing, taxonomy placement, bibliography, blueprint) · `probe.py` (the Lean daemon client) · `prove_session.py` (the live prove path: a headless agent session ⇄ lean-lsp, then the daemon-phase gate) · `autoformalize.py` + `af_parse`/`af_prompts`/`af_routing`/`af_drafting`/`af_gates` (the issue→stub refill, split into focused modules re-exported through `autoformalize`) · `decompose.py` + `decompose_tick.py` (the lemma-DAG path) · `gate.py` (the kernel-grade candidate gate) · `strengthen.py` (drop hypotheses the theorem does not need) · `gate_cache.py` · `state_cache.py` + `proof_states.py` (proof-state addressing + recurrence measurement) · `experience.py` (the cross-tick rolling notebook of failed attempts) · `pipeline.py` + `pipeline_lib.py` (cadence + token budgeting) · `house_context.py` (system-prompt assembly, injects the live `docs/patterns.md`) · `build_manifest.py` (elaborate-with-sorry target validation) · `assemble.py` (corpus entry assembly) · `scout_index.py` (the declaration index behind the context pack) · `issues.py` (issue sync) |
+| `scripts/` | shell entrypoints: `pipeline-tick.sh` (the cron prove step) · `decompose-tick.sh` (the lemma-DAG tick) · `open-pr.sh` (assemble with the pack's recipe + open the PR) · `assembly-smoke.sh` (the assembly canary: the same path on a fixture, no push) · `claude-prove.sh` (the prover's launcher; also the hands-on path) · `slot-switch.sh` (the daemon ⇄ lean-lsp flip) · `build-index.sh` (the scout index) |
 | `targets/` | `queue/` — validated targets (stub `.lean` + `.entry.json` sidecar + `manifest.json`, seeded from `status:ready`+`type:proof` issues). Its [`README`](targets/queue/README.md) carries the authoring bar, including the two ways a *faithful* stub is still empty: instantiating an already-∀-quantified corpus lemma, and restating a Mathlib lemma in finance names. · `informal/` — informal statements |
 | `index/` | the scout index of the main repo: `const_dep.jsonl`, `types.jsonl`, `PIN` |
 | `scout-lake/` | a minimal Lake project used to build the index against the pins |
 | `runs/` | per-tick telemetry JSONL + candidate `.lean` files |
 | `reports/` | calibration reports |
-| `docs/` | `overview.md` · `leanstral-architecture.md` · `PROVER_SETUP.md` · `research/` · `superpowers/` (specs + plans) |
+| `docs/` | `overview.md` · `architecture.md` · `PROVER_SETUP.md` · `research/` · `superpowers/` (specs + plans) |
 | `pipeline.toml` · `pipeline_state.json` | cadence + token-budget config; spent-budget/attempt state |
 | `.github/workflows/pipeline.yml` | the scheduled cron (one tick every `interval_days`, currently 2 days) |
 | `.github/workflows/assembly-smoke.yml` | the assembly canary: on a PR touching the assembly path, weekly, and on demand |
@@ -205,25 +213,24 @@ Decomposition mechanics: [`docs/superpowers/specs/2026-07-18-decomposer-design.m
 ## Runbook
 
 `MAIN_REPO` defaults to `/home/rapha/code/automated_proofs_quantfin`; the daemon and
-Docker image live in the main repo. `MISTRAL_API_KEY` (Leanstral + embeddings) and
-`CLAUDE_CODE_OAUTH_TOKEN` (the Claude drafter) are sourced from the main repo's `.env`
-locally (from the CI secrets in Actions).
+Docker image live in the main repo. `CLAUDE_CODE_OAUTH_TOKEN` is sourced from the main
+repo's `.env` locally (from the CI secrets in Actions).
 
 ```bash
 # All commands run from the foundry root.
 
-# 1. Validate + activate the queue (needs the daemon; spends NO Leanstral tokens):
+# 1. Validate + activate the queue (needs the daemon; no model call):
 docker compose -f $MAIN_REPO/docker/docker-compose.yml up -d lean-repl   # in the main repo
 ( cd probe && python3 build_manifest.py --main-repo "$MAIN_REPO" )        # writes targets/queue/manifest.json
 
-# 2. Run one tick now (needs the daemon up + the API key). If the queue has no
+# 2. Run one tick now (needs the daemon up + Claude auth). If the queue has no
 #    unattempted target, the tick first SELF-FEEDS — autoformalizes a stub from the
 #    next ready issue (Claude draft + faithfulness gates → build_manifest) — then
 #    proves it. Toggle with [autoformalize].enabled in pipeline.toml.
 FORCE=1 scripts/pipeline-tick.sh
 
-# 3. Hands-on path for a hard target (vibe + lean-lsp; takes the daemon down first):
-scripts/leanstral-vibe.sh --agent lean -p "prove the sorry in MathFin/…; use lean_goal"
+# 3. Hands-on path for a hard target (the prover's launcher; takes the daemon down first):
+scripts/claude-prove.sh --agent lean -p "prove the sorry in MathFin/…; use lean_goal"
 ```
 
 On a pass, the scheduled workflow assembles the proof and — **only with the

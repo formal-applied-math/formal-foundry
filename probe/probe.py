@@ -1,15 +1,11 @@
-"""Leanstral text-loop calibration probe: prove targets via Mistral API + lean-repl daemon.
+"""The Lean daemon client and the chat-driven prove loop.
 
-LEGACY / calibration only. The cron prove path is now `vibe_prove.py` (the trained-for
-vibe ⇄ lean-lsp-mcp harness). This text-loop remains for token-metered calibration
-sweeps and as the home of the shared `daemon_check` + `mistral_chat` + `run_target`
-helpers. Premise retrieval (Track A) and the autop scout have been removed here — the
-vibe agent drives search + multi-attempt itself.
-
-Usage:
-  export MISTRAL_API_KEY=...   # or put in ../.env and `source` it
-  python3 probe.py prove --manifest ../targets/manifest.json --budget 50000 \
-      --run-tag tier1 [--only cal-bk-1] [--max-rounds 8]
+`daemon_check` sends a file to the lean-repl daemon and returns its verdict; every gate
+in the pipeline takes it as `check_fn`. `run_target` is the completion-style prove loop
+(pass@k sampling + bounded compiler-feedback repair) over any `chat_fn(messages) ->
+(text, tokens)`: the refill's two kernel probes use it for a short attempt at `False` or
+at the negated conclusion. The prove path proper is `prove_session.py`, an agentic
+session with the lean-lsp tools.
 
 The daemon must be up (from the MAIN repo root):
   docker compose -f docker/docker-compose.yml up -d lean-repl
@@ -17,103 +13,20 @@ The daemon must be up (from the MAIN repo root):
 
 from __future__ import annotations
 
-import argparse
 import json
-import os
 import socket
-import sys
 import time
-import urllib.error
-import urllib.request
 
-import domain_pack
-from house_context import build_system_prompt, extract_signatures
 from probe_lib import (
     TokenLedger,
-    append_jsonl,
     axiom_guard_block,
     best_failure,
     build_initial_prompt,
     build_repair_prompt,
     extract_lean_code,
-    normalize_content,
     slop_report,
     window_messages,
 )
-
-# Reconfirmed 2026-07-11 against docs.mistral.ai: `labs-leanstral-1-5` is the
-# live Leanstral 1.5 id on api.mistral.ai/v1 (free until 2026-09-30). The older
-# `labs-leanstral-2603` was retired 2026-06-30 — do not target it.
-DEFAULT_MODEL = "labs-leanstral-1-5"
-DEFAULT_BASE_URL = "https://api.mistral.ai/v1"
-
-
-def mistral_chat(messages, *, api_key, model=DEFAULT_MODEL,
-                 base_url=DEFAULT_BASE_URL, max_tokens=16384,
-                 temperature=0.7, timeout=240, reasoning_effort=None):
-    payload = {
-        "model": model,
-        "messages": messages,
-        "max_tokens": max_tokens,
-        "temperature": temperature,
-    }
-    # Leanstral supports reasoning_effort ("high" for hard proofs, "none" for
-    # speed); only send it when set so non-reasoning models aren't disturbed.
-    if reasoning_effort is not None:
-        payload["reasoning_effort"] = reasoning_effort
-    body = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        f"{base_url}/chat/completions",
-        data=body,
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-    )
-    for attempt in range(4):
-        try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-            content = normalize_content(data["choices"][0]["message"]["content"])
-            tokens = data.get("usage", {}).get("total_tokens", 0)
-            return content, tokens
-        except urllib.error.HTTPError as e:
-            body = ""
-            try:
-                body = e.read().decode("utf-8")[:500]
-            except Exception:
-                pass
-            if e.code == 401:
-                raise RuntimeError(
-                    f"401 from Mistral API — check MISTRAL_API_KEY. {body}") from e
-            if e.code in (429, 500, 502, 503) and attempt < 3:
-                wait = 5 * (2 ** attempt)
-                print(f"  [chat] HTTP {e.code}, retry in {wait}s", file=sys.stderr)
-                time.sleep(wait)
-                continue
-            raise RuntimeError(f"HTTP {e.code} from Mistral API: {body}") from e
-        except (ValueError, KeyError) as e:
-            # empty / truncated / malformed response body (seen on the free tier
-            # under rate pressure: a 200 with an empty payload → json.loads(''))
-            # — treat like a transient 5xx and retry with backoff.
-            if attempt < 3:
-                wait = 5 * (2 ** attempt)
-                print(f"  [chat] bad response body ({type(e).__name__}), retry in {wait}s",
-                      file=sys.stderr)
-                time.sleep(wait)
-                continue
-            raise RuntimeError(f"unparseable Mistral response after retries: {e}") from e
-        except (TimeoutError, urllib.error.URLError) as e:
-            # a hung / timed-out call or transient network error — retry with backoff,
-            # so ONE slow call can't stall the whole tick (a hard issue must fail fast
-            # and yield to easier ones, not eat the run).
-            if attempt < 3:
-                wait = 5 * (2 ** attempt)
-                print(f"  [chat] {type(e).__name__}, retry in {wait}s", file=sys.stderr)
-                time.sleep(wait)
-                continue
-            raise RuntimeError(f"Mistral API {type(e).__name__} after retries: {e}") from e
-    raise RuntimeError("unreachable")
 
 
 def _parse_daemon_response(raw: bytes) -> dict:
@@ -280,82 +193,3 @@ def run_target(target: dict, *, budget: int, max_rounds: int,
         "budget": budget, "wall_s": round(time.time() - t0, 1),
         "axioms_clean": axioms_clean, "slop": last_slop,
     }
-
-
-def main() -> int:
-    ap = argparse.ArgumentParser()
-    sub = ap.add_subparsers(dest="cmd", required=True)
-    p = sub.add_parser("prove")
-    p.add_argument("--manifest", required=True)
-    p.add_argument("--budget", type=int, required=True)
-    p.add_argument("--max-rounds", type=int, default=8)
-    p.add_argument("--only", default=None)
-    p.add_argument("--model", default=DEFAULT_MODEL)
-    p.add_argument("--base-url", default=DEFAULT_BASE_URL)
-    p.add_argument("--run-tag", required=True)
-    p.add_argument("--main-repo", default="/home/rapha/code/automated_proofs_quantfin",
-                   help="main repo root, for the live house-doctrine system prompt + pins")
-    p.add_argument("--reasoning-effort", default=None,
-                   choices=[None, "none", "low", "medium", "high"],
-                   help="Leanstral reasoning_effort; 'high' for hard targets")
-    p.add_argument("--fanout", type=int, default=1,
-                   help="pass@k whole-proof candidates sampled per round (1 = sequential)")
-    p.add_argument("--repair-rounds", type=int, default=None,
-                   help="max compiler-feedback repair rounds (default: --max-rounds)")
-    p.add_argument("--max-tokens", type=int, default=16384,
-                   help="max_tokens per attempt (Leanstral's lever is tokens-per-attempt)")
-    args = ap.parse_args()
-
-    api_key = os.environ.get("MISTRAL_API_KEY")
-    if not api_key:
-        print("MISTRAL_API_KEY not set", file=sys.stderr)
-        return 2
-
-    system_prompt = build_system_prompt(args.main_repo, domain_pack.load(
-        getattr(args, "domain", None) or domain_pack.DEFAULT_NAME))
-    manifest = json.load(open(args.manifest))
-    root = os.path.dirname(os.path.abspath(args.manifest))
-    # runs/ lives at the FOUNDRY root (where pipeline-tick.sh writes + reads the
-    # candidate), not relative to the manifest — the manifest can sit at any depth
-    # (targets/queue/manifest.json). Derive it from this file's location + ensure it.
-    foundry_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    run_dir = os.path.join(foundry_root, "runs")
-    os.makedirs(run_dir, exist_ok=True)
-    attempts_log = os.path.join(run_dir, f"{args.run_tag}-attempts.jsonl")
-    summary_log = os.path.join(run_dir, f"{args.run_tag}-summary.jsonl")
-
-    def chat_fn(messages):
-        return mistral_chat(messages, api_key=api_key, model=args.model,
-                            base_url=args.base_url, max_tokens=args.max_tokens,
-                            reasoning_effort=args.reasoning_effort)
-
-    for target in manifest["targets"]:
-        if args.only and target["id"] != args.only:
-            continue
-        if target.get("kind") != "prove":
-            continue
-        target["statement"] = open(os.path.join(root, target["file"])).read()
-        pointers = target.get("pointers", [])
-        context_pack = extract_signatures(args.main_repo, pointers) if pointers else ""
-        print(f"[{target['id']}] budget={args.budget} pointers={len(pointers)} …", flush=True)
-
-        summary = run_target(target, budget=args.budget,
-                             max_rounds=args.max_rounds, chat_fn=chat_fn,
-                             check_fn=daemon_check,
-                             log_fn=lambda r: append_jsonl(attempts_log, r),
-                             system_prompt=system_prompt, context_pack=context_pack,
-                             fanout=args.fanout, repair_rounds=args.repair_rounds)
-        summary["model"] = args.model
-        summary["ts"] = time.strftime("%Y-%m-%dT%H:%M:%S")
-        append_jsonl(summary_log, summary)
-        print(f"  -> {summary['outcome']} rounds={summary['rounds']} "
-              f"tokens={summary['tokens']}", flush=True)
-        if "_winning_candidate" in target:
-            win_path = os.path.join(run_dir, f"{args.run_tag}-{target['id']}.lean")
-            with open(win_path, "w") as f:
-                f.write(target["_winning_candidate"])
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

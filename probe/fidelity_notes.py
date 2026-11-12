@@ -37,7 +37,7 @@ def _fence(code: str, lang: str = "lean") -> str:
 
 def render_notes(*, target_id: str, lean_statement: str, issue_number=None,
                  issue_title: str = "", issue_task: str = "", pointers=None,
-                 provenance=None, harness: str = "vibe ⇄ lean-lsp-mcp") -> str:
+                 provenance=None, harness: str = "agent ⇄ lean-lsp-mcp") -> str:
     pointers = pointers or []
     provenance = provenance or {}
     out: list[str] = [

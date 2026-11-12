@@ -70,24 +70,17 @@ DEFERRED="$(read_meta deferred)"   # json list of facts a SUBSET proof left for 
 [ -n "$MODULE" ] && [ -n "$BENCH" ] || {
   echo "[open-pr] target $ID missing main_module/benchmark metadata" >&2; exit 1; }
 
-# The prover, READ from the session that ran — never assumed. This block used to say
-# "Proved by Leanstral" for every candidate; from 2026-09-28 the prover is whatever
-# `[prover] engine` selected (Claude by default), and cal-bk-129 — the first proof in two
-# months — was claude-sonnet-5's. The commit and PR body name the real prover, and so does
-# the entry's provenance (`stamp_prover`, below). Attribution rule: the prover is NAMED;
-# only a Leanstral proof keeps the `Co-Authored-By` trailer, Claude is never a co-author.
+# The prover, READ from the session that ran — never assumed. The commit and PR body
+# name the real prover, and so does the entry's provenance (`stamp_prover`, below).
+# Attribution rule: the prover is NAMED in the message; Claude is never a co-author.
 # (The autop scout path — draft PRs, `.scout` sidecars, `refs`-not-`closes` — was removed
 # with autop itself; every candidate is axiom-guarded by the gate.)
-PROVER_JSON="$(cd "$FOUNDRY/probe" && python3 vibe_prove.py prover-of --run-tag "$TAG" \
+PROVER_JSON="$(cd "$FOUNDRY/probe" && python3 prove_session.py prover-of --run-tag "$TAG" \
   --id "$ID" --config "$FOUNDRY/pipeline.toml")"
 PROVER_ENGINE="$(printf '%s' "$PROVER_JSON" | python3 -c 'import sys,json;print(json.load(sys.stdin)["engine"])')"
 MODEL="${MODEL:-$(printf '%s' "$PROVER_JSON" | python3 -c 'import sys,json;print(json.load(sys.stdin)["model"])')}"
 PR_FLAGS=()
-COMMIT_TRAILER=()
 case "$PROVER_ENGINE" in
-  leanstral)
-    PROVER_NAME="Leanstral (${MODEL})"
-    COMMIT_TRAILER=(-m "Co-Authored-By: Leanstral <${MODEL}@users.noreply.mistral.ai>") ;;
   claude) PROVER_NAME="Claude (${MODEL})" ;;
   *)      PROVER_NAME="${MODEL}" ;;
 esac
@@ -362,8 +355,7 @@ git -c user.name="${DOMAIN_COMMIT_AUTHOR:-$DOMAIN_NAME-autoform[bot]}" \
     -c user.email="autoform@users.noreply.github.com" \
     commit -q \
     -m "feat(autoform): $ID — prove $(basename "$MODULE" .lean) ($CLOSE_KW #$ISSUE)" \
-    -m "$PROVER_DESC" \
-    "${COMMIT_TRAILER[@]}"
+    -m "$PROVER_DESC"
 # The OTHER half of CI parity: the library's host-side gates, run exactly as its
 # build runs them — and AFTER the commit, because the attribution gate reads who
 # added each file from git. (They ran before it until 2026-11: the new module was

@@ -52,9 +52,9 @@ def judge_messages(pack: DomainPack, issue: dict, stub: str,
 
 
 def _assistant(content: str) -> dict:
-    """An assistant turn safe to re-send. Mistral 400s on an empty-content assistant message
-    ("Assistant message must have either content or tool_calls, but not none") — which a
-    free-tier empty reply produces once threaded into a repair round — so substitute a
+    """An assistant turn safe to re-send. A chat API can refuse an empty-content assistant
+    message ("Assistant message must have either content or tool_calls, but not none") —
+    which an empty reply produces once threaded into a repair round — so substitute a
     placeholder (caught #61 in the 2026-07-15 forced tick)."""
     return {"role": "assistant", "content": content or "(no output)"}
 
@@ -65,9 +65,8 @@ def _assistant(content: str) -> dict:
 #
 # The split still stands, but both stages are Claude now: it SPECIFIES the intended
 # statement in precise prose first (no Lean), then FORMALIZES it agentically
-# (`claude -p` + the lean-lsp MCP, self-validating to elaboration). Leanstral no
-# longer drafts either stage — it only PROVES. See
-# docs/superpowers/specs/2026-07-14-leanstral-drafter-two-stage-design.md.
+# (`claude -p` + the lean-lsp MCP, self-validating to elaboration). The prover
+# drafts neither stage. Design history: docs/superpowers/specs/ (2026-07-14).
 #
 # The system prompts these stages use are pack files:
 #   intent-system.md · formalize-system.md · intent-defs-addendum.md

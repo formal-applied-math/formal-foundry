@@ -79,10 +79,10 @@ def test_load_entry_reads_sidecar():
         open(stub, "w").close()
         with open(os.path.join(d, "cal-bk-88.entry.json"), "w") as f:
             json.dump({"id": "mf-fx-contango", "metadata":
-                       {"provenance": {"source": "leanstral-autoform", "issue": 88}}}, f)
+                       {"provenance": {"source": "foundry-autoform", "issue": 88}}}, f)
         entry = load_entry(stub)
         assert entry["id"] == "mf-fx-contango"
-        assert entry["metadata"]["provenance"]["source"] == "leanstral-autoform"
+        assert entry["metadata"]["provenance"]["source"] == "foundry-autoform"
 
 
 def test_load_entry_none_when_absent():

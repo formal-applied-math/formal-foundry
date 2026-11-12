@@ -3,12 +3,14 @@
 How the formalization (prover) agents are equipped to match a MathFin author's
 standards: the context they see, the values their output is held to, the house
 idioms they're told to use, the exact pins they target, and the loop/harness
-around them. Implemented in `probe/house_context.py` + `probe/probe.py`.
+around them. Implemented in `probe/house_context.py` + `probe/prove_session.py`, launched
+by `scripts/claude-prove.sh`.
 
 ## What every agent gets (the system message)
 
-`house_context.build_system_prompt(main_repo)` is injected as the `system`
-message on every attempt. It is assembled live (never stale) from:
+`house_context.build_system_prompt(main_repo)` is the session's appended system prompt
+(passed as a file: built from the v2 library it is larger than one command-line
+argument may be). It is assembled live (never stale) from:
 
 - **Context** — the project is a Mathlib + BrownianMotion quant-finance library;
   the agent replaces a single `sorry` and returns the complete file.
@@ -53,19 +55,26 @@ value and the higher-yield path.
 
 ## The loop
 
-`run_target` runs the multiturn compiler-feedback loop Leanstral is trained for:
-build prompt → chat → extract the ```lean block → slop-screen → daemon-check →
-on failure, feed the compiler errors back and resend the complete file; on
-success, verify axiom-cleanliness. Supporting pieces:
+The prover is one headless agentic session per target (`claude -p`, model
+`[prover].claude_model`), with the lean-lsp MCP server as its only Lean access. The
+session reads the goal at the `sorry`, tries tactics against the live state
+(`lean_goal`, `lean_multi_attempt`, `lean_diagnostic_messages`), searches
+(`lean_loogle`, `lean_leansearch`), and edits the stub in place until the file checks or
+`max_turns` ends. It never sees the issue: its task is the stub, the context pack and,
+on a retry, the notebook of what earlier attempts tried.
 
-- **`reasoning_effort`** — `--reasoning-effort high` for hard targets, `none` for
-  speed. In reasoning mode the API returns content as a list of blocks;
-  `normalize_content` keeps the answer text and drops the internal thinking.
-- **Test-time scaling** — the per-target token budget (`--budget`) is the
-  first-class knob; the calibration sweeps it 50k → 500k → 2M.
-- **Windowing** — `window_messages` preserves the leading system message + the
-  first user turn (the file) across long repair loops, so the doctrine and the
-  statement are never dropped.
+`prove_session.py` then takes the Lean slot back for the daemon and gates what the
+session left: no errors, no `sorry`, the axiom guard, the slop screen, and the
+statement-integrity pin (the proved file must still assert the drafted statement). The
+session's transcript is parsed for its token use and for whether the Lean tools were
+actually reached; a session that never started is a red tick, never a failed proof.
+
+- **Depth, not breadth** — `max_turns` (60) is the lever. More turns is more repair
+  depth in one session, under the per-issue token cap.
+- **The canary** — before a paid session, a trivial theorem goes through the same
+  launcher (`[prover].canary`); if it does not come back proved the tick stops.
+- **The completion-style loop** (`probe.run_target`: prompt → reply → daemon check →
+  feed the errors back) remains for the refill's two optional kernel probes only.
 
 ## Targets come from issues, not a parallel list
 
@@ -75,11 +84,10 @@ drives the context pack; its **Task** is the statement to formalize.
 
 ## The `lean-lsp-mcp` harness (built + verified, Docker-plugged)
 
-Leanstral was specifically trained for **`lean-lsp-mcp`** — the MCP server
-exposing the Lean language server's live goal states, type info, hovers, search,
-and `run` as tools, which is what enables its long-horizon proof sessions. The
-text-loop pastes compiler *error strings*; this gives the agent the *goal state*
-directly. It is stood up and verified against this box's constraints:
+**`lean-lsp-mcp`** is the MCP server exposing the Lean language server's live goal
+states, type info, hovers, search and `run` as tools. A completion loop pastes compiler
+*error strings*; this gives the agent the *goal state* directly. It is stood up and
+verified against this box's constraints:
 
 - **`docker/docker-compose.lean-lsp.yml`** (main repo) adds a `lean-lsp` service:
   the pinned Lean image + the `lake_build_cache` olean volume (reuses the built
@@ -87,33 +95,32 @@ directly. It is stood up and verified against this box's constraints:
   It `pip install`s `lean-lsp-mcp` at start and idles; `docker exec` spawns the
   stdio MCP per session.
 - **Memory doctrine** — the Lean LSP loads only during a session, so it is *the*
-  one Lean process: the lean-repl daemon must be DOWN. `scripts/leanstral-vibe.sh`
-  enforces it (takes the daemon down, brings `lean-lsp` up, sources the key).
-- **`~/.vibe/config.toml`** wires the MCP as
-  `docker exec -i mathfin-lean-lsp lean-lsp-mcp --lean-project-path /app`.
-  Verified end-to-end: the handshake exposes 23 tools including `lean_goal`,
-  `lean_term_goal`, `lean_hover_info`, `lean_diagnostic_messages`,
-  `lean_completions`, and `lean_loogle`/`lean_leansearch`/`lean_state_search`.
+  one Lean process: the lean-repl daemon must be DOWN. `scripts/claude-prove.sh`
+  enforces it (validates its arguments first, then takes the daemon down and brings
+  `lean-lsp` up).
+- **The MCP wiring** is a config the launcher writes per session and passes with
+  `--strict-mcp-config`: `docker exec -i <lean-lsp container> lean-lsp-mcp
+  --lean-project-path /app`, with `--allowedTools` limited to the Lean tools and file
+  edits. The agentic drafter uses the same server (`autoformalize._lean_lsp_mcp_config`).
 
 Runbook:
 
 ```bash
-# one-time: Leanstral API key + agent
-vibe --setup                 # stores the Mistral API key
-# then, inside vibe, run /leanstall to install the Leanstral agent + model (labs-leanstral-1-5)
+# Claude auth: CLAUDE_CODE_OAUTH_TOKEN (or ANTHROPIC_API_KEY) in the env, or a local login.
 
 # per session (the launcher takes the daemon down + brings lean-lsp up):
 cd ~/code/formal-foundry
-scripts/leanstral-vibe.sh --agent lean -p "prove the sorry in <MathFin/…>; use lean_goal to read the state"
+scripts/claude-prove.sh --agent lean --max-turns 60 \
+  -p "prove the sorry in <MathFin/…>; use lean_goal to read the state"
 
 # tear the LSP down when done (frees the Lean slot for the daemon):
-docker compose -f ~/code/automated_proofs_quantfin/docker/docker-compose.yml \
-  -f ~/code/automated_proofs_quantfin/docker/docker-compose.lean-lsp.yml down lean-lsp
+docker compose -f "$MAIN_REPO/docker/docker-compose.yml" \
+  -f "$MAIN_REPO/docker/docker-compose.lean-lsp.yml" down lean-lsp
 ```
 
 The house doctrine + values gate + issue-driven context pack (above) go in front
-of whichever loop produces the candidate — the text-loop *or* this MCP harness;
-the slop screen and axiom guard are harness-independent.
+of whichever session produces the candidate; the slop screen and axiom guard do not
+depend on it.
 
 Note: the first `up` pip-installs `lean-lsp-mcp` in the container (~30 s); to skip
 that, bake it into the image via CI (`publish-image.yml`), never a local
@@ -121,11 +128,11 @@ that, bake it into the image via CI (`publish-image.yml`), never a local
 
 ## Harness tuning — no new model (see `docs/upgrade-backlog.md` §A/§B)
 
-Two lean-lsp-mcp levers speed the vibe path with zero new dependencies:
+Two lean-lsp-mcp levers speed the prove session with zero new dependencies:
 
 - **`lean_multi_attempt`** — lean-lsp-mcp exposes a REPL-backed multi-candidate
-  tool (~5× faster than paste-and-recheck, maintainer estimate). Tell the vibe
-  agent to use it for cheap candidate fan-out on hard targets (add it to the task
+  tool (~5× faster than paste-and-recheck, maintainer estimate). Tell the
+  prover to use it for cheap candidate fan-out on hard targets (add it to the task
   prompt or the agent's standing instructions).
 - **Self-hosted search endpoints** — the bundled LeanSearch/Loogle/State-Search
   hit hosted services rate-limited to ~3 req/30s and send queries off-box. Point
@@ -134,14 +141,12 @@ Two lean-lsp-mcp levers speed the vibe path with zero new dependencies:
   Loogle build is ~2 GB; it is host-side (not a Lean env), but verify the footprint
   against the one-Lean-process memory doctrine before standing it up.
 
-The other no-model lever is the **budget shape** (`fanout` vs `tokens_per_attempt`
-in `pipeline.toml`) — Leanstral's dominant one; the recommended tuning is in
+The other no-model lever is the **budget shape**: `max_turns` under
+`tokens_per_issue_cap` in `pipeline.toml`. The reasoning is in
 `docs/upgrade-backlog.md` §B.
 
 ## References
 
-- [Leanstral 1.5 — Mistral AI](https://mistral.ai/news/leanstral-1-5/)
-- [mistralai/Leanstral-1.5-119B-A6B — Hugging Face](https://huggingface.co/mistralai/Leanstral-1.5-119B-A6B)
 - [oOo0oOo/lean-lsp-mcp](https://github.com/oOo0oOo/lean-lsp-mcp)
 - house idioms: `formal-mathfin/docs/patterns.md`; values: `docs/values-review.md`.
 

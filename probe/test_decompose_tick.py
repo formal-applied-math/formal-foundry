@@ -81,7 +81,7 @@ def test_do_recompose_assembles_candidate_from_proved_leaves(tmp_path):
     leafdir.mkdir()
     (leafdir / "manifest.json").write_text(json.dumps(
         {"targets": [{"id": "cal-bk-99__lem_refl", "sorry_name": "lem_refl"}]}), encoding="utf-8")
-    # the proved leaf module vibe would have written
+    # the proved leaf module the prover would have written
     (tmp_path / "T-cal-bk-99__lem_refl.lean").write_text(_proved_module("lem_refl"), encoding="utf-8")
 
     r = do_recompose(PACK, "cal-bk-99", "T", runs, check_fn=lambda m: {"passed": True, "reason": "ok"})
@@ -108,14 +108,14 @@ def test_do_recompose_partial_banks_and_declares_remainder(tmp_path):
 
 def test_draft_then_recompose_chains(tmp_path):
     # the real path-contract between the two shell steps: do_draft's leaf-manifest ids +
-    # the vibe-written `<tag>-<leafid>.lean` convention must be exactly what do_recompose reads.
+    # the prover-written `<tag>-<leafid>.lean` convention must be exactly what do_recompose reads.
     runs = str(tmp_path)
     good_chat = lambda msgs, **_kw: (json.dumps(_DAG), 1)                    # noqa: E731
     clean = lambda code: {"errors": [], "sorry_count": code.count("sorry")}  # noqa: E731
     d = do_draft(PACK, "cal-bk-99", "T", runs, target_text="t", context_pack="", drafter_preamble="",
                  cfg_max_leaves=3, cfg_max_reask=1, chat_fn=good_chat, check_fn=clean)
     assert d["outcome"] == "drafted"
-    # vibe would write the proved leaf module at this exact path (from the manifest id)
+    # the prover would write the proved leaf module at this exact path (from the manifest id)
     leaf_id = d["leaf_ids"][0]
     (tmp_path / f"T-{leaf_id}.lean").write_text(_proved_module("lem_refl"), encoding="utf-8")
     r = do_recompose(PACK, "cal-bk-99", "T", runs, check_fn=lambda m: {"passed": True})

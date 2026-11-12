@@ -4,7 +4,7 @@ The vacuity (`⊢ False` from the hyps) and disproof (`⊢ ¬C`) probes re-elabo
 adversarial goal from scratch every attempt and every tick — a stuck issue that keeps
 redrafting the same statement pays the full prove cost each time. This content-addresses
 the goal and substitutes the cached verdict on a hit (Nexus caches disproofs too), saving
-Mistral tokens + daemon time. A genuine refutation is deterministic (the b078f9f statement
+model tokens + daemon time. A genuine refutation is deterministic (the b078f9f statement
 pin guards against a reverted-goal false positive), so caching it is safe within a
 toolchain generation; a Mathlib/Lean pin bump bumps CACHE_GENERATION and drops the file.
 

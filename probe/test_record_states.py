@@ -1,10 +1,10 @@
-"""Tests for the vibe harness's proof-state recording hook. No daemon, no API."""
+"""Tests for the prove session's proof-state recording hook. No daemon, no API."""
 from __future__ import annotations
 
 import json
 
 import state_cache as sc
-import vibe_prove
+import prove_session
 
 
 def _check(goals):
@@ -23,7 +23,7 @@ def _check(goals):
 def test_records_states_into_the_cache_and_reports_counts(tmp_path):
     cache = sc.StateCache(str(tmp_path / "c.json"))
     cand = "theorem t : P := by\n  intro x\n  simp"
-    got = vibe_prove.record_proof_states(
+    got = prove_session.record_proof_states(
         cand, target_id="cal-bk-1", check_fn=_check({0: "⊢ P", 1: "x : X\n⊢ Q"}),
         cache=cache, log_path=str(tmp_path / "states.jsonl"))
     assert got == {"states": 2, "new_states": 2}
@@ -37,9 +37,9 @@ def test_second_target_hitting_the_same_states_is_new_states_zero(tmp_path):
     cand = "theorem t : P := by\n  intro x\n  simp"
     check = _check({0: "⊢ P", 1: "x : X\n⊢ Q"})
     log = str(tmp_path / "states.jsonl")
-    vibe_prove.record_proof_states(cand, target_id="t1", check_fn=check, cache=cache,
+    prove_session.record_proof_states(cand, target_id="t1", check_fn=check, cache=cache,
                                    log_path=log)
-    got = vibe_prove.record_proof_states(cand, target_id="t2", check_fn=check, cache=cache,
+    got = prove_session.record_proof_states(cand, target_id="t2", check_fn=check, cache=cache,
                                          log_path=log)
     assert got == {"states": 2, "new_states": 0}
     assert cache.report()["cross_target_states"] == 2
@@ -48,7 +48,7 @@ def test_second_target_hitting_the_same_states_is_new_states_zero(tmp_path):
 def test_every_sighting_is_logged_as_jsonl_for_offline_measurement(tmp_path):
     cache = sc.StateCache(str(tmp_path / "c.json"))
     log = str(tmp_path / "states.jsonl")
-    vibe_prove.record_proof_states(
+    prove_session.record_proof_states(
         "theorem t : P := by\n  simp", target_id="cal-bk-9",
         check_fn=_check({0: "⊢ P"}), cache=cache, log_path=log)
     rows = [json.loads(line) for line in open(log, encoding="utf-8")]
@@ -65,7 +65,7 @@ def test_a_dead_daemon_records_nothing_and_does_not_raise(tmp_path):
     def dead(_code):
         return {"success": False, "error": "daemon check did not complete", "errors": ["x"]}
 
-    got = vibe_prove.record_proof_states(
+    got = prove_session.record_proof_states(
         "theorem t : P := by\n  simp", target_id="t", check_fn=dead, cache=cache,
         log_path=str(tmp_path / "s.jsonl"))
     assert got == {"states": 0, "new_states": 0}
@@ -77,7 +77,7 @@ def test_a_raising_check_fn_is_swallowed(tmp_path):
     def boom(_code):
         raise RuntimeError("socket exploded")
 
-    got = vibe_prove.record_proof_states(
+    got = prove_session.record_proof_states(
         "theorem t : P := by\n  simp", target_id="t", check_fn=boom, cache=cache,
         log_path=str(tmp_path / "s.jsonl"))
     assert got == {"states": 0, "new_states": 0}
@@ -85,12 +85,12 @@ def test_a_raising_check_fn_is_swallowed(tmp_path):
 
 # --- consumption: the suggestions reach the prover's task -------------------
 
-def test_the_vibe_task_carries_cross_target_suggestions_when_present():
-    task = vibe_prove.build_vibe_task("f.lean", "t", "sig : …",
+def test_the_prove_task_carries_cross_target_suggestions_when_present():
+    task = prove_session.build_prove_task("f.lean", "t", "sig : …",
                                       state_hints="-- goal:\n⊢ B\n-- closed by: ring")
     assert "⊢ B" in task and "ring" in task
 
 
-def test_the_vibe_task_is_unchanged_when_there_are_no_suggestions():
-    plain = vibe_prove.build_vibe_task("f.lean", "t", "sig : …")
-    assert plain == vibe_prove.build_vibe_task("f.lean", "t", "sig : …", state_hints="")
+def test_the_prove_task_is_unchanged_when_there_are_no_suggestions():
+    plain = prove_session.build_prove_task("f.lean", "t", "sig : …")
+    assert plain == prove_session.build_prove_task("f.lean", "t", "sig : …", state_hints="")
