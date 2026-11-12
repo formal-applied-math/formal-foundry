@@ -4,8 +4,7 @@
     "cal-bk-85",
     "cal-bk-161",
     "cal-bk-162",
-    "cal-bk-144",
-    "cal-bk-318"
+    "cal-bk-144"
   ],
   "history": [
     {
@@ -36,12 +35,6 @@
       "epoch": 1785217852,
       "id": "cal-bk-144",
       "outcome": "max_rounds",
-      "tokens": 0
-    },
-    {
-      "epoch": 1794473206,
-      "id": "cal-bk-318",
-      "outcome": "fail_assembly",
       "tokens": 0
     }
   ],
@@ -167,6 +160,13 @@
       "outcome": "fail_gate",
       "tokens": 0,
       "voided": "no session ran: the redraft (blackForm_tendsto_zero_iff_dpl_tendsto_atBot) was handed the kept proof of the previous statement under the same target id, and the gate refused it as statement_altered. Proof reuse is now pinned to the staged statement (fix/adopt-pins-statement). Voided 2026-11-12 so the new statement is proved."
+    },
+    {
+      "epoch": 1794473206,
+      "id": "cal-bk-318",
+      "outcome": "fail_assembly",
+      "tokens": 0,
+      "voided": "released 2026-11-12: the tail lemma passed through the decompose path and the library refused the assembly for faults of the assembly, not the statement: three long lines (the main statement and proof were not reflowed), a leaf renaming tendsto_Phi_atBot (duplicate_statements), and a leaf proved through SVI.blackCall (price_entries_off_trunk). fix/decompose-assembly reflows and trunk-checks the recomposed module, inlines alias leaves and tells the prover the prices to avoid; the statement is re-proved under it. Proof kept at runs/pipeline-20261112-081101-cal-bk-318.lean"
     }
   ]
 }
