@@ -7,7 +7,7 @@ import re
 from af_parse import *  # noqa: F401,F403
 from domain_pack import DomainPack
 
-__all__ = ['_probed_conclusion', '_probed_signature', '_DEPTH_MARKER', '_mod_name', 'depth_probe', 'depth_rejection', '_MAP_MARKER', 'map_probe', 'map_rejection', '_TRIV_TACTIC', '_SORRY_RE', 'triviality_goal', 'triviality_rejection', '_DEFS_MARKER', 'drafted_def_names', 'defs_probe', 'defs_rejection', '_INSTANCE_PROBE_TACTIC_RE', '_example_blocks', '_example_probes_def', 'instance_probe_rejection']
+__all__ = ['_probed_conclusion', '_probed_signature', '_DEPTH_MARKER', '_mod_name', 'depth_probe', 'depth_rejection', '_MAP_MARKER', 'map_probe', 'map_rejection', '_TRIV_TACTIC', '_SORRY_RE', 'triviality_goal', 'triviality_rejection', '_DEFS_MARKER', 'drafted_def_names', 'defs_probe', 'defs_rejection', '_INSTANCE_PROBE_TACTIC_RE', '_example_blocks', '_example_probes_def', 'instance_probe_rejection', '_TRUNK_MARKER', 'trunk_rejection', '_SHAPE_MARKER', 'shape_probe', 'shape_text_problems', 'shape_rejection', 'LONG_FILE_LINES']
 
 
 
@@ -226,6 +226,86 @@ def map_probe(pack: DomainPack, lean_text: str, name: str, anchors: list[str],
         'library has not yet founded on its pricing functional"\n'
     )
     return lean_text.rstrip() + "\n" + meta
+
+
+_SHAPE_MARKER = "shape-gate:"
+_HEARTBEATS = re.compile(r"\bset_option\s+maxHeartbeats\b")
+#: Mathlib's `linter.style.longFile` default, the library's `long_files` ratchet
+LONG_FILE_LINES = 1500
+
+
+def shape_probe(pack: DomainPack, lean_text: str) -> str:
+    """The module + a `run_cmd` block that FAILS, under `shape-gate:`, when a theorem the
+    module declares is one the library's declaration index would count as debt:
+
+    * a DUPLICATE: its statement's `Expr` hash equals a library theorem's, or another of
+      the module's own (`duplicate_statements`, baseline 0; cal-bk-318's decompose leaf
+      `Phi_tendsto_zero_atBot := tendsto_Phi_atBot`);
+    * a MATHLIB-SHAPED PRIVATE: private, and its statement mentions no constant of the
+      library or of the module itself (`private_mathlib_shaped`, baseline 0).
+
+    The library computes both in its own Lean index tool over the declarations a
+    reader would name; this walks the same set (no auto-generated declaration, no
+    constructor or recursor) with the same hash, so the two agree."""
+    root = pack.lake_root
+    meta = (
+        "\nopen Lean in\n"
+        "run_cmd do\n"
+        "  let env ← getEnv\n"
+        "  let mods := env.header.moduleNames\n"
+        "  let inLib (c : Name) : Bool :=\n"
+        "    match env.getModuleIdxFor? c with\n"
+        f"    | some i => mods[i.toNat]!.getRoot == `{root}\n"
+        "    | none => true\n"
+        "  let lib : Std.HashMap UInt64 Name := env.constants.map₁.fold (init := {}) fun acc n ci =>\n"
+        "    if (ci matches .thmInfo _) && inLib n && !env.isAutoDecl (privateToUserName n) then\n"
+        "      acc.insert ci.type.hash n else acc\n"
+        "  let mut seen : Std.HashMap UInt64 Name := {}\n"
+        "  let mut bad : Array String := #[]\n"
+        "  for (n, ci) in env.constants.map₂.toList do\n"
+        "    unless (ci matches .thmInfo _) do continue\n"
+        "    if env.isAutoDecl (privateToUserName n) then continue\n"
+        "    let h := ci.type.hash\n"
+        "    if let some m := lib[h]? then\n"
+        "      bad := bad.push s!\"{privateToUserName n} states what {m} states\"\n"
+        "    else if let some m := seen[h]? then\n"
+        "      bad := bad.push s!\"{privateToUserName n} states what {privateToUserName m} states\"\n"
+        "    seen := seen.insert h n\n"
+        "    if isPrivateName n && !(ci.type.getUsedConstants.any inLib) then\n"
+        "      bad := bad.push s!\"private {privateToUserName n} mentions nothing of the library: \" ++\n"
+        "        \"use the upstream lemma, inline it, or make it public under a name that says what it proves\"\n"
+        "  unless bad.isEmpty do\n"
+        "    let msg := String.intercalate \"; \" bad.toList\n"
+        f'    throwError m!"{_SHAPE_MARKER} {{msg}}"\n'
+    )
+    return lean_text.rstrip() + "\n" + meta
+
+
+def shape_text_problems(lean_text: str) -> list[str]:
+    """The library's source counts a module can raise by its text alone."""
+    code = re.sub(r"/-.*?-/", "", lean_text, flags=re.S)
+    code = re.sub(r"--[^\n]*", "", code)
+    out = []
+    if _HEARTBEATS.search(code):
+        out.append("`set_option maxHeartbeats` (the library's `max_heartbeats` count may not "
+                   "rise): find a proof that elaborates in the default budget")
+    if lean_text.count("\n") + 1 > LONG_FILE_LINES:
+        out.append(f"the module is over {LONG_FILE_LINES} lines (`long_files`)")
+    return out
+
+
+def shape_rejection(pack: DomainPack, lean_text: str, *, check_fn) -> dict:
+    """`{refused, indeterminate?, verdict}`: would the library's index or source counts
+    rise because of what this module declares? Fails open on a daemon error."""
+    text = shape_text_problems(lean_text)
+    if text:
+        return {"refused": True, "verdict": "; ".join(text)}
+    res = check_fn(shape_probe(pack, lean_text))
+    if res.get("error"):
+        return {"refused": False, "indeterminate": True,
+                "verdict": "indeterminate: " + str(res["error"])[:120]}
+    errs = [str(e) for e in (res.get("errors") or []) if _SHAPE_MARKER in str(e)]
+    return {"refused": bool(errs), "verdict": "; ".join(errs[:2])[:600]}
 
 
 def trunk_rejection(pack: DomainPack, lean_text: str, name: str, trunk: dict | None,

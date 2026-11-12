@@ -125,3 +125,28 @@ def test_a_proof_through_an_unfounded_price_is_caught_through_the_proof():
     assert _errors(af_gates.map_probe(PACK, stub, "t_pf", [], trunk)) == []
     errs = _errors(af_gates.map_probe(PACK, stub, "t_pf", [], trunk, through_proof=True))
     assert errs and all(af_gates._TRUNK_MARKER in e for e in errs), errs
+
+
+# --- the shape gate: what the library's index would count as debt -----------------------
+
+def test_a_new_public_statement_has_a_clean_shape():
+    """Also the fact the probe rests on: the environment's local map holds the module's
+    own declarations only, not the library's."""
+    _, obj = _fixture()
+    stub = _stub(f"theorem t_new (x : ℝ) : {obj} x + 0 = {obj} x := by simp\n")
+    assert _errors(af_gates.shape_probe(PACK, stub)) == []
+
+
+def test_a_restated_library_lemma_is_a_duplicate():
+    _, obj = _fixture()
+    stub = _stub(f"theorem t_dup (x : ℝ) : 0 ≤ {obj} x := {obj}_nonneg x\n")
+    errs = _errors(af_gates.shape_probe(PACK, stub))
+    assert errs and af_gates._SHAPE_MARKER in errs[0] and f"{obj}_nonneg" in errs[0], errs
+
+
+def test_a_private_lemma_about_nothing_of_the_library_is_refused():
+    _, obj = _fixture()
+    stub = _stub("private theorem t_priv (x : ℝ) : x + 0 = x := by simp\n\n"
+                 f"private theorem t_ok (x : ℝ) : {obj} x + 0 = {obj} x := by simp\n")
+    errs = _errors(af_gates.shape_probe(PACK, stub))
+    assert errs and "t_priv" in errs[0] and "t_ok" not in errs[0], errs

@@ -771,3 +771,29 @@ def test_the_trunk_gate_reads_its_own_marker():
     r = af_gates.map_rejection(PACK, stub, "t", ["MathFin.Phi"], trunk=trunk,
                                check_fn=check([]))
     assert not r["off_map"] and not r["off_trunk"]
+
+
+# --- the library's index and source counts, asked of a module before assembly ----------
+
+def test_the_shape_gate_reads_its_marker_and_the_text_counts():
+    ok = af_gates.shape_rejection(PACK, "theorem t : True := trivial\n",
+                                  check_fn=lambda c: {"errors": []})
+    assert not ok["refused"]
+    dup = af_gates.shape_rejection(PACK, "theorem t : True := trivial\n", check_fn=lambda c: {
+        "errors": [f"{af_gates._SHAPE_MARKER} t states what MathFin.u states"]})
+    assert dup["refused"] and "MathFin.u" in dup["verdict"]
+    hb = af_gates.shape_rejection(
+        PACK, "set_option maxHeartbeats 400000 in\ntheorem t : True := trivial\n",
+        check_fn=lambda c: pytest.fail("the text check decides first"))
+    assert hb["refused"] and "maxHeartbeats" in hb["verdict"]
+    assert not af_gates.shape_text_problems("-- set_option maxHeartbeats 400000\n")
+    down = af_gates.shape_rejection(PACK, "theorem t : True := trivial\n",
+                                    check_fn=lambda c: {"error": "daemon gone"})
+    assert not down["refused"] and down["indeterminate"]
+
+
+def test_the_draft_gates_see_the_new_checks():
+    """autoformalize re-exports the gates with `*`: a name missing from `__all__` is a
+    NameError in the middle of a tick, which no unit test of af_gates would show."""
+    for name in ("shape_rejection", "trunk_rejection", "map_rejection"):
+        assert callable(getattr(af, name))

@@ -95,6 +95,18 @@ REGEN_LOG="$FOUNDRY/runs/$TAG-$ID.assembly.log"
 
 blocked() {  # file an autoform-blocked issue on the FOUNDRY repo, do NOT open a PR
   echo "[open-pr] BLOCKED: $1" >&2
+  # the reason, for the tick: it releases the target with it (`release.py`) so the next
+  # attempt is told what the library refused, instead of the issue staying stranded
+  python3 - "$FOUNDRY/runs/$TAG-$ID.blocked.json" "$1" "$REGEN_LOG" <<'PY' || true
+import json, re, sys
+out, why, log = sys.argv[1:4]
+try:
+    text = open(log, encoding="utf-8", errors="replace").read()
+except OSError:
+    text = ""
+ratchets = re.findall(r"^ratchet: (.+)$", text, re.M)
+json.dump({"reason": why, "ratchets": ratchets}, open(out, "w", encoding="utf-8"), indent=2)
+PY
   # WHY, kept: the last lines of the recipe's output ride the run's telemetry and the
   # issue, so "did not assemble green" names the gate that said so.
   local tail_txt=""

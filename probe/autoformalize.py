@@ -577,6 +577,14 @@ def semantic_verdict(pack: DomainPack, *, lean_text: str, stub: str, name: str,
         return {"gate": "off_map" if mp["off_map"] else "off_trunk",
                 "detail": mp.get("verdict", "") + (f" Program objects to state it "
                                                    f"through: {hint}" if hint else "")}, tokens
+    # a statement the library already has: its entry would raise `duplicate_statements`
+    # whatever the proof (the gate is active wherever the map is, i.e. on a checkout)
+    if issue.get("map_anchors"):
+        sh = shape_rejection(pack, lean_text, check_fn=check_fn)
+        if sh.get("indeterminate"):
+            return {"gate": "indeterminate", "detail": sh.get("verdict", "")}, tokens
+        if sh["refused"]:
+            return {"gate": "duplicate", "detail": sh.get("verdict", "")}, tokens
     if triviality_gate:
         triv = triviality_rejection(lean_text, check_fn=check_fn)
         tokens += triv["tokens"]

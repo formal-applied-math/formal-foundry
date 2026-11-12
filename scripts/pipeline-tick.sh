@@ -321,6 +321,10 @@ elif [ "$OUTCOME" = "pass" ] && [ "$PR_OPENED" = 0 ] && [ "$ASSEMBLY_BLOCKED" = 
   echo "[tick] pass but content-blocked at assembly → recording fail_assembly" >&2
   python3 pipeline.py record --config "$CFG" --state "$STATE" --id "$ID" \
     --outcome fail_assembly ${TOKENS:+--tokens "$TOKENS"} >&2
+  # …and release it, told why: a re-prove first, then a redraft, then a redraft ordered
+  # last (probe/release.py). Recording alone stranded the issue in-progress for good.
+  python3 release.py --state "$STATE" --queue "$(dirname "$QUEUE")" --runs "$FOUNDRY/runs" \
+    --id "$ID" --tag "$TAG" --config "$CFG" >&2 || echo "[tick] release failed — the target stays recorded" >&2
 elif [ "$OUTCOME" = "pass" ] && [ "$PR_OPENED" = 0 ] && [ -n "${MAIN_PR_TOKEN:-}" ]; then
   echo "[tick] pass but PR not opened (transient) → NOT recording (retryable next tick)" >&2
 else
