@@ -472,7 +472,8 @@ def prover_of(run_dir: str, tag: str, target_id: str, config: str | None = None)
     return {"engine": cfg.engine, "model": cfg.claude_model}
 
 
-def adopt_verified(run_dir: str, target_id: str, tag: str) -> str | None:
+def adopt_verified(run_dir: str, target_id: str, tag: str, *, stub: str | None = None,
+                   sorry_name: str | None = None) -> str | None:
     """Reuse the newest proof of `target_id` that passed the gate in an earlier run and
     never became a PR (a refused push, a transient assembly failure): copy its raw
     `.candidate` and its `.session.json` into run `tag`, and return the source run's tag,
@@ -481,8 +482,20 @@ def adopt_verified(run_dir: str, target_id: str, tag: str) -> str | None:
 
     The session is marked `reused_from` and charges 0 tokens: they were spent, and
     counted, by the run that produced it. cal-bk-129 was proved twice on 2026-09-28
-    because a push was refused after the first proof."""
+    because a push was refused after the first proof.
+
+    A kept proof is reused only for the statement it proves: with the staged `stub` and
+    its `sorry_name`, a candidate whose signature differs is skipped, and with no stub to
+    compare against nothing is reused. A redrafted issue keeps its target id, and
+    cal-bk-318's redraft under the trunk gate was handed the proof of the old statement,
+    refused as `statement_altered` and recorded without a session (2026-11-12)."""
     import glob
+    from af_gates import _probed_signature
+    if not stub or not sorry_name:
+        return None
+    want = _probed_signature(stub, sorry_name)
+    if want is None:
+        return None
     passing = []
     for path in sorted(glob.glob(os.path.join(run_dir, "*-summary.jsonl"))):
         src = os.path.basename(path)[:-len("-summary.jsonl")]
@@ -501,6 +514,8 @@ def adopt_verified(run_dir: str, target_id: str, tag: str) -> str | None:
         session = _read_json(os.path.join(run_dir, f"{src}-{target_id}.session.json"))
         if not content or has_sorry(content) or not session:
             continue
+        if _probed_signature(content, sorry_name) != want:
+            continue                  # a proof of another statement under the same id
         with open(os.path.join(run_dir, f"{tag}-{target_id}.candidate"), "w",
                   encoding="utf-8") as f:
             f.write(content)
@@ -896,6 +911,8 @@ def main() -> int:
                                       "in an earlier run (exit 1 when there is none)")
     ad.add_argument("--id", required=True)
     ad.add_argument("--run-tag", required=True)
+    ad.add_argument("--manifest", required=True,
+                    help="the queue manifest: the staged stub pins what may be reused")
     po = sub.add_parser("prover-of", help="the engine + model that proved a target in a run")
     po.add_argument("--run-tag", required=True)
     po.add_argument("--id", required=True)
@@ -909,7 +926,11 @@ def main() -> int:
         return _cmd_experience(args)
     if args.cmd == "adopt":
         _, run_dir = _run_dir()
-        src = adopt_verified(run_dir, args.id, args.run_tag)
+        stub = name = None
+        for target, root in _iter_targets(args.manifest, args.id):
+            stub = read_back(os.path.join(root, target["file"]))
+            name = target.get("sorry_name")
+        src = adopt_verified(run_dir, args.id, args.run_tag, stub=stub, sorry_name=name)
         print(f"[prove-adopt] {args.id}: " + (f"reusing the proof that passed in {src}"
                                               if src else "no verified proof to reuse"),
               file=sys.stderr)

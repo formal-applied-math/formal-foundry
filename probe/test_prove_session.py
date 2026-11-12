@@ -292,9 +292,32 @@ def test_adopt_reuses_the_newest_verified_proof_and_charges_nothing(tmp_path):
             "theorem x : True := trivial\n" if outcome == "pass" else "theorem x : True := by sorry\n")
         (runs / f"{tag}-cal-bk-129.session.json").write_text(json.dumps(
             {"engine": "claude", "model": "claude-sonnet-5", "rc": 0, "tokens": 72456}))
-    src = prove_session.adopt_verified(str(runs), "cal-bk-129", "pipeline-20261001-061700")
+    stub = "theorem x : True := by sorry\n"
+    src = prove_session.adopt_verified(str(runs), "cal-bk-129", "pipeline-20261001-061700",
+                                       stub=stub, sorry_name="x")
     assert src == "pipeline-20260928-011101"
     rec = json.load(open(runs / "pipeline-20261001-061700-cal-bk-129.session.json"))
     assert rec["reused_from"] == src and rec["tokens"] == 0 and rec["original_tokens"] == 72456
     assert "trivial" in (runs / "pipeline-20261001-061700-cal-bk-129.candidate").read_text()
-    assert prove_session.adopt_verified(str(runs), "cal-bk-999", "t") is None
+    assert prove_session.adopt_verified(str(runs), "cal-bk-999", "t", stub=stub,
+                                        sorry_name="x") is None
+
+
+def test_adopt_never_reuses_a_proof_of_another_statement(tmp_path):
+    """A redrafted issue keeps its target id: the kept proof of the OLD statement must not
+    be handed to the new one (cal-bk-318, 2026-11-12), and with no stub nothing is reused."""
+    tag = "pipeline-20261112-063913"
+    (tmp_path / f"{tag}-summary.jsonl").write_text(json.dumps(
+        {"target": "cal-bk-318", "harness": "agentic", "outcome": "pass"}) + "\n")
+    (tmp_path / f"{tag}-cal-bk-318.candidate").write_text(
+        "theorem x (a : Nat) : a = a := rfl\n")
+    (tmp_path / f"{tag}-cal-bk-318.session.json").write_text(json.dumps(
+        {"engine": "claude", "model": "m", "rc": 0, "tokens": 28580}))
+    redrafted = "theorem x (a b : Nat) : a + b = b + a := by sorry\n"
+    assert prove_session.adopt_verified(str(tmp_path), "cal-bk-318", "t2",
+                                        stub=redrafted, sorry_name="x") is None
+    assert not (tmp_path / "t2-cal-bk-318.candidate").exists()
+    assert prove_session.adopt_verified(str(tmp_path), "cal-bk-318", "t2") is None
+    same = "theorem x (a : Nat) : a = a := by sorry\n"
+    assert prove_session.adopt_verified(str(tmp_path), "cal-bk-318", "t2",
+                                        stub=same, sorry_name="x") == tag
