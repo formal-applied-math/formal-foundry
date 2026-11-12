@@ -891,8 +891,11 @@ def refill(pack: DomainPack, issues: list[dict], *, reason_fn, prove_fn, check_f
 # --- CLI (the refill entrypoint pipeline-tick.sh calls) -----------------------
 
 def _fetch_issues(slug: str) -> list[dict]:
+    # `gh` lists newest first and stops at its limit. At 100 the refill saw the newest
+    # 100 of the flagship's 156 open issues, so the OLDEST — the small, well-scoped ones
+    # the queue is ordered to try first — were never candidates.
     out = subprocess.run(
-        ["gh", "issue", "list", "--repo", slug, "--state", "open", "--limit", "100",
+        ["gh", "issue", "list", "--repo", slug, "--state", "open", "--limit", "1000",
          "--json", "number,title,labels,body"],
         capture_output=True, text=True, check=True).stdout
     return json.loads(out)

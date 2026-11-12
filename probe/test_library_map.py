@@ -567,3 +567,16 @@ def test_a_stub_is_never_retired_on_a_failed_lookup(tmp_path):
     assert issue_state.retire_closed("o/r", q, apply=True,
                                      run_fn=_gh_stub([], {129: "OPEN"})) == []
     assert os.path.exists(os.path.join(q, "cal-bk-129.lean"))
+
+
+def test_a_candidate_without_a_module_doc_gets_its_stubs(repo):
+    stub, _e, _p = af.emit_target_files(PACK, _prepared(repo), _STUB, _INTENT)
+    rebuilt = ("/- licence -/\nmodule\n\npublic import Mathlib\n"
+               "public import MathFin.Models.Rates.ZCB\n\n@[expose] public section\n\n"
+               "namespace MathFin\n\ntheorem hoLee_bond_affine : True := trivial\n\nend MathFin\n")
+    out = assemble.ensure_module_doc(rebuilt, stub)
+    assert "# The Ho–Lee bond price" in out
+    assert out.index("public import MathFin.Models.Rates.ZCB") < out.index("/-!") \
+        < out.index("@[expose] public section")
+    assert assemble.ensure_module_doc(out, stub) == out          # one docstring, not two
+    assert assemble.ensure_module_doc(rebuilt, None) == rebuilt  # nothing to take it from

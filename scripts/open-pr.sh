@@ -133,6 +133,11 @@ transient() {  # infra/transient failure (network, gh, docker pull): no issue, n
 
 # --- 2. branch + place -------------------------------------------------------
 cd "$MAIN"
+# The drafter and the prover worked in scratch modules UNDER the Lake root, and they are
+# still there. The library's gates walk that tree on disk, not git's index: a leftover
+# scratch file is a module in no taxonomy cell, with a whole-Mathlib import and no
+# docstring, and it would fail the contribution for something that is not in it.
+rm -f "$MAIN/${DOMAIN_SCRATCH_MODULE:-}" "$MAIN/$DOMAIN_LAKE_ROOT"/_Autoform_*.lean 2>/dev/null || true
 # ONE branch per target, force-pushed. A run-tagged branch name left thirteen copies of
 # cal-bk-129 on the library (2026-09-28 .. 10-21: every tick pushed, none could open its
 # PR); a retry now updates the branch it already has.
@@ -145,8 +150,8 @@ import json, os, sys
 cand_path, queue_path, tid, main, probe_dir, entry_override, domain_name, prover_model, placed = sys.argv[1:10]
 sys.path.insert(0, probe_dir)
 import domain_pack
-from assemble import (apply_contribution, ensure_umbrella_import, record_frontier_core,
-                      stamp_prover)
+from assemble import (apply_contribution, ensure_module_doc, ensure_umbrella_import,
+                      record_frontier_core, stamp_prover)
 from redact import secret_findings, secret_values
 # the pack is passed DOWN (2026-08-16 refactor); this heredoc was missed by it, so the
 # first real pass after that date would have crashed here and — treated as transient —
@@ -165,6 +170,14 @@ entry, stamped = stamp_prover(entry, model=prover_model)
 if stamped:
     print(f"[open-pr] provenance: prover is {prover_model} ({stamped})", file=sys.stderr)
 code = open(cand_path, encoding="utf-8").read()
+# a decompose-path candidate is rebuilt around its lemma-DAG and has lost the module
+# docstring its stub was emitted with; the stub is the source of record for it
+try:
+    stub_text = open(os.path.join(os.path.dirname(queue_path), target.get("file") or ""),
+                     encoding="utf-8").read()
+except OSError:
+    stub_text = None
+code = ensure_module_doc(code, stub_text)
 # The last look before anything is written to a PUBLIC pull request: the proof and the
 # entry (whose prose a model drafted) must not carry a credential. Kinds only, never values.
 leaks = sorted(set(secret_findings(code, secret_values())

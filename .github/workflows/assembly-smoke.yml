@@ -93,7 +93,7 @@ jobs:
         run: |
           cd main
           git log -1 --stat --format='%an <%ae>%n%s%n' || true
-          f="$(git show --name-only --format= HEAD | grep -E '\.lean$' | grep -v AxiomAuditGen | head -1)"
+          f="$(git show --diff-filter=A --name-only --format= HEAD | grep -E '\.lean$' | head -1)"
           [ -n "$f" ] && { echo "::group::$f"; cat "$f"; echo "::endgroup::"; } || true
 
       - name: Upload the assembly log

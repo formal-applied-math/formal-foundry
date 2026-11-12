@@ -195,6 +195,25 @@ def strip_placement_headers(code: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", out)
 
 
+_MODULE_DOC_RE = re.compile(r"/-!.*?-/", re.DOTALL)
+
+
+def ensure_module_doc(candidate: str, stub: str | None) -> str:
+    """Give a candidate that has no module docstring the one its queue stub was emitted
+    with. The plain prove path edits the stub in place and keeps it; the decompose path
+    REBUILDS the module around its lemma-DAG (`decompose._module_text`) and drops it, and
+    a library with a documentation standard refuses a module without one. The stub is
+    the source of record for it either way: emitted once, from the gated intent."""
+    if _MODULE_DOC_RE.search(candidate):
+        return candidate
+    doc = _MODULE_DOC_RE.search(stub or "")
+    imports = list(_IMPORT_RE.finditer(candidate))
+    if not doc or not imports:
+        return candidate
+    at = imports[-1].end()
+    return candidate[:at] + "\n\n" + doc.group(0) + candidate[at:]
+
+
 def record_frontier_core(main_repo: str, frontier_rel: str, labels: list[str],
                          entry_id: str) -> list[str]:
     """Record `entry_id` in the `core` list of each of `labels` that is still a frontier
