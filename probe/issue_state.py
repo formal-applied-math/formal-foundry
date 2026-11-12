@@ -37,6 +37,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 
 __all__ = ["STATUSES", "PIPELINE_STATUSES", "set_status", "current_status",
            "desired_status", "reconcile_plan"]
@@ -185,6 +186,8 @@ def claimed_issue_numbers(slug: str, *, run_fn=None) -> set[int] | None:
                    "--json", "number,body,title,headRefName", "--limit", "200"],
                   run_fn=run_fn)
     if not ok:
+        print(f"[issue-state] gh pr list on {slug} failed: {out.strip()[:300]}",
+              file=sys.stderr)
         return None
     try:
         rows = json.loads(out.strip() or "[]")
