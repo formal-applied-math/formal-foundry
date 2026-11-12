@@ -191,7 +191,7 @@ if [ -n "$DECOMPOSE_FORCE" ] || { [ -n "$DECOMPOSE_ON" ] && [ -n "$DECOMPOSE_TAG
   WHY="$([ -n "$DECOMPOSE_FORCE" ] && echo 'forced by dispatch' || echo 'tagged decompose + enabled')"
   echo "[tick] $ID → lemma-DAG decompose path ($WHY)" >&2
   run_decompose
-elif python3 prove_session.py adopt --id "$ID" --run-tag "$TAG" >&2; then
+elif python3 prove_session.py adopt --id "$ID" --run-tag "$TAG" --manifest "$QUEUE" >&2; then
   # A proof of this target already passed the gate in an earlier tick and never became a
   # PR (a refused push, a transient assembly failure). Re-gate it on the current daemon —
   # the pins may have moved — instead of paying for a new session. The daemon is up: no
