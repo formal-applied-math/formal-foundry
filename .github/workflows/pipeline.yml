@@ -171,7 +171,12 @@ jobs:
           # /app/.lake on first mount (Docker volume semantics), so no seed step.
           docker compose -f main/docker/docker-compose.yml up -d lean-repl
           echo "probing 7878 until the daemon serves (cold Mathlib load ~5 min)…"
-          python3 probe/wait_daemon.py \
+          # 35 minutes, not 10. The daemon builds whatever the library checkout holds
+          # that the image does not, and the image is republished ~30 min AFTER a push
+          # to the library: a run that starts inside that window rebuilds the changed
+          # modules here. Run 43159501106 started 9 minutes before the new image landed
+          # and ran out of the old 10 while the build was at 4881 of 5042.
+          python3 probe/wait_daemon.py --tries 420 \
             || { echo "::error::daemon not ready"; docker logs docker-lean-repl-1 2>&1 | tail -60; exit 1; }
 
       - name: Gates on real Lean — instance probe, map gate (daemon warm, pre-tick)
