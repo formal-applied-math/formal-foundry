@@ -26,9 +26,9 @@ eval "$(python3 "$FOUNDRY/probe/domain_pack.py" --export-env ${DOMAIN:+"$DOMAIN"
 # is exactly where a dead path is least likely to be noticed.
 MAIN="${MAIN_REPO:-$(dirname "$FOUNDRY")/$DOMAIN_REPO_NAME}"
 IMAGE="${VERIFY_IMAGE:-$DOMAIN_VERIFY_IMAGE}"
-# lean_scout on Lean v4.35.0, the library toolchain since the 2026-10 bump. The FULL
-# sha: Lake fetches the rev as a ref, and a short one is refused ("could not find
-# remote ref"). Every index build from the bump to 2026-11-12 died there, non-fatally.
+# lean_scout on Lean v4.35.0, the library toolchain. The FULL sha: this Lake fetches
+# the rev as a ref, and a short one is refused ("could not find remote ref"), which is
+# how the 2026-11-12 ticks lost their index build (non-fatally) on the v4.32 pin.
 REV="421133e243a5928e8e20441d0892db8f6bb3b213"
 INDEX="$FOUNDRY/index"
 mkdir -p "$INDEX"
