@@ -1,0 +1,64 @@
+{
+  "target": "cal-bk-318",
+  "engine": "claude",
+  "model": "claude-sonnet-5-5",
+  "rc": 0,
+  "duration_s": 282.8,
+  "secret_leak": 0,
+  "identical_to_stub": false,
+  "captured_bytes": 10335,
+  "transcript": "/home/runner/work/formal-foundry/formal-foundry/runs/pipeline-20261112-063913-cal-bk-318.transcript.jsonl",
+  "launcher_log": "/home/runner/work/formal-foundry/formal-foundry/runs/pipeline-20261112-063913-cal-bk-318.launcher.log",
+  "mcp_servers": {
+    "lean-lsp": "connected"
+  },
+  "tool_calls": 25,
+  "lean_tool_calls": 5,
+  "result": {
+    "subtype": "success",
+    "is_error": false,
+    "num_turns": 26,
+    "duration_ms": 281027,
+    "total_cost_usd": 0.9167626999999999,
+    "usage": {
+      "input_tokens": 38,
+      "cache_creation_input_tokens": 94546,
+      "cache_read_input_tokens": 2530827,
+      "output_tokens": 28542,
+      "output_tokens_details": {
+        "thinking_tokens": 14352
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 94546,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 673,
+          "cache_read_input_tokens": 164928,
+          "cache_creation_input_tokens": 849,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 849
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard",
+      "fallback_credit": null
+    }
+  },
+  "turns": 26,
+  "cost_usd": 0.9167626999999999,
+  "tokens": 0,
+  "last_text": "0, 1)`. Here `C(1) < 1` because `Φ(d₊) < 1` and `Φ(d₋) > 0`.\n- **Contradiction.** The Mills-type bounds `neg_mul_Phi_le_gaussianPDFReal`, together with `e^k φ(d₋) = φ(d₊)`, give `R·(1 − C(K)) ≤ 2K` once `−d₋ ≥ R`. Taking `R = 4/(1 − C(1))` contradicts the convexity bound.\n\nI left the theorem statement, name and binders untouched. I did not rerun any benchmark, ledger or `lake build`. Nothing in the repo points at this scratch file yet. `benchmarks/black_scholes.json` has no `mf-svi-left-wing-bound` entry, `MathFin/Models/ModelFree/LeftWingBound.lean` doesn't exist, and I did not create either.",
+  "reused_from": "pipeline-20261112-063913",
+  "original_tokens": 28580
+}

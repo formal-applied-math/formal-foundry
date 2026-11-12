@@ -1,0 +1,1 @@
+{"target": "cal-bk-318", "stream": "backlog", "ts": "2026-11-12T07:53:05", "harness": "agentic", "arm": "cron", "engine": "claude", "model": "claude-sonnet-5-5", "tokens": 0, "cost_usd": 0.9167626999999999, "turns": 26, "duration_s": 282.8, "outcome": "fail_gate", "gate_reason": "statement_altered", "experience_attempts": 1}
