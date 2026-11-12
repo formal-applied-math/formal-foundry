@@ -91,6 +91,34 @@ fact to be wrong.
   assembly path on a fixture theorem, in the verify image, no model call, no push. On a
   PR that touches the path, and weekly, because the library moves without telling us.
 
+## What the canary found before a tick paid for it
+
+Three canary runs on the retarget's own pull request, each about ten minutes on a runner,
+no model call:
+
+1. *Run 43145772467.* The build, the shake (`public import Mathlib` narrowed to the one
+   module the proof needs), lint, the regenerations, the ledger row and the index ratchets
+   passed. One library gate refused: `formalization.yaml`'s disclosure is derived from
+   each entry's `provenance.model`, and the fixture was signed by a prover that does not
+   exist. The canary now signs with the model `pipeline.toml` configures, so the run also
+   answers whether the library accepts an entry that prover signs.
+2. *Run 43147663249.* Every gate on the contribution passed. The library's blueprint
+   check refused, for three open issues naming labels that main retired twenty minutes
+   later: main itself was red. A red host gate is now re-asked of the base commit, and
+   red there is a retry, not a `fail_assembly` verdict against the proof.
+3. *Run 43150003089.* Green: `cal-smoke-1 assembled green … not pushed`, on main at
+   `88f4284c` (871 ledger rows fresh, 137 library tests, blueprint check 0 problems).
+
+And two read off the code while the runs were in flight, either of which would have cost
+the first real tick:
+
+- **The prover's doctrine no longer fits on a command line.** Built from the v2 library
+  it is 134 KB; Linux allows one argument 128 KiB. `claude-prove.sh` chose between a file
+  and an argument by looking for `--append-system-prompt-file` in `claude --help`, which
+  does not list it (2.1.322 accepts it). It is always a file now.
+- **The refill exited without `MISTRAL_API_KEY`**, though Claude drafts, judges and
+  proves. The key now buys embedding retrieval only, and retrieval fails open.
+
 ## What this does not fix
 
 - A candidate the assembly recipe refuses is recorded `fail_assembly` and its stub stays
@@ -100,6 +128,9 @@ fact to be wrong.
 - The map gate reads the statement only. A proof can reach the map through a lemma the
   statement does not name; such a target is refused at draft time though its build would
   have passed.
+- Until `MAIN_PR_TOKEN` can create a pull request, a green proof ends as a pushed branch
+  and one `autoform-ready` issue here carrying the link that opens it. A pull request
+  opened from that link is found by its branch on the next tick.
 - An issue served once (an entry with `provenance.issue = N`) is skipped until a person
   splits or closes it. The pipeline does not yet take the `deferred` facts of its own
   subset proof as its next target.
