@@ -55,7 +55,11 @@ concurrency:
 jobs:
   tick:
     runs-on: ubuntu-latest
-    timeout-minutes: 120                # headroom for a pin-bump index+embedding rebuild
+    # A full tick is: index + embeddings on a pin change (~40 min), three cold daemon
+    # loads, a draft session, a prove session, then the library's whole CI in the image
+    # (build, shake, lint, regen, ledger, declaration index). 120 was sized for a tick
+    # that reused a proof; the repo is public, so the minutes are not metered.
+    timeout-minutes: 300
     env:
       # The scheduled run has no inputs, so it falls back to the flagship. Every
       # step that used to name the flagship reads DOMAIN_* out of the pack instead.
@@ -83,6 +87,7 @@ jobs:
           # `--format env` is REQUIRED here: $GITHUB_ENV is not shell-parsed, so the
           # shell-quoted form would put literal quotes inside every value.
           python3 probe/domain_pack.py --export-env "$DOMAIN" --format env >> "$GITHUB_ENV"
+          echo "ISO_WEEK=$(date -u +%G-W%V)" >> "$GITHUB_ENV"
           echo "[domain] ticking $DOMAIN" >&2
           python3 probe/domain_pack.py --show "$DOMAIN" >&2
 
@@ -138,7 +143,12 @@ jobs:
             index/types.jsonl
             index/const_dep.jsonl
             index/PIN
-          key: ${{ env.DOMAIN_NAME }}-index-v1-${{ hashFiles('main/lean-toolchain', 'main/lake-manifest.json', format('main/{0}/**', env.DOMAIN_LAKE_ROOT)) }}
+          # Keyed on the PINS and the ISO week, not on every library source file: the
+          # library lands commits daily, so a key over its sources missed on every tick
+          # and each tick spent ~36 minutes rebuilding a retrieval index that was at
+          # most a few modules stale. A pin bump still rebuilds at once; otherwise the
+          # index is refreshed weekly.
+          key: ${{ env.DOMAIN_NAME }}-index-v2-${{ hashFiles('main/lean-toolchain', 'main/lake-manifest.json') }}-${{ env.ISO_WEEK }}
 
       - name: Build lean_scout index (cache miss only; non-fatal)
         if: steps.index-cache.outputs.cache-hit != 'true'
@@ -153,7 +163,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: index/embeddings-mistral-embed.json
-          key: ${{ env.DOMAIN_NAME }}-embeddings-mistral-embed-v2-${{ hashFiles('main/lean-toolchain', 'main/lake-manifest.json', format('main/{0}/**', env.DOMAIN_LAKE_ROOT)) }}
+          key: ${{ env.DOMAIN_NAME }}-embeddings-mistral-embed-v3-${{ hashFiles('main/lean-toolchain', 'main/lake-manifest.json') }}-${{ env.ISO_WEEK }}
 
       - name: Build embedding cache (cache miss only; non-fatal)
         if: steps.embed-cache.outputs.cache-hit != 'true'
@@ -205,16 +215,18 @@ jobs:
         if: ${{ !inputs.mtest_only }}
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
 
       - name: Install Claude Code CLI (the drafter, and the prover under [prover] engine="claude")
         if: ${{ !inputs.mtest_only }}
         # Pinned, and put FIRST on PATH. Unpinned, this step reported 2.1.197 on every run
         # while npm's latest moved on — some other `claude` on the runner was shadowing
         # the one installed here, so the version in use was neither chosen nor visible.
-        # 2.1.197 is the version the drafter has actually been running; bump deliberately.
+        # Bumped deliberately 2026-11-11, 2.1.197 → 2.1.322, with the models: `[prover]`
+        # and `[drafter]` now name claude-sonnet-5-5, which postdates 2.1.197, and the
+        # canary proves the pairing on every tick before a target is tried.
         env:
-          CLAUDE_CODE_VERSION: "2.1.197"
+          CLAUDE_CODE_VERSION: "2.1.322"
         run: |
           npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
           echo "$(npm prefix -g)/bin" >> "$GITHUB_PATH"

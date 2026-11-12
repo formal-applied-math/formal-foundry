@@ -153,7 +153,7 @@ class ProverConfig:
     before the prover started on every tick and each crash was scored as a failed proof;
     a canary would have gone red on the first one."""
     engine: str = "claude"
-    claude_model: str = "claude-sonnet-5"   # `claude -p --model`; claude-opus-5-5 for hard targets
+    claude_model: str = "claude-sonnet-5-5"   # `claude -p --model`; claude-opus-5-5 for hard targets
     canary: bool = True
     canary_max_turns: int = 12
 
@@ -206,7 +206,7 @@ class DrafterConfig:
     formalizes agentically (`claude -p` + lean-lsp, self-validating to elaboration), and
     JUDGES; Leanstral PROVES. The only knob is which Claude model drafts. A subscription cap
     defers the target (there is no fallback drafter — Claude is the only one)."""
-    claude_model: str = "claude-sonnet-5"   # `claude -p --model`; the CLI default (fable) is too weak to draft
+    claude_model: str = "claude-sonnet-5-5"   # `claude -p --model`; the CLI default (fable) is too weak to draft
 
     @staticmethod
     def load(path: str | None) -> "DrafterConfig":

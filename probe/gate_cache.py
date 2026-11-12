@@ -19,7 +19,7 @@ import os
 
 # bump on a Mathlib/Lean pin change so stale verdicts (proved against the old toolchain)
 # are dropped wholesale rather than substituted.
-CACHE_GENERATION = "v1"
+CACHE_GENERATION = "v2"   # v2: the flagship moved to Lean v4.35 and reorganised into layers (2026-11)
 
 
 def goal_key(goal: str) -> str:

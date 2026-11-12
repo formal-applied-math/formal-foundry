@@ -104,4 +104,4 @@ claude -p "$TASK" \
   "${SYSTEM_ARGS[@]}" \
   --max-turns "$TURNS" \
   --output-format stream-json --verbose \
-  --model "${CLAUDE_PROVER_MODEL:-claude-sonnet-5}"
+  --model "${CLAUDE_PROVER_MODEL:-claude-sonnet-5-5}"
