@@ -6,7 +6,7 @@ from probe_lib import DEF_RE, append_jsonl, extract_lean_code, lint_violations
 import json
 import os
 
-__all__ = ['ROUTING_ARCH', 'count_pointer_defs', 'classify_refill', 'load_refill_families', 'load_prior_unknowns', '_DIVERSITY', '_LESSON_SKIP', 'load_prior_lessons', 'render_prior_lessons', 'route_for', 'resolve_route', '_DEMOTED_FAMILIES', 'order_by_route']
+__all__ = ['ROUTING_ARCH', 'count_pointer_defs', 'map_census', 'MAP_RANK', 'classify_refill', 'load_refill_families', 'load_prior_unknowns', '_DIVERSITY', '_LESSON_SKIP', 'load_prior_lessons', 'render_prior_lessons', 'route_for', 'resolve_route', '_DEMOTED_FAMILIES', 'order_by_route']
 
 
 
@@ -46,6 +46,67 @@ def count_pointer_defs(main_repo: str, pointers: list[str]) -> int:
     return n
 
 
+
+
+# --- the program map, measured per issue ---------------------------------------
+#
+# The map gate (af_gates) refuses a statement that reaches no declaration the target
+# library's blueprint tags, because the library's build refuses the entry (its count of
+# corpus entries off the map is a ratchet). Whether an issue CAN pass is a property of
+# the library, known before any draft is paid for: do the modules the issue points at
+# hold a definition that rests on the map? Measured on the flagship 2026-11-12, of 55
+# ready issues 7 did, 17 held only theorems that do (a proof could reach the map, a
+# statement cannot), and 31 held nothing; the tick's first three picks were among the 48.
+
+#: Attempt order by census verdict: a statement can pass, unknown, only a proof could,
+#: nothing on the map.
+MAP_RANK = {"statement": 0, None: 1, "proof_only": 2, "off_map": 3}
+
+
+def map_census(index, anchors, main_repo: str, pointers: list[str], *,
+               own_root: str = "") -> dict | None:
+    """What an issue's pointer modules hold that rests on the program map.
+
+    `index` is a `ScoutIndex`; `anchors` are the fully-qualified names the map tags.
+    Returns `{"verdict", "defs", "theorems"}`: `defs` are the consumable exports
+    (`DEF_RE`: def/abbrev/structure) that are an anchor or depend on one, the things a
+    statement can be written through; `theorems` counts the other declarations that do.
+    With `own_root` (the library's lake root) only the anchors the library itself
+    declares count, as in the gate and in the library's own index: an upstream node of
+    the blueprint is drawn on the map but no entry is counted as resting on it.
+    None when it cannot be measured (no index, no anchors, no pointer module): the caller
+    then orders the issue as unknown and the gate decides."""
+    mods = [p for p in pointers if p.endswith(".lean")]
+    if not mods or not anchors or index is None or not index.available:
+        return None
+    try:
+        if own_root:
+            anchors = [a for a in anchors
+                       if (index.module_of(a) or "").split(".")[0] == own_root]
+        on_map = index.dependents_of(anchors)
+        by_mod = index.names_in(mods)
+    except Exception:            # a damaged index is not a verdict about the issue
+        return None
+    if not by_mod:
+        return None
+    short_defs: set[str] = set()
+    for p in mods:
+        try:
+            with open(os.path.join(main_repo, p), encoding="utf-8") as f:
+                short_defs |= {m.rsplit(".", 1)[-1] for m in DEF_RE.findall(f.read())}
+        except OSError:
+            continue
+    defs, theorems = [], 0
+    for names in by_mod.values():
+        for n in names:
+            if n not in on_map or "._" in n or n.startswith("_private."):
+                continue
+            if n.rsplit(".", 1)[-1] in short_defs:
+                defs.append(n)
+            else:
+                theorems += 1
+    verdict = "statement" if defs else ("proof_only" if theorems else "off_map")
+    return {"verdict": verdict, "defs": sorted(defs), "theorems": theorems}
 
 
 def classify_refill(rec: dict) -> str:
@@ -254,7 +315,9 @@ _DEMOTED_FAMILIES = {"undraftable", "fidelity", "statement_wrong", "trivial_rest
 
 
 def order_by_route(issues: list[dict]) -> list[dict]:
-    """Attempt order: fresh issues before current-arch lemons, easier difficulty
+    """Attempt order: fresh issues before current-arch lemons, then by what the issue's
+    pointer modules hold on the program map (`map_census`: an issue whose statement can
+    rest on the map before one whose cannot), easier difficulty
     first, then MORE pointer consumables (a def-richer context gives the drafter
     more to consume), then issue number. The ROUTE deliberately does NOT rank:
     it selects the PATH, not the priority — a needs_primitives issue carries
@@ -262,6 +325,7 @@ def order_by_route(issues: list[dict]) -> list[dict]:
     defs backlog behind ~45 untested theorem issues for ~15 ticks). Stable ties."""
     def key(i: dict):
         return (1 if i.get("family") in _DEMOTED_FAMILIES else 0,
+                MAP_RANK.get((i.get("map_census") or {}).get("verdict"), 1),
                 difficulty_rank(i.get("difficulty")),
                 -int(i.get("def_count", 0) or 0),
                 i.get("number", 0))

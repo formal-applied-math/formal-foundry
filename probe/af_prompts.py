@@ -97,6 +97,15 @@ def intent_messages(pack: DomainPack, issue: dict, context_pack: str,
                  "names a declaration, or the shown declarations include library objects for "
                  "the quantities involved, state the theorem through them (fully applied), "
                  "not over raw numbers with the formulas inlined.")
+    census = issue.get("map_census") or {}
+    if census.get("defs"):
+        # measured, not advised: these are the consumable declarations of the issue's
+        # own modules that rest on the map, i.e. the ones the map gate will accept
+        user += ("\n\nMAP OBJECTS. A mechanical check refuses a statement that mentions "
+                 "none of the program's declarations. Of the definitions in the modules "
+                 "this issue points at, these rest on the program map; the statement "
+                 "must be written through at least one of them:\n"
+                 + ", ".join(f"`{d}`" for d in census["defs"][:24]))
     if issue.get("citable"):
         user += ("\n\nBIBLIOGRAPHY — the works this library cites. `citation.key` MUST "
                  "be one of these keys:\n" + issue["citable"])

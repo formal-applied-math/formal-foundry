@@ -485,11 +485,16 @@ def prepare_issues(pack: DomainPack, raw: list[dict], *, main_repo: str | None =
                 issue["blueprint_note"] = bp.note(nodes, library_map.entry_descriptions(
                     main_repo, layout.benchmarks_dir, core))
             if bp.proved:
-                # every declaration the program map tags: the map gate requires the
-                # drafted statement to reach one of them
-                issue["map_anchors"] = sorted({n["name"] for n in bp.proved.values()
-                                               if n.get("name")})
-                issue["map_hint"] = bp.hint(nodes)
+                # every declaration of the library's own that the program map tags: the
+                # map gate requires the drafted statement to reach one of them. A node
+                # drawn on an upstream declaration (Brownian motion, in Mathlib) is on
+                # the map, but the library counts no entry as resting on it.
+                own = {n["name"] for n in bp.proved.values() if n.get("name")
+                       and str(n.get("module") or pack.lake_root).split(".")[0]
+                       == pack.lake_root}
+                issue["map_anchors"] = sorted(own)
+                issue["map_hint"] = ", ".join(
+                    h for h in bp.hint(nodes).split(", ") if h.strip("`") in own)
             if bib:
                 issue["citable"] = bib.catalogue()
                 issue["bibliography"] = {k: {"bullet": bib.bullet(k),
@@ -997,8 +1002,28 @@ def main() -> int:
         i["route"] = resolve_route(args.route, i, def_count=i["def_count"], family=i["family"])
         i["prior_unknowns"] = prior_unknowns.get(i["number"], [])
         i["prior_lessons"] = prior_lessons.get(i["number"])
+    # the program map, measured per issue from the scout index: which issues CAN pass the
+    # map gate. It orders the attempts and names the objects to state the theorem through.
+    from scout_index import ScoutIndex, default_index_dir
+    _map_idx = ScoutIndex(default_index_dir())
+    for i in issues:
+        i["map_census"] = map_census(_map_idx, i.get("map_anchors") or [],
+                                     args.main_repo, i.get("pointers", []),
+                                     own_root=pack.lake_root)
+        if (i["map_census"] or {}).get("defs"):
+            own = ", ".join(f"`{d}`" for d in i["map_census"]["defs"][:24])
+            i["map_hint"] = own + (", " + i["map_hint"] if i.get("map_hint") else "")
     issues = order_by_route(issues)
-    print(f"[refill] routes: " + ", ".join(f"#{i['number']}→{i['route']}" for i in issues[:8]),
+    _verdicts = [(i.get("map_census") or {}).get("verdict") or "unmeasured" for i in issues]
+    print("[refill] program map: " + ", ".join(
+              f"{v}={_verdicts.count(v)}" for v in
+              ("statement", "unmeasured", "proof_only", "off_map") if v in _verdicts)
+          + ("" if _map_idx.available else " (no scout index: the gate decides alone)"),
+          file=sys.stderr)
+    print(f"[refill] routes: " + ", ".join(
+              f"#{i['number']}→{i['route']}"
+              f"/{(i.get('map_census') or {}).get('verdict') or 'unmeasured'}"
+              for i in issues[:8]),
           file=sys.stderr)
 
     prove_system = build_system_prompt(args.main_repo, pack)  # leaf-prover gate doctrine

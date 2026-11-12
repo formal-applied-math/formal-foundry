@@ -37,6 +37,19 @@ def _write_index(d):
                             "deps": ["Real.exp", "MathFin.affineA"], "allowCompletion": True}) + "\n")
 
 
+def test_dependents_of_follows_dependence_backwards_and_names_in_lists_a_module():
+    with tempfile.TemporaryDirectory() as d:
+        _write_index(d)
+        idx = ScoutIndex(d)
+        assert idx.dependents_of(["MathFin.affineA"]) == {
+            "MathFin.affineA", "MathFin.vasicekBondPrice"}
+        assert idx.dependents_of(["MathFin.nothing"]) == {"MathFin.nothing"}
+        assert idx.names_in(["MathFin/FixedIncome/VasicekBondPrice.lean"]) == {
+            "MathFin.FixedIncome.VasicekBondPrice": ["MathFin.vasicekBondPrice"]}
+        assert idx.module_of("MathFin.vasicekBondPrice") == "MathFin.FixedIncome.VasicekBondPrice"
+        assert idx.module_of("MathFin.nothing") is None
+
+
 def test_available_false_when_absent():
     with tempfile.TemporaryDirectory() as d:
         assert ScoutIndex(d).available is False
