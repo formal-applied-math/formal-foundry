@@ -117,7 +117,10 @@ the first real tick:
   and an argument by looking for `--append-system-prompt-file` in `claude --help`, which
   does not list it (2.1.322 accepts it). It is always a file now.
 - **The refill exited without `MISTRAL_API_KEY`**, though Claude drafts, judges and
-  proves. The key now buys embedding retrieval only, and retrieval fails open.
+  proves. The key bought embedding retrieval only. It was removed the same day, with
+  the retrieval, the retired prover's launcher and every other call to that vendor;
+  entries are now marked `foundry-autoform`, and the model that proved one is in its
+  `provenance.model`.
 
 ## What this does not fix
 

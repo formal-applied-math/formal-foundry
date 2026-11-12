@@ -98,7 +98,7 @@ def _toolchain_and_commit(main_repo: str) -> tuple[str, str]:
 
 def build_dag_leaves(args) -> int:
     """--dag mode (Phase 2): write a per-leaf single-sorry manifest for a decomposed
-    hard target, so the tick proves the leaves with the vibe prover VERBATIM. The DAG
+    hard target, so the tick proves the leaves with the prover VERBATIM. The DAG
     comes from `draft_decomposition` (already skeleton-gated); this only lays out the
     leaves + their parent linkage (`parent`, `parent_id`, `dag_order`)."""
     toolchain, commit = _toolchain_and_commit(args.main_repo)

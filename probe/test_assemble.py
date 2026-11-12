@@ -113,18 +113,36 @@ def test_ensure_umbrella_import_handles_no_trailing_newline():
 
 def test_stamp_prover_names_the_model_that_proved_the_candidate():
     from assemble import stamp_prover
+    from assemble import PIPELINE_SOURCE
+    # as the emitter seeds it: nothing is proved yet, so no prover is named
     seed = {"metadata": {
         "formalization_scope": "Full formal proof in M.lean (autoformalized statement, "
-                               "leanstral proof). Re-export from MathFin. Axioms-clean.",
+                               "machine proof). Re-export from MathFin. Axioms-clean.",
+        "provenance": {"source": PIPELINE_SOURCE, "issue": 129}}}
+    out, changed = stamp_prover(seed, model="claude-sonnet-5-5")
+    prov = out["metadata"]["provenance"]
+    assert prov["model"] == "claude-sonnet-5-5"
+    assert prov["source"] == PIPELINE_SOURCE          # the pipeline's counting marker
+    assert ("(autoformalized statement, claude-sonnet-5-5 proof)"
+            in out["metadata"]["formalization_scope"])
+    assert set(changed) == {"model", "formalization_scope"}
+    assert "model" not in seed["metadata"]["provenance"]   # copied, not mutated
+    # stamping the same prover again changes nothing
+    same, changed2 = stamp_prover(out, model="claude-sonnet-5-5")
+    assert changed2 == [] and same == out
+
+
+def test_stamp_prover_overwrites_a_seed_from_before_the_prover_changed():
+    """A stub staged while another prover was configured names it in the seed. The entry
+    that lands must name the session that ran, in all three places."""
+    from assemble import PIPELINE_SOURCE, stamp_prover
+    stale = {"metadata": {
+        "formalization_scope": "Full formal proof in M.lean (autoformalized statement, "
+                               "leanstral proof).",
         "provenance": {"source": "leanstral-autoform", "model": "labs-leanstral-1-5",
                        "issue": 129}}}
-    out, changed = stamp_prover(seed, model="claude-sonnet-5")
-    prov = out["metadata"]["provenance"]
-    assert prov["model"] == "claude-sonnet-5"
-    assert prov["source"] == "leanstral-autoform"          # the pipeline's counting marker
-    assert "(autoformalized statement, claude-sonnet-5 proof)" in out["metadata"]["formalization_scope"]
-    assert set(changed) == {"model", "formalization_scope"}
-    assert seed["metadata"]["provenance"]["model"] == "labs-leanstral-1-5"   # copied, not mutated
-    # a Leanstral proof leaves a Leanstral entry exactly as it was
-    same, changed2 = stamp_prover(seed, model="labs-leanstral-1-5")
-    assert changed2 == [] and same == seed
+    out, changed = stamp_prover(stale, model="claude-sonnet-5-5")
+    assert out["metadata"]["provenance"] == {
+        "source": PIPELINE_SOURCE, "model": "claude-sonnet-5-5", "issue": 129}
+    assert "leanstral" not in json.dumps(out).lower()
+    assert set(changed) == {"model", "source", "formalization_scope"}

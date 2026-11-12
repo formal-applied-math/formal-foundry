@@ -56,11 +56,11 @@ def test_loader_partitions_by_provenance_and_status(tmp_path):
              "metadata": {"formalization_status": "full"}},
             {"id": "b", "code": {"lean": WRAPPER},
              "metadata": {"formalization_status": "library_wrapper",
-                          "provenance": {"source": "leanstral-autoform"}}},
+                          "provenance": {"source": "foundry-autoform"}}},
         ]}), encoding="utf-8")
     entries = ns.load_catalogue_entries(str(tmp_path / "*.json"))
     assert [(e.entry_id, e.status, e.provenance) for e in entries] == [
-        ("a", "full", "human"), ("b", "library_wrapper", "leanstral-autoform")]
+        ("a", "full", "human"), ("b", "library_wrapper", "foundry-autoform")]
     assert entries[0].domain == "d"
 
 

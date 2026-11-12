@@ -9,8 +9,8 @@
 # + library oleans are baked in), add lean_scout as an EPHEMERAL in-container
 # dependency, and extract there. This reuses the baked oleans (fast), never
 # touches the host main repo (no stray .lake — the doctrine forbids one), and
-# needs only the toolchains to match: lean_scout is pinned to 289c1f1 (v4.32.0,
-# our toolchain; it has no Mathlib require, so no dependency conflict).
+# needs only the toolchains to match: lean_scout is pinned (REV below) to its commit on
+# the library toolchain; it has no Mathlib require, so no dependency conflict.
 #
 # Memory doctrine: this loads the Lean/library env — the ONE local Lean process.
 # The lean-repl daemon MUST be down (guarded). `types` + `const_dep` read the
@@ -26,7 +26,10 @@ eval "$(python3 "$FOUNDRY/probe/domain_pack.py" --export-env ${DOMAIN:+"$DOMAIN"
 # is exactly where a dead path is least likely to be noticed.
 MAIN="${MAIN_REPO:-$(dirname "$FOUNDRY")/$DOMAIN_REPO_NAME}"
 IMAGE="${VERIFY_IMAGE:-$DOMAIN_VERIFY_IMAGE}"
-REV="289c1f1f88a4"                       # lean_scout on Lean v4.32.0
+# lean_scout on Lean v4.35.0, the library toolchain. The FULL sha: this Lake fetches
+# the rev as a ref, and a short one is refused ("could not find remote ref"), which is
+# how the 2026-11-12 ticks lost their index build (non-fatally) on the v4.32 pin.
+REV="421133e243a5928e8e20441d0892db8f6bb3b213"
 INDEX="$FOUNDRY/index"
 mkdir -p "$INDEX"
 
@@ -75,10 +78,9 @@ EOF
 # 2. Slice to the library + the Mathlib neighborhoods it actually reaches.
 #    `--imports <Namespace>` extracts the whole transitive closure (~771k records /
 #    ~850 MB, mostly Mathlib/core internals). This step used to keep ONLY
-#    own-namespace decls only (~2.8k, a 275x shrink) for a 0.03s load — but the
-#    embedding retrieval in probe/embed.py reads types.jsonl, so that filter is
-#    why the drafter's semantic search had never seen a Mathlib lemma, leaving
-#    an off-pin public loogle as its only Mathlib channel. index_filter keeps
+#    own-namespace decls only (~2.8k, a 275x shrink) for a 0.03s load — which left
+#    the index without a single Mathlib lemma, though the library's proofs rest on
+#    them and the context packs render dependency signatures. index_filter keeps
 #    the middle: ours in full, plus every Mathlib module hosting a constant a
 #    library proof depends on. See probe/index_filter.py for the reasoning.
 # --domain is REQUIRED, not decorative: without it index_filter falls back to the

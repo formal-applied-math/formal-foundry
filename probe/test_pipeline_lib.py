@@ -152,7 +152,7 @@ def test_load_state_missing_returns_fresh():
 
 
 def test_config_has_max_turns_default():
-    # the vibe ⇄ lean-lsp-mcp harness's depth lever (replaced the retired
+    # the prove session's depth lever (replaced the retired
     # text-loop's fanout/repair_rounds/tokens_per_attempt knobs).
     assert PipelineConfig().max_turns == 40
 
@@ -262,12 +262,12 @@ def test_prover_config_defaults_to_claude_with_a_canary():
 def test_prover_config_rejects_an_unknown_engine(tmp_path):
     import pytest
     toml = tmp_path / "p.toml"
-    toml.write_text('[prover]\nengine = "magistral"\n')
+    toml.write_text('[prover]\nengine = "not-a-prover"\n')
     with pytest.raises(ValueError):
         P.ProverConfig.load(str(toml))
 
 
-def test_the_live_config_proves_with_claude_and_skips_the_retired_kernel_probes():
+def test_the_live_config_proves_with_claude_and_skips_the_kernel_probes():
     import os
     cfg = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                        "pipeline.toml")

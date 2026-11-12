@@ -11,7 +11,7 @@ SQLite view rebuilt from scratch each time (TauCetiData's shape, applied to our 
 - prove records come from `pipeline-*-summary.jsonl` (one per target).
 - per-stage fields the source stream does not carry are null — an honest gap.
 
-Pure stdlib; no daemon, no Mistral, no `autoformalize` import (family/arch ride the
+Pure stdlib; no daemon, no model call, no `autoformalize` import (family/arch ride the
 records already). Schema: `schema/run_record.v1.json`.
 """
 from __future__ import annotations

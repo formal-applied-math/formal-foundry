@@ -22,7 +22,7 @@ def test_autoformalize_config_defaults():
     cfg = pl.AutoformalizeConfig.load(None)
     assert cfg.enabled is True
     assert cfg.budget > 0
-    assert cfg.prover_model == "labs-leanstral-1-5"
+    assert cfg.kernel_probes is False      # optional, and off: a model call per draft
 
 
 # --- [drafter] engine switch (item I) ----------------------------------------
@@ -109,7 +109,7 @@ def test_refill_intent_fn_defaults_to_reason_fn(monkeypatch, tmp_path):
 
 
 def test_lean_lsp_mcp_config_targets_the_container():
-    # phase 2: the agentic drafter gets the SAME lean-lsp MCP the vibe harness gives Leanstral
+    # phase 2: the agentic drafter gets the SAME lean-lsp MCP the prove session gives the prover
     c = af._lean_lsp_mcp_config(PACK.lean_lsp_container)
     s = c["mcpServers"]["lean-lsp"]
     assert s["command"] == "docker"
@@ -216,7 +216,7 @@ def test_refill_flips_slot_around_agentic_formalize(monkeypatch, tmp_path):
                          "intent": {"statement": "s", "module_name": "M", "benchmark_id": "mf-x",
                                     "docstring": "d"}})
 
-    def agentic_fn(intent, ctx, issue, premises=""):
+    def agentic_fn(intent, ctx, issue):
         events.append("formalize")
         return {"ok": False, "tokens": 0}          # stop after formalize (records a gate fail)
     af.refill(PACK, [_issue(9)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
@@ -229,7 +229,7 @@ def test_refill_agentic_cap_is_not_swallowed_by_fallback(monkeypatch, tmp_path):
     # a ClaudeCapError from agentic is the outer on_cap handler's job — NOT an infra fallback
     monkeypatch.setattr(af, "draft_intent", _good_intent)
 
-    def capping_agentic(intent, ctx, issue, premises=""):
+    def capping_agentic(intent, ctx, issue):
         raise af.ClaudeCapError("usage limit reached")
 
     res = af.refill(PACK, [_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
@@ -312,7 +312,7 @@ def test_emit_prelint_rejects_sigma_identifier():
 
 
 def test_prelint_strips_model_imports():
-    # Leanstral (RL-trained on complete files) emits its own `import` lines; the module
+    # A model trained on complete files emits its own `import` lines; the module
     # header already imports Mathlib + pointers, so a stub-level import lands mid-file and
     # the module system rejects it ("invalid 'import' command" — recurred live on #109/#60).
     stub = "import Mathlib\npublic import MathFin.FixedIncome.ZCB\n\ntheorem foo : True := by sorry"
@@ -421,12 +421,6 @@ def test_route_feasibility_ok_when_present_or_mathlib():
 
 # --- Task 1.9: telemetry for silent channels (H11) ---------------------------
 
-def test_retrieval_backend_is_labeled():
-    r, _p = af.build_retrieve_fns(backend="loogle", main_repo="/x", index_dir="/no/index",
-                                  k=4, embed_model="m", api_key=None)
-    assert getattr(r, "backend", None) == "loogle"
-
-
 def test_autoformalize_config_depth_gate_default_on():
     assert pl.AutoformalizeConfig.load(None).depth_gate is True
 
@@ -440,22 +434,16 @@ def test_autoformalize_config_depth_gate_reads_toml(tmp_path):
 def test_autoformalize_config_defaults():
     cfg = pl.AutoformalizeConfig.load(None)
     assert cfg.formalize_rounds == 3
-    assert cfg.retrieval is True
 
 
-def test_autoformalize_config_retrieval_backend_defaults():
-    cfg = pl.AutoformalizeConfig.load(None)
-    assert cfg.retrieval_backend == "embedding"
-    assert cfg.retrieval_k == 8
-    assert cfg.embed_model == "mistral-embed"
-
-
-def test_autoformalize_config_retrieval_backend_reads_toml(tmp_path):
+def test_a_retired_config_key_is_ignored_not_fatal(tmp_path):
+    # pipeline.toml files in the wild still carry the embedding-retrieval and
+    # prover_model keys; loading one must not raise
     toml = tmp_path / "pipeline.toml"
-    toml.write_text('[autoformalize]\nretrieval_backend = "loogle"\nretrieval_k = 4\n')
+    toml.write_text('[autoformalize]\nretrieval_backend = "embedding"\n'
+                    'embed_model = "x"\nprover_model = "y"\nformalize_rounds = 2\n')
     cfg = pl.AutoformalizeConfig.load(str(toml))
-    assert cfg.retrieval_backend == "loogle"
-    assert cfg.retrieval_k == 4
+    assert cfg.formalize_rounds == 2 and not hasattr(cfg, "embed_model")
 
 
 def test_autoformalize_config_semantic_cascade_defaults():
@@ -788,10 +776,10 @@ def test_emit_entry_reexport_and_provenance():
     assert entry["metadata"]["provenance"] == {
         "statement_source": "autoform",
         "statement_model": "autoform",
-        "source": "leanstral-autoform",
-        "model": "labs-leanstral-1-5",
+        "source": "foundry-autoform",     # names the pipeline; the prover is stamped later
         "issue": 67,
     }
+    assert "machine proof" in entry["metadata"]["formalization_scope"]
     code = entry["code"]["lean"]
     assert "import MathFin.FixedIncome.FRA" in code
     assert "theorem mf_fi_fra" in code                  # dashes -> underscores
@@ -1654,9 +1642,9 @@ def test_refill_defs_route_requires_intent_definitions(monkeypatch, tmp_path):
     calls = {"formalize": 0}
     monkeypatch.setattr(af, "draft_intent", _good_intent)      # definitions: absent
 
-    def agentic(intent, ctx, issue, premises=""):
+    def agentic(intent, ctx, issue):
         calls["formalize"] += 1
-        return _good_agentic(intent, ctx, issue, premises=premises)
+        return _good_agentic(intent, ctx, issue)
     _pass_gates(monkeypatch)
     res = af.refill(PACK, [_issue(5, route="defs")], reason_fn=_NOOP, prove_fn=_NOOP,
                     check_fn=_ELAB_OK, context_fn=lambda i: "", queue_dir=str(tmp_path),
@@ -1673,7 +1661,7 @@ def test_refill_defs_route_seeds_with_new_defs_header(monkeypatch, tmp_path):
         base["intent"]["definitions"] = [{"name": "knockInPayoff"}]
         return base
 
-    def agentic(intent_, ctx, issue, premises=""):
+    def agentic(intent_, ctx, issue):
         lean_text, entry, _ = af.emit_target_files(PACK, issue, _DEFS_STUB,
                                       {"module_name": intent_["module_name"],
                                        "benchmark_id": intent_["benchmark_id"],
@@ -1696,7 +1684,7 @@ def test_refill_defs_route_seeds_with_new_defs_header(monkeypatch, tmp_path):
 
 
 def test_refill_history_rows_carry_unknowns_and_family(monkeypatch, tmp_path):
-    def agentic(intent, ctx, issue, premises=""):
+    def agentic(intent, ctx, issue):
         stub = "theorem t5 (h : p) : q := by sorry"
         lean_text, entry, _ = af.emit_target_files(PACK, {"number": 5, "area": "fixed-income",
                                              "pointers": []}, stub,
@@ -1733,7 +1721,7 @@ def _good_intent(pack, i, ctx, *, chat_fn, feedback=None, **_kw):
         "benchmark_id": f"mf-fi-t{n}", "docstring": "d", "deferred": []}}
 
 
-def _good_agentic(intent, ctx, issue, premises=""):
+def _good_agentic(intent, ctx, issue):
     """Stand-in for agentic_formalize_fn — emits a real lean_text/entry from the intent meta."""
     n = issue["number"]
     stub = f"theorem t{n} (h : p) : q := by sorry"
@@ -1790,7 +1778,7 @@ def test_refill_skips_when_formalization_fails(monkeypatch, tmp_path):
     _pass_gates(monkeypatch)
     res = af.refill(PACK, [_issue(5)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
                     context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000,
-                    agentic_formalize_fn=lambda intent, ctx, issue, premises="":
+                    agentic_formalize_fn=lambda intent, ctx, issue:
                         {"ok": False, "stub": None, "meta": None,
                          "lean_text": None, "entry": None, "tokens": 20},
                     slot_switch_fn=lambda s: None)
@@ -1866,7 +1854,7 @@ def test_refill_skips_issue_on_step_exception(monkeypatch, tmp_path):
     # whole refill — log it and skip to the next issue.
     def boom(pk, i, ctx, *, chat_fn, feedback=None, **_kw):
         if i["number"] == 1:
-            raise RuntimeError("HTTP 429 from Mistral API")
+            raise RuntimeError("HTTP 429 from the model API")
         return _good_intent(pk, i, ctx, chat_fn=chat_fn)
     monkeypatch.setattr(af, "draft_intent", boom)
     _pass_gates(monkeypatch)
@@ -2010,7 +1998,7 @@ def test_refill_budget_stops_semantic_loop(monkeypatch, tmp_path):
 
 def test_refill_records_error_outcome(monkeypatch, tmp_path):
     def boom(pk, i, ctx, *, chat_fn, feedback=None, **_kw):
-        raise RuntimeError("HTTP 429 from Mistral API")
+        raise RuntimeError("HTTP 429 from the model API")
     monkeypatch.setattr(af, "draft_intent", boom)
     res = af.refill(PACK, [_issue(1)], reason_fn=_NOOP, prove_fn=_NOOP, check_fn=_ELAB_OK,
                     context_fn=lambda i: "", queue_dir=str(tmp_path), budget=100000)
@@ -2056,7 +2044,7 @@ def test_draft_intent_not_ok_when_unparseable():
 
 def test_assistant_turn_substitutes_placeholder_for_empty():
     assert af._assistant("hi")["content"] == "hi"
-    assert af._assistant("")["content"] == "(no output)"       # Mistral 400s on empty content
+    assert af._assistant("")["content"] == "(no output)"       # an empty assistant turn is a 400
     assert af._assistant(None)["content"] == "(no output)"
 
 
@@ -2274,23 +2262,6 @@ def test_prepare_issues_filters_and_enriches():
     assert out[0]["body"].startswith("## Task")
 
 
-# --- build_retrieve_fns (backend selection + fails-open fallback) -----------
-
-def test_build_retrieve_fns_selects_loogle_when_configured():
-    # backend "loogle" ⇒ reactive loogle fn, no proactive fn (loogle is name-only)
-    r, p = af.build_retrieve_fns(backend="loogle", main_repo="/x", index_dir="/no/index",
-                                 k=8, embed_model="mistral-embed", api_key="k")
-    assert r is not None and p is None
-
-
-def test_build_retrieve_fns_falls_open_to_loogle_when_index_absent():
-    # backend "embedding" but no cache present ⇒ degrade to loogle, no proactive
-    r, p = af.build_retrieve_fns(backend="embedding", main_repo="/x",
-                                 index_dir="/no/index", k=8,
-                                 embed_model="mistral-embed", api_key="k")
-    assert r is not None and p is None
-
-
 def test_locate_named_accepts_declaration_modifiers():
     """`private`/`protected`/`nonrec` are ordinary Lean declaration modifiers, and a
     locator that rejects them silently reports the declaration as absent. Every caller
@@ -2336,13 +2307,13 @@ def test_gate0_wants_exactly_the_theorems_sorry_and_a_dead_daemon_is_no_verdict(
     assert fail["gate"] == "indeterminate"
 
 
-def test_kernel_probes_off_never_calls_the_retired_prover(monkeypatch):
-    """After 2026-09-30 every Leanstral call raises; with the probes on, that exception
+def test_kernel_probes_off_never_calls_the_prove_fn(monkeypatch):
+    """A prove_fn that raises: with the probes on, that exception
     escapes the battery and the issue is recorded `error` — no draft could be staged."""
     import pytest
 
     def retired(msgs):
-        raise RuntimeError("HTTP 400 from Mistral API: invalid model")
+        raise RuntimeError("HTTP 400: invalid model")
 
     monkeypatch.setattr(af, "judge_faithfulness",
                         lambda *a, **k: {"faithful": True, "tokens": 0})

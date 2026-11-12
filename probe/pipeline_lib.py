@@ -48,7 +48,7 @@ class PipelineConfig:
     escalate_hard_cap: int = 2_000_000
     max_issues_per_tick: int = 1
     reasoning_effort: str = "high"
-    # vibe ⇄ lean-lsp-mcp harness (the cron prove path since 2026-07-17): one deep
+    # the prove path (agent ⇄ lean-lsp-mcp, since 2026-07-17): one deep
     # agentic session per target, bounded by turns (depth over breadth) — the lever
     # that replaced the retired text-loop's fanout×tokens budget. (The legacy
     # calibration probe carries its own defaults; it no longer reads this config.)
@@ -70,7 +70,7 @@ class AutoformalizeConfig:
     """Config for the issue->stub refill phase (the `[autoformalize]` block).
 
     The tick runs `refill` when the queue has no unattempted target: claude
-    drafts+judges a stub from the next ready issue, leanstral gates it. (No
+    drafts+judges a stub from the next ready issue and the gate battery vets it. (No
     roundtrip back-translation — that is backlog item G, still unbuilt; both
     docstrings claimed it until 2026-08-06.)
     `enabled=false` reverts the pipeline to a hand-seeded queue.
@@ -80,17 +80,11 @@ class AutoformalizeConfig:
     max_issues: int = 1
     max_attempt_issues: int = 3
     gate_budget: int = 20_000
-    prover_model: str = "labs-leanstral-1-5"   # leanstral: the kernel gate battery
     # pointers-scoped depth gate: reject a true-but-shallow stub whose TYPE consumes
     # no def from its `-- pointers:` library modules (a Mathlib identity in domain
     # clothing). `false` disables it (rely on the kernel/judge gates + human merge).
     depth_gate: bool = True
     formalize_rounds: int = 3   # round-count cited in the formalize-miss telemetry (agentic self-iterates)
-    retrieval: bool = True      # feed embedding-retrieved premises into the agentic drafter prompt
-    # embedding premise retrieval (pin-accurate types.jsonl) with loogle fallback.
-    retrieval_backend: str = "embedding"   # "embedding" | "loogle"
-    retrieval_k: int = 8                    # top-k premises surfaced per query
-    embed_model: str = "mistral-embed"      # Mistral /v1/embeddings model id
     # semantic repair cascade (design: 2026-07-17-semantic-repair-cascade): a semantic
     # gate rejection (shallow/trivial/vacuous/false/unfaithful) re-drafts BOTH
     # stages with the gate verdict as feedback, up to semantic_rounds total attempts
@@ -114,12 +108,11 @@ class AutoformalizeConfig:
     # performs into informed ones; costs one small summariser call per failure and nothing
     # at all on the pass path. Off by default ⇒ prompts stay byte-identical.
     experience: bool = False
-    # The two kernel probes on a draft (hypothesis-rejection ⊢ False, disproof ⊢ ¬Concl),
-    # run by `prover_model`. Off by default: they fired 0 times in the 34+ drafts that
-    # reached them (all 54 cached verdicts negative — the Claude judge caught both false
-    # drafts), and `prover_model` is Mistral's `labs-leanstral-1-5`, retired 2026-09-30 —
-    # after which every probe call raises, the issue-level handler records `error`, and
-    # NO draft can ever be staged. Turn back on only with a live `prover_model`.
+    # The two kernel probes on a draft (hypothesis-rejection ⊢ False, disproof ⊢ ¬Concl):
+    # short pass@1 proof attempts by the drafter's Claude chat adapter. Off by default:
+    # they fired 0 times in the 34+ drafts that reached them (all 54 cached verdicts
+    # negative — the Claude judge caught both false drafts), and each costs a model call
+    # per draft.
     kernel_probes: bool = False
 
     @staticmethod
@@ -133,20 +126,20 @@ class AutoformalizeConfig:
         return AutoformalizeConfig(**{k: v for k, v in section.items() if k in fields})
 
 
-#: The prove engines a `[prover] engine` may name, and the launcher each one runs. Both
-#: launchers take the same contract (`--agent lean --auto-approve --max-turns N -p TASK`)
-#: and give the model the same lean-lsp MCP server and house doctrine.
-PROVER_LAUNCHERS = {"claude": "claude-prove.sh", "leanstral": "leanstral-vibe.sh"}
+#: The prove engines a `[prover] engine` may name, and the launcher each one runs. A
+#: launcher takes `--agent lean --auto-approve --max-turns N -p TASK` and gives the model
+#: the lean-lsp MCP server and the house doctrine. One engine today; the table is where a
+#: second would be declared.
+PROVER_LAUNCHERS = {"claude": "claude-prove.sh"}
 
 
 @dataclasses.dataclass(frozen=True)
 class ProverConfig:
     """Which model proves (the `[prover]` block).
 
-    `claude` is the default: Mistral retires the `labs-leanstral-1-5` endpoint on
-    2026-09-30, and the field's evidence on realistic, library-dependent targets favours a
-    frontier model in a plain agentic loop (AlphaProof Nexus: 9/9 vs 0/9). `leanstral`
-    stays selectable for a live Leanstral endpoint.
+    `claude` is the one engine: a frontier model in a plain agentic loop over the
+    lean-lsp tools (the field's evidence on realistic, library-dependent targets favours
+    that shape — AlphaProof Nexus: 9/9 vs 0/9).
 
     `canary` proves a trivial theorem through the exact production path (launcher, auth,
     MCP, Lean) before every prove run. From 2026-08-19 to 2026-09-23 the launcher crashed
@@ -186,7 +179,7 @@ class DecomposeConfig:
     Design: docs/superpowers/specs/2026-07-18-decomposer-design.md."""
     enabled: bool = False
     max_leaves: int = 3        # tight splits first; a DAG wanting more is usually mis-shaped
-    leaf_max_turns: int = 40   # vibe turns per leaf (leaves are individually short by design)
+    leaf_max_turns: int = 40   # prover turns per leaf (leaves are individually short by design)
     max_reask: int = 1         # bounded re-decompose rounds on a malformed DAG / failed skeleton gate
 
     @staticmethod
@@ -204,7 +197,7 @@ class DecomposeConfig:
 class DrafterConfig:
     """Config for the DRAFT stage (the `[drafter]` block). Claude drafts the intent,
     formalizes agentically (`claude -p` + lean-lsp, self-validating to elaboration), and
-    JUDGES; Leanstral PROVES. The only knob is which Claude model drafts. A subscription cap
+    JUDGES; `[prover]` picks who proves. The only knob is which Claude model drafts. A subscription cap
     defers the target (there is no fallback drafter — Claude is the only one)."""
     claude_model: str = "claude-sonnet-5-5"   # `claude -p --model`; the CLI default (fable) is too weak to draft
 

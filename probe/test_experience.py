@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 
 import experience as xp
-import vibe_prove as vp
+import prove_session as vp
 
 
 # --- the roll ----------------------------------------------------------------
@@ -154,22 +154,22 @@ def test_report_flags_a_write_only_memory(tmp_path):
 # --- prompt wiring -----------------------------------------------------------
 
 def test_task_is_unchanged_when_there_is_no_experience():
-    before = vp.build_vibe_task("MathFin/X.lean", "thm", "PACK", "HINTS")
-    after = vp.build_vibe_task("MathFin/X.lean", "thm", "PACK", "HINTS", experience="")
+    before = vp.build_prove_task("MathFin/X.lean", "thm", "PACK", "HINTS")
+    after = vp.build_prove_task("MathFin/X.lean", "thm", "PACK", "HINTS", experience="")
     assert before == after
 
 
-def test_experience_goes_last_after_the_premises():
+def test_experience_goes_last_after_the_context():
     """Weakest-authority block last: the statement and the context pack must not be read
     through a record of past failures."""
-    task = vp.build_vibe_task("MathFin/X.lean", "thm", "PACK", "HINTS",
+    task = vp.build_prove_task("MathFin/X.lean", "thm", "PACK", "HINTS",
                               experience="NOTEBOOK")
     assert task.index("PACK") < task.index("NOTEBOOK")
     assert task.index("HINTS") < task.index("NOTEBOOK")
 
 
-def test_experience_reaches_the_vibe_invocation(tmp_path, monkeypatch):
-    """End to end through run_vibe_target: the rendered block must land in the `-p` task."""
+def test_experience_reaches_the_prover_invocation(tmp_path, monkeypatch):
+    """End to end through run_prove_target: the rendered block must land in the `-p` task."""
     captured = {}
 
     def fake_run(argv, **_kw):
@@ -178,9 +178,9 @@ def test_experience_reaches_the_vibe_invocation(tmp_path, monkeypatch):
 
     main_repo = tmp_path / "main"
     (main_repo / "MathFin").mkdir(parents=True)
-    vp.run_vibe_target(PACK, {"id": "t", "sorry_name": "thm", "statement": "theorem thm : True := by sorry"},
+    vp.run_prove_target(PACK, {"id": "t", "sorry_name": "thm", "statement": "theorem thm : True := by sorry"},
                        main_repo=str(main_repo), context_pack="", max_turns=1,
-                       vibe_script="/bin/true", run_fn=fake_run, experience="NOTEBOOK-HERE")
+                       launcher_script="/bin/true", run_fn=fake_run, experience="NOTEBOOK-HERE")
     assert "NOTEBOOK-HERE" in captured["task"]
 
 
@@ -193,11 +193,13 @@ def test_store_is_off_unless_the_config_enables_it(tmp_path):
     assert vp._experience_store(str(tmp_path), str(cfg)) is not None
 
 
-def test_summarizer_is_none_without_a_key_or_when_disabled(monkeypatch):
-    monkeypatch.delenv("MISTRAL_API_KEY", raising=False)
+def test_summarizer_is_none_without_claude_auth_or_when_disabled(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))            # no local login either
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("EXPERIENCE_LLM", raising=False)
     assert vp._summarizer() is None
-    monkeypatch.setenv("MISTRAL_API_KEY", "sk-test")
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "test-token")
     assert vp._summarizer() is not None
     monkeypatch.setenv("EXPERIENCE_LLM", "0")
     assert vp._summarizer() is None

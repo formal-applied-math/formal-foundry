@@ -40,12 +40,28 @@ def ensure_umbrella_import(main_repo: str, main_module: str,
     return [umbrella]
 
 
+#: `provenance.source` of every entry this pipeline contributes: the marker the target
+#: library counts its machine-contributed entries by. It names the PIPELINE; who proved
+#: an entry is `provenance.model`. (Entries merged before 2026-11 carry the marker of the
+#: prover the pipeline had then; the library counts both.)
+PIPELINE_SOURCE = "foundry-autoform"
+
+#: What an entry's scope prose says about its proof before anything is proved.
+#: `stamp_prover` replaces it with the model of the session that ran.
+PROVER_PLACEHOLDER = "machine"
+
+
 # Drafters that have left the pipeline. A queue entry authored while one was live
 # carries its name baked in, because provenance used to be stamped at ENQUEUE rather
 # than by the stage that ran (backlog U). Magistral was removed 2026-07-29; both
 # `cal-bk-161` and `cal-bk-162` were still queued with `magistral-autoform` after it,
 # so a re-pick would have emitted that claim for a Claude-drafted artifact.
 _RETIRED_DRAFTERS = ("magistral",)
+
+# A prover that has left it, for the same reason: a stub staged while it was the prover
+# carries its name in the seed's `source` and scope prose. `stamp_prover` writes the
+# session's facts over both, so no new entry claims a proof by a model that did not run.
+_RETIRED_PROVERS = ("leanstral",)
 
 # What a drafter-agnostic entry says instead. The prover stays credited (`stamp_prover`);
 # the drafter is not named, per the repo's standing attribution rule.
@@ -74,8 +90,8 @@ def sanitize_provenance(entry: dict) -> tuple[dict, list[str]]:
             if any(d in val.lower() for d in _RETIRED_DRAFTERS):
                 prov[key] = _ANON_DRAFTER
                 changed.append(key)
-    # the same claim is also made in prose — "(magistral-drafted statement, leanstral
-    # proof)" — and that string is what a reader of docs/coverage.md actually sees
+    # the same claim is also made in prose ("(<drafter>-drafted statement, … proof)"),
+    # and that string is what a reader of the library's coverage page actually sees
     scope = meta.get("formalization_scope")
     if isinstance(scope, str):
         new = re.sub(r"(?i)\b(" + "|".join(_RETIRED_DRAFTERS) + r")-drafted\b",
@@ -89,12 +105,11 @@ def sanitize_provenance(entry: dict) -> tuple[dict, list[str]]:
 def stamp_prover(entry: dict, *, model: str) -> tuple[dict, list[str]]:
     """Record the model that actually PROVED this candidate in the entry's provenance.
 
-    Provenance used to be written once, at seed time, as `model: labs-leanstral-1-5` and
-    "(autoformalized statement, leanstral proof)", because Leanstral was the only prover.
-    From 2026-09-28 the prover is whatever `[prover] engine` selected for the run, so the
-    seed-time value is a guess and this is the fact: `model` and the scope prose are set
-    from the session that ran. `source` stays `leanstral-autoform` — the counting marker
-    the target library's disclosure reads, which names the pipeline, not the prover.
+    At seed time nothing has been proved, so the entry names no prover: `model` is absent
+    and the scope prose says "(autoformalized statement, machine proof)". This writes the
+    fact from the session that ran — `model`, and the model's name into the prose.
+    `source` (`PIPELINE_SOURCE`) is the counting marker the target library's disclosure
+    reads; it names the pipeline, not the prover.
 
     Returns `(entry, changed_keys)`; the entry is copied, never mutated in place."""
     out = json.loads(json.dumps(entry))
@@ -103,12 +118,17 @@ def stamp_prover(entry: dict, *, model: str) -> tuple[dict, list[str]]:
         return out, []
     changed = []
     prov = meta.get("provenance")
-    if isinstance(prov, dict) and prov.get("model") != model:
-        prov["model"] = model
-        changed.append("model")
+    if isinstance(prov, dict):
+        if prov.get("model") != model:
+            prov["model"] = model
+            changed.append("model")
+        if any(p in str(prov.get("source") or "").lower() for p in _RETIRED_PROVERS):
+            prov["source"] = PIPELINE_SOURCE          # a stub seeded before the rename
+            changed.append("source")
     scope = meta.get("formalization_scope")
-    if isinstance(scope, str) and "leanstral" not in model.lower():   # already true then
-        new = re.sub(r"(?i)\bleanstral proof\b", f"{model} proof", scope)
+    if isinstance(scope, str):
+        seeded = "|".join((PROVER_PLACEHOLDER,) + _RETIRED_PROVERS)
+        new = re.sub(rf"\b(?:{seeded}) proof\b", f"{model} proof", scope)
         if new != scope:
             meta["formalization_scope"] = new
             changed.append("formalization_scope")

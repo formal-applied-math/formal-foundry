@@ -236,7 +236,7 @@ def test_no_append_header_when_the_module_is_new():
 def _entry(src, model):
     return {"id": "x", "metadata": {"provenance": {
         "statement_source": src, "statement_model": model,
-        "source": "leanstral-autoform", "model": "labs-leanstral-1-5", "issue": 161}}}
+        "source": A.PIPELINE_SOURCE, "model": "claude-sonnet-5-5", "issue": 161}}}
 
 
 def test_sanitizer_strips_a_retired_drafter():
@@ -249,7 +249,7 @@ def test_sanitizer_strips_a_retired_drafter():
 def test_sanitizer_leaves_the_prover_credited():
     out, _ = A.sanitize_provenance(_entry("magistral-autoform", "magistral-medium"))
     p = out["metadata"]["provenance"]
-    assert p["source"] == "leanstral-autoform" and p["model"] == "labs-leanstral-1-5"
+    assert p["source"] == A.PIPELINE_SOURCE and p["model"] == "claude-sonnet-5-5"
     assert p["issue"] == 161
 
 
@@ -283,11 +283,11 @@ def test_apply_contribution_scrubs_before_the_entry_lands(tmp_path):
 
 def test_sanitizer_also_scrubs_the_prose_claim():
     e = {"id": "x", "metadata": {"formalization_scope":
-         "Full formal proof in M.lean (magistral-drafted statement, leanstral proof)."}}
+         "Full formal proof in M.lean (magistral-drafted statement, machine proof)."}}
     out, changed = A.sanitize_provenance(e)
     scope = out["metadata"]["formalization_scope"]
     assert "magistral" not in scope and "autoformalized statement" in scope
-    assert "leanstral proof" in scope          # the prover stays named
+    assert "machine proof" in scope            # the prover's half is stamp_prover's
     assert "formalization_scope" in changed
 
 

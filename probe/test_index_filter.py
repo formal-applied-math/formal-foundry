@@ -195,30 +195,24 @@ def test_cli_reports_and_exits_zero(capsys):
 
 # --- the seam that actually broke ---------------------------------------------
 # Every unit on both sides of this passed while the pipeline as a whole was
-# wrong: the build script kept MathFin-only records and `embed.load_premises`
-# faithfully embedded exactly what it was given, so the drafter's semantic
-# retrieval could not surface a Mathlib lemma. The contract worth pinning is the
-# composition, not either half.
+# wrong: the build script kept MathFin-only records, so no consumer of the index
+# could surface a Mathlib lemma. The contract worth pinning is the composition
+# (slice, then read through the adapter), not either half.
 
-def test_sliced_index_feeds_both_consumers_with_mathlib_visible():
-    import embed
+def test_sliced_index_feeds_the_context_packs_with_mathlib_visible():
     from scout_index import ScoutIndex
 
     with tempfile.TemporaryDirectory() as d:
         _full_index(d)
         ixf.slice_index(d, own=PACK.own_namespaces)
 
-        # consumer 1: the premise corpus the drafter searches semantically
-        names = {p["name"] for p in embed.load_premises(d)}
+        idx = ScoutIndex(d)
+        names = {r["name"] for r in idx._t()}
         assert "MeasureTheory.Integrable.add" in names, \
-            "a Mathlib lemma MathFin consumes must be retrievable"
+            "a Mathlib lemma MathFin consumes must be in the index"
         assert "MeasureTheory.Integrable.sub" in names, \
             "so must its module-mate — that is the anti-wrapper payload"
         assert "Polynomial.roots" not in names
-        assert embed.corpus_composition(embed.load_premises(d))["Mathlib"] == 2
-
-        # consumer 2: the context-pack adapter
-        idx = ScoutIndex(d)
         assert idx.available
         sig = idx.signature_of("MeasureTheory.Integrable.add")
         assert sig is not None and sig[0] == "Mathlib.MeasureTheory.Integral"
@@ -229,11 +223,11 @@ def test_sliced_index_feeds_both_consumers_with_mathlib_visible():
 def test_own_only_index_still_works_when_nothing_external_is_reached():
     # a library with no external deps recorded must degrade to the old behaviour
     # rather than producing an empty index.
-    import embed
+    from scout_index import ScoutIndex
     with tempfile.TemporaryDirectory() as d:
         _write(d, "const_dep.jsonl", [{"name": "MathFin.a", "module": "MathFin.Foo", "deps": []}])
         _write(d, "types.jsonl", [{"name": "MathFin.a", "module": "MathFin.Foo",
                                    "type": "ℝ", "allowCompletion": True}])
         stats = ixf.slice_index(d, own=PACK.own_namespaces)
         assert stats["neighborhood_modules"] == 0
-        assert [p["name"] for p in embed.load_premises(d)] == ["MathFin.a"]
+        assert [r["name"] for r in ScoutIndex(d)._t()] == ["MathFin.a"]

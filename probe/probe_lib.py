@@ -1,4 +1,4 @@
-"""Pure helper functions for the Leanstral calibration probe. Stdlib only."""
+"""Pure helper functions for the prove loop and the gates. Stdlib only."""
 
 from __future__ import annotations
 

@@ -1,21 +1,15 @@
 #!/usr/bin/env bash
-# The FRONTIER prover arm: a headless Claude Code session driving the same lean-lsp MCP
-# server `leanstral-vibe.sh` gives Leanstral. Same contract, same tools, same doctrine —
-# so a cron/decompose run differs from the incumbent in exactly one variable, the model.
+# The prover: a headless Claude Code session driving the lean-lsp MCP server, with the
+# house doctrine as its system prompt.
 #
-# Why this exists. The foundry drafts with a frontier model and proves with a small
-# specialist one, and its own cited ablation (backlog 2026-07-23, AlphaProof Nexus) reads
-# frontier basic loop 9/9, small-model basic loops 0/9, specialist prover alone 0/9 —
-# "drafter model class dominates architecture". That finding was applied to the draft
-# stage and withheld from the prove stage. Four passes in the project's lifetime, all in
-# a nine-day window in July, none since. This is the arm that makes the comparison
-# runnable instead of assumed.
+# Why a frontier model in a plain agentic loop. The foundry's own cited ablation (backlog
+# 2026-07-23, AlphaProof Nexus) reads frontier basic loop 9/9, small-model basic loops
+# 0/9, specialist prover alone 0/9 — "model class dominates architecture".
 #
-# The gates do not change. Kernel verification, axiom checks, vacuity/disproof, the
-# faithfulness judge and the necessity prober are the foundry's actual value and they
-# are engine-independent. Only the prover is swapped.
+# The gates are engine-independent. Kernel verification, axiom checks, vacuity/disproof,
+# the faithfulness judge and the necessity prober are the foundry's actual value.
 #
-# Contract (identical to leanstral-vibe.sh, so vibe_prove.py needs no special case):
+# Contract (what prove_session.py calls; a second engine's launcher would take the same):
 #   claude-prove.sh --agent lean --auto-approve --max-turns N -p "TASK"
 set -euo pipefail
 FOUNDRY="$(cd "$(dirname "$0")/.." && pwd)"
@@ -30,8 +24,7 @@ LSP="$MAIN/docker/docker-compose.lean-lsp.yml"
 #    flip stops another process's daemon, and an unusable command line must never cost
 #    someone the Lean slot. Learned the hard way 2026-09-09 — a smoke test with
 #    deliberately incomplete args was expected to be a no-op and instead took the slot
-#    out from under a concurrent session mid-run. leanstral-vibe.sh has the same
-#    stop-then-parse ordering and the same latent hazard.
+#    out from under a concurrent session mid-run.
 TURNS=60; TASK=""; take=0
 for a in "$@"; do
   if [ "$take" = "turns" ]; then TURNS="$a"; take=0; continue; fi
@@ -39,7 +32,7 @@ for a in "$@"; do
   case "$a" in
     --max-turns) take=turns ;;
     -p|--prompt) take=prompt ;;
-    --agent|--auto-approve) ;;          # vibe-isms with no Claude equivalent
+    --agent|--auto-approve) ;;          # contract flags with no Claude equivalent
     *) ;;
   esac
 done
@@ -69,8 +62,8 @@ if [ "$ready" != "1" ]; then
   exit 4
 fi
 
-# 4. The same lean-lsp MCP server vibe spawns — stdio, exec'd into the running container.
-#    Both arms therefore see an identical tool surface; the only variable is the model.
+# 4. The lean-lsp MCP server — stdio, exec'd into the running container; the same one
+#    the agentic drafter uses.
 MCP="$(mktemp)"; DOCTRINE_FILE="$(mktemp)"
 trap 'rm -f "$MCP" "$DOCTRINE_FILE"' EXIT
 cat > "$MCP" <<JSON
@@ -79,8 +72,7 @@ cat > "$MCP" <<JSON
            "lean-lsp-mcp", "--lean-project-path", "/app"]}}}
 JSON
 
-# 5. The house doctrine, injected as a system prompt — the same text leanstral-vibe.sh
-#    prepends to the task. Through the module's CLI (an inline `python3 -c` call is what
+# 5. The house doctrine, injected as a system prompt. Through the module's CLI (an inline `python3 -c` call is what
 #    broke both launchers on 2026-08-16), and passed as a FILE where the CLI supports it:
 #    Linux caps a single argv string at 128 KiB and the doctrine is larger than that.
 python3 "$FOUNDRY/probe/house_context.py" doctrine --main-repo "$MAIN" \
@@ -94,7 +86,7 @@ SYSTEM_ARGS=(--append-system-prompt-file "$DOCTRINE_FILE")
 # 6. Run. The tool allow-list is load-bearing: headless `-p` cannot ask for permission,
 #    so any tool not listed here is DENIED — without `mcp__lean-lsp` the prover would run
 #    with no Lean at all. It mirrors the drafter's (autoformalize.py) plus read-only search.
-#    stream-json goes to stdout, where vibe_prove.py captures it as the session transcript
+#    stream-json goes to stdout, where prove_session.py captures it as the session transcript
 #    (turns, tool calls, tokens, cost, and whether the MCP server connected).
 cd "$MAIN"
 claude -p "$TASK" \

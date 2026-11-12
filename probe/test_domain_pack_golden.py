@@ -229,8 +229,7 @@ def renders(main_repo: str) -> dict[str, str]:
     # ---- prompts: the agentic formalize task ----
     scaffold, _entry, _placement = autoformalize.emit_target_files(PACK, _ISSUE, _STUB, _META)
     out["prompt/agentic-formalize"] = autoformalize._agentic_formalize_prompt(
-        PACK, _INTENT, scaffold, PACK.scratch_module,
-        premises="zcb_pos : 0 < zcb r t T")
+        PACK, _INTENT, scaffold, PACK.scratch_module)
     out["config/lean-lsp-mcp"] = json.dumps(
         autoformalize._lean_lsp_mcp_config(PACK.lean_lsp_container),
         indent=2, sort_keys=True)

@@ -1,11 +1,9 @@
 """A/B scoreboard for the decomposition decision-gate (Task 2.6).
 
-One row per real target-attempt per arm — `cron` (the plain vibe prove path) vs
-`decompose` (the lemma-DAG loop), BOTH Mistral. It answers the single question the
-2026-09-30 decision gate needs: does decomposition close hard targets the plain cron
-path cannot, for the tokens it costs? There is NO centaur/Claude arm — production is
-Mistral-only (R decision 2026-07-18). `refinery_minutes` is filled by hand at merge (the
-unpriced human review cost). Stdlib only; the running log is runs/ab-decomposer.jsonl and
+One row per real target-attempt per arm — `cron` (the plain prove path) vs `decompose`
+(the lemma-DAG loop). It answers one question: does decomposition close hard targets the
+plain path cannot, for the tokens it costs? `refinery_minutes` is filled by hand at merge
+(the unpriced human review cost). Stdlib only; the running log is runs/ab-decomposer.jsonl and
 the human doc is docs/research/ab-decomposer.md.
 """
 
@@ -19,21 +17,18 @@ from probe_lib import append_jsonl
 #: which PATH ran — direct prove vs the lemma-DAG loop.
 ARMS = ("cron", "decompose")
 
-#: which MODEL proved. `arm` used to carry this implicitly because there was only ever
-#: one, and `ab_row` rejected a claude arm outright ("production is Mistral-only",
-#: R 2026-07-18) — which meant the scoreboard could not express the one comparison the
-#: 2026-09-30 engine decision needs. Path and engine are separate questions; a row now
-#: says both. Default is the incumbent, so every row already on disk reads unchanged.
-ENGINES = ("leanstral", "claude")
-DEFAULT_ENGINE = "leanstral"
+#: which ENGINE proved — a separate question from the path, so a row says both. These are
+#: the engines a NEW row may name (`pipeline_lib.PROVER_LAUNCHERS`); rows on disk keep
+#: whatever engine they recorded when they were written.
+ENGINES = ("claude",)
+DEFAULT_ENGINE = "claude"
 _START, _END = "<!-- SCOREBOARD:START -->", "<!-- SCOREBOARD:END -->"
 
 
 def ab_row(*, target: str, arm: str, outcome: str, ts: str, leaves_total: int = 0,
            leaves_closed: int = 0, tokens: int = 0, refinery_minutes=None,
            note: str = "", engine: str = DEFAULT_ENGINE) -> dict:
-    """One scoreboard row. `arm` is the path (`cron`/`decompose`), `engine` the prover
-    (`leanstral`/`claude`). `refinery_minutes` stays None until a human fills it at
+    """One scoreboard row. `arm` is the path (`cron`/`decompose`), `engine` the prover. `refinery_minutes` stays None until a human fills it at
     merge. Both fields are guarded, so a typo cannot quietly open a new column in the
     A/B."""
     if arm not in ARMS:
@@ -77,7 +72,7 @@ def render_scoreboard(rows) -> str:
             "|------|")
     lines = [
         f"| {r.get('ts', '')} | {r.get('target', '')} | {r.get('arm', '')} | "
-        f"{r.get('engine') or DEFAULT_ENGINE} | "
+        f"{r.get('engine') or '—'} | "
         f"{r.get('outcome', '')} | {_leaves_cell(r)} | {r.get('tokens', 0)} | "
         f"{'' if r.get('refinery_minutes') is None else r['refinery_minutes']} | "
         f"{_note_cell(r)} |"

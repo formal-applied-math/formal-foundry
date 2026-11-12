@@ -423,7 +423,7 @@ def _leaf_stub(pack: DomainPack, dag: Dag, leaf: Node, proved: dict) -> str:
     (no sorry) inlined ABOVE `<leaf.statement> := by sorry`, so a dependent leaf's
     proof can consume them while the stub stays a single-sorry target."""
     deps = [proved[d] for d in leaf.depends_on if proved.get(d)]
-    # a proving hint the vibe agent reads: the lemmas the decomposer expects this leaf to
+    # a proving hint the prover reads: the lemmas the decomposer expects this leaf to
     # consume (a Lean line comment — no sorry, no effect on elaboration; sliced off by
     # `extract_leaf_decl` at recompose since it starts at the `theorem` keyword)
     hint = f"-- apply: {', '.join(leaf.applied_to)}\n" if leaf.applied_to else ""
@@ -434,7 +434,7 @@ def build_leaf_manifest(pack: DomainPack, dag: Dag, meta: dict, out_dir: str, *,
                         toolchain: str = "", main_commit: str = "",
                         proved: dict | None = None) -> dict:
     """Write per-leaf single-sorry stubs + a `manifest.json` for the DAG's leaves, in
-    the shape `vibe_prove.py run/gate` consumes VERBATIM (they are ordinary single-sorry
+    the shape `prove_session.py run/gate` consumes VERBATIM (they are ordinary single-sorry
     targets). Each leaf target carries `parent` (the main theorem name), `parent_id` (the
     decompose target id), and `dag_order` (its index in topo order among the leaves — the
     order they must be proved in). `proved` optionally maps an already-proved leaf name ->
@@ -487,7 +487,7 @@ def extract_leaf_decl(pack: DomainPack, module_text: str, name: str) -> str | No
 def recompose(pack: DomainPack, dag: Dag, proved_leaves: dict, *, check_fn,
               meta: dict | None = None) -> dict:
     """Assemble proved leaves + the main theorem into ONE module and run the FULL gate.
-    `proved_leaves` maps a leaf name -> its proved module text (what `vibe_prove` writes).
+    `proved_leaves` maps a leaf name -> its proved module text (what `prove_session` writes).
 
     - ALL leaves proved AND the assembled module passes `check_fn` -> `{ok:True, module,
       banked}`.

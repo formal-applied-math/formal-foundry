@@ -2,13 +2,13 @@
 # One autoformalizer pipeline tick — the headless entrypoint the GitHub Actions
 # cron fires every `interval_days`. It:
 #   1. asks pipeline.py whether it's due + affordable + which target (plan)
-#   2. proves that target's queued stub with the vibe ⇄ lean-lsp-mcp harness
+#   2. proves that target's queued stub in an agentic session over lean-lsp-mcp
 #   3. charges the budget + persists state (record)
 #   4. STOPS at "candidate ready → notify R".  It NEVER opens a PR — scout-not-
 #      author holds; a human runs the 8-lens refinery and authors the PR.
 #
-# The prover is now the vibe ⇄ lean-lsp-mcp harness Leanstral was trained for: a
-# headless agent driving live goal states + lean_multi_attempt + search, run for one
+# The prover is a headless agent driving live goal states + lean_multi_attempt +
+# search through lean-lsp-mcp, run for one
 # deep session per target (depth over breadth). The tick flips the single Lean slot
 # lean-lsp→daemon to gate the captured proof. Token metering is traded for a turn
 # budget (max_turns); the daemon serves refill + the gate.
@@ -48,13 +48,9 @@ trap record_tick EXIT
 
 # API key (from main .env locally; from the secret in CI). Never logged.
 if [ -f "$MAIN/.env" ]; then set -a; . "$MAIN/.env"; set +a; fi
-# Which model proves ([prover] engine). Only the Leanstral engine needs the Mistral key;
-# the Claude engine's auth is checked for real by the canary before any target is tried.
+# Which engine proves ([prover] engine). Its auth is checked for real by the canary
+# before any target is tried.
 ENGINE="$(python3 -c "import pipeline_lib as p; print(p.ProverConfig.load('$CFG').engine)")"
-if [ "$ENGINE" = "leanstral" ] && [ -z "${MISTRAL_API_KEY:-}" ]; then
-  TICK_REASON="MISTRAL_API_KEY not set (engine=leanstral)"
-  echo "[tick] $TICK_REASON" >&2; exit 2
-fi
 
 # 0. Preflight: the main repo's python gates (values/router/ledger/audit pytest)
 # must be green BEFORE we spend a prove. A repo-WIDE red gate (values-review
@@ -110,11 +106,9 @@ if [ "$(jget "$DEC" stale_manifest)" = "True" ]; then
 fi
 
 # 1b. Self-feeding refill: when the queue has no unattempted target, autoformalize
-# one from the next `status:ready`+`type:proof` issue — claude drafts + judges +
-# roundtrips a faithful stub, leanstral runs the kernel gates — then rebuild the
-# manifest and re-plan. Needs the daemon (up) and Claude auth; MISTRAL_API_KEY only
-# buys embedding retrieval (absent or dead, the drafter searches with loogle);
-# gated on [autoformalize].enabled. On any failure it falls through to the skip.
+# one from the next `status:ready`+`type:proof` issue — claude drafts and judges a
+# faithful stub, the gate battery vets it — then rebuild the manifest and re-plan.
+# Needs the daemon (up) and Claude auth; gated on [autoformalize].enabled. On any failure it falls through to the skip.
 # (not after an infrastructure failure: drafting against a daemon that could not
 # validate the queue spends a Claude session on gates that cannot answer)
 if [ "$ACTION" = "skip" ] && [ "$REASON" = "no_unattempted_targets" ] && [ "$INFRA_FAIL" = 0 ]; then
@@ -158,7 +152,7 @@ echo "[tick] running target $ID via the $ENGINE prover ⇄ lean-lsp-mcp (max_tur
 
 # 2. Prove the target. Same artifacts either way (runs/$TAG-$ID.lean + a summary row) so
 #    steps 3-6 are shared. Routing:
-#      • plain vibe path by default (the running cron, byte-identical when decompose is off);
+#      • the plain prove path by default (the running cron, byte-identical when decompose is off);
 #      • the lemma-DAG decompose path when a workflow_dispatch FORCES it (DECOMPOSE_FORCE),
 #        or the target is tagged `decompose` and [decompose].enabled;
 #      • AND the autonomous standing rule: when [decompose].enabled, a plain attempt that
@@ -197,7 +191,7 @@ if [ -n "$DECOMPOSE_FORCE" ] || { [ -n "$DECOMPOSE_ON" ] && [ -n "$DECOMPOSE_TAG
   WHY="$([ -n "$DECOMPOSE_FORCE" ] && echo 'forced by dispatch' || echo 'tagged decompose + enabled')"
   echo "[tick] $ID → lemma-DAG decompose path ($WHY)" >&2
   run_decompose
-elif python3 vibe_prove.py adopt --id "$ID" --run-tag "$TAG" >&2; then
+elif python3 prove_session.py adopt --id "$ID" --run-tag "$TAG" >&2; then
   # A proof of this target already passed the gate in an earlier tick and never became a
   # PR (a refused push, a transient assembly failure). Re-gate it on the current daemon —
   # the pins may have moved — instead of paying for a new session. The daemon is up: no
@@ -208,19 +202,18 @@ elif python3 vibe_prove.py adopt --id "$ID" --run-tag "$TAG" >&2; then
   if [ "$DAEMON_RC" != 0 ]; then
     INFRA_FAIL=1; INFRA_WHY="the daemon was not ready to re-gate the adopted proof"
   else
-    python3 vibe_prove.py gate --manifest "$QUEUE" --only "$ID" --run-tag "$TAG" --main-repo "$MAIN" --config "$CFG"
+    python3 prove_session.py gate --manifest "$QUEUE" --only "$ID" --run-tag "$TAG" --main-repo "$MAIN" --config "$CFG"
   fi
   set -e
 else
-  # Plain vibe ⇄ lean-lsp-mcp harness (spec:
-  #   docs/superpowers/specs/2026-07-17-leanstral-vibe-cron-harness-design.md).
-  #   Phase A (lean-lsp UP): headless vibe drives lean_goal / lean_multi_attempt / search
-  #     → runs/$TAG-$ID.candidate. leanstral-vibe.sh stops the daemon + brings lean-lsp up.
+  # The plain prove path.
+  #   Phase A (lean-lsp UP): the headless prover drives lean_goal / lean_multi_attempt /
+  #     search → runs/$TAG-$ID.candidate. The launcher stops the daemon + brings lean-lsp up.
   #   Flip: stop lean-lsp, restart the daemon — `stop`/`up`, NEVER `down` (down removes the
   #     shared docker_default network the daemon publishes 7878 on).
   #   Phase B (daemon UP): gate the candidate → runs/$TAG-$ID.lean + summary row.
   set +e
-  python3 vibe_prove.py run --manifest "$QUEUE" --only "$ID" \
+  python3 prove_session.py run --manifest "$QUEUE" --only "$ID" \
     --max-turns "$TURNS" --run-tag "$TAG" --main-repo "$MAIN" --config "$CFG"
   RUN_RC=$?
   echo "[tick] flipping the Lean slot back to the daemon for the gate…" >&2
@@ -239,7 +232,7 @@ else
   elif [ "$DAEMON_RC" != 0 ]; then
     INFRA_FAIL=1; INFRA_WHY="the daemon did not come back for the gate"
   else
-    python3 vibe_prove.py gate --manifest "$QUEUE" --only "$ID" --run-tag "$TAG" --main-repo "$MAIN" --config "$CFG"
+    python3 prove_session.py gate --manifest "$QUEUE" --only "$ID" --run-tag "$TAG" --main-repo "$MAIN" --config "$CFG"
   fi
   set -e
   if [ "$INFRA_FAIL" = 1 ]; then echo "::error::[tick] $INFRA_WHY — no verdict this tick" >&2; fi
@@ -299,7 +292,7 @@ if [ "$OUTCOME" = "pass" ] && [ -f "$CAND" ]; then
         echo "[tick] (open-pr.sh transient failure rc=$OPENPR_RC; candidate still at $CAND — retryable)" >&2
         # A proof that passed and could not become a PR is the machinery failing (a push
         # refused with 403 went green on 2026-09-28). Red, and the next tick REUSES the
-        # verified proof (`vibe_prove.py adopt`) instead of paying for it again.
+        # verified proof (`prove_session.py adopt`) instead of paying for it again.
         INFRA_FAIL=1
         INFRA_WHY="$ID passed but its PR could not be opened (open-pr rc=$OPENPR_RC); the verified proof is kept for the next tick"
       fi

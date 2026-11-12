@@ -7,7 +7,7 @@ leaves in parallel and (b) speed the `ledger verify --exec` corpus sweep after a
 change — both wall-clock-bound by a single Lean slot today.
 
 Scope: it parallelizes ELABORATION/verification (the leaf gate + the corpus sweep), not the
-agentic prove itself — the vibe ⇄ lean-lsp harness keeps its single-lean-lsp slot. So on CI
+agentic prove itself — the prove session keeps its single lean-lsp slot. So on CI
 it gates N proved leaves at once and re-verifies the ledger's stale entries concurrently.
 
 The pool is generic: it schedules `tasks` across `n_workers` reusable workers (a worker holds

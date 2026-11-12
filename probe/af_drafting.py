@@ -103,13 +103,12 @@ def parse_intent(reply: str) -> dict | None:
 
 # --- the frontier draft engine (item I): a `claude -p` adapter ----------------
 # `claude -p --output-format json` runs a headless completion; with tools DISABLED it
-# is a pure text generator, drop-in for `mistral_chat` (returns (text, tokens)). Claude
-# is now the only drafter (intent + agentic formalize) and the judge too; Leanstral
-# still PROVES — the gate battery is drafter-agnostic either way. Design:
+# is a pure text generator: `messages -> (text, tokens)`, the chat contract every caller
+# here takes. Claude is the drafter (intent + agentic formalize) and the judge. Design:
 # docs/superpowers/specs/2026-07-24-frontier-drafter-design.md.
 _CLAUDE_CAP_MARKERS = ("usage limit", "rate limit", "limit reached", "quota", "capacity",
                        # auth/expiry — a dead or missing subscription token degrades like a
-                       # cap (on_cap fallback → mistral / defer) instead of erroring the tick
+                       # cap (the target is deferred) instead of erroring the tick
                        "login expired", "please run /login", "invalid api key",
                        "authentication", "unauthorized", "not logged in")
 
@@ -117,24 +116,32 @@ _CLAUDE_CAP_MARKERS = ("usage limit", "rate limit", "limit reached", "quota", "c
 
 
 class ClaudeCapError(RuntimeError):
-    """The claude.ai subscription hit a usage cap for this window. Per `[drafter]
-    on_cap`, the tick defers the target (requeue, no obstruction) or falls back to the
-    mistral drafter — distinct from a real draft failure."""
+    """The claude.ai subscription hit a usage cap for this window. The tick defers the
+    target (requeue, no obstruction) — distinct from a real draft failure."""
 
 
 
 
-def _claude_draft_args(messages: list[dict], *, model: str = "") -> tuple[list[str], str]:
+#: Linux refuses a single argv string over 128 KiB. A system prompt near that (the house
+#: doctrine is 134 KB against the v2 library) goes in as a file instead.
+_ARGV_SAFE_BYTES = 96 * 1024
+
+
+def _claude_draft_args(messages: list[dict], *, model: str = "",
+                       system_file: str | None = None) -> tuple[list[str], str]:
     """Build the `claude -p` argv + stdin from chat `messages`. System messages become
-    `--append-system-prompt`; the user content is the stdin prompt (avoids arg-length
-    limits on big context packs). Tools DISABLED (`--allowedTools ""`) → a pure
+    `--append-system-prompt` (or `--append-system-prompt-file system_file`, when the
+    caller has written them to one); the user content is the stdin prompt (avoids
+    arg-length limits on big context packs). Tools DISABLED (`--allowedTools ""`) → a pure
     completion, no file/bash/agentic side effects. Returns (argv, stdin)."""
     system = "\n\n".join(m["content"] for m in messages if m.get("role") == "system")
     user = "\n\n".join(m["content"] for m in messages if m.get("role") != "system")
     argv = ["claude", "-p", "--output-format", "json", "--allowedTools", ""]
     if model:
         argv += ["--model", model]
-    if system:
+    if system and system_file:
+        argv += ["--append-system-prompt-file", system_file]
+    elif system:
         argv += ["--append-system-prompt", system]
     return argv, user
 
@@ -142,10 +149,9 @@ def _claude_draft_args(messages: list[dict], *, model: str = "") -> tuple[list[s
 
 
 def claude_draft_fn(messages: list[dict], *, model: str = "", run_fn=None) -> tuple[str, int]:
-    """A `claude -p` adapter shaped like `mistral_chat`: returns (text, tokens). Used for
-    the DRAFT stage under [drafter] engine="claude". `run_fn(argv, stdin)` is injectable
-    for tests (defaults to `subprocess.run`). Raises `ClaudeCapError` on a subscription
-    cap so the tick can defer / fall back."""
+    """The `claude -p` chat adapter: `messages -> (text, tokens)`. `run_fn(argv, stdin)` is
+    injectable for tests (defaults to `subprocess.run`). Raises `ClaudeCapError` on a
+    subscription cap so the tick can defer."""
     if run_fn is None:
         from redact import agent_env
 
@@ -153,8 +159,23 @@ def claude_draft_fn(messages: list[dict], *, model: str = "", run_fn=None) -> tu
             # only Claude's own credential (the refill runs with GH_TOKEN = MAIN_PR_TOKEN)
             return subprocess.run(argv, input=stdin, capture_output=True, env=agent_env("claude"),
                                   text=True, timeout=600)
-    argv, stdin = _claude_draft_args(messages, model=model)
-    res = run_fn(argv, stdin)
+    system = "\n\n".join(m["content"] for m in messages if m.get("role") == "system")
+    system_file = None
+    if len(system.encode("utf-8")) > _ARGV_SAFE_BYTES:
+        import tempfile
+        with tempfile.NamedTemporaryFile("w", suffix=".system.txt", delete=False,
+                                         encoding="utf-8") as f:
+            f.write(system)
+            system_file = f.name
+    try:
+        argv, stdin = _claude_draft_args(messages, model=model, system_file=system_file)
+        res = run_fn(argv, stdin)
+    finally:
+        if system_file:
+            try:
+                os.unlink(system_file)
+            except OSError:
+                pass
     out = (getattr(res, "stdout", "") or "").strip()
     try:
         data = json.loads(out)
@@ -177,8 +198,8 @@ def claude_draft_fn(messages: list[dict], *, model: str = "", run_fn=None) -> tu
 
 def claude_chat_fn(drafter):
     """The `claude -p` chat fn bound to the configured model. ONE claude does every general-
-    reasoner role — intent, the faithfulness JUDGE, and the decompose split
-    (Leanstral still PROVES). A subscription cap raises `ClaudeCapError`, which refill defers."""
+    reasoner role — intent, the faithfulness JUDGE, the kernel probes and the decompose
+    split. A subscription cap raises `ClaudeCapError`, which refill defers."""
     def call(msgs):
         return claude_draft_fn(msgs, model=drafter.claude_model)
     return call

@@ -38,7 +38,7 @@ __all__ = ["droppable_hypotheses", "necessity_probe", "unnecessary_hypotheses",
 _SORRY = re.compile(r"\bsorry\b")
 
 # The re-prove runs in the GATE phase, where the daemon holds the Lean slot and the
-# vibe harness is down (they are mutually exclusive). So "can the prover close the
+# prove session is down (they are mutually exclusive). So "can the prover close the
 # reduced statement?" is answered by a fixed tactic sweep rather than a model call:
 # zero tokens, no phase flip, and every tactic here is one the house rules allow in a
 # merged source (no `?`-suggestion tactics, no hammer). Ordered cheap → strong.

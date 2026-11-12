@@ -54,13 +54,14 @@ Per issue `#N` (worked example: `cal-bk-88.*` for #88):
   `assemble.py` appends to the corpus (the `mf-bs-put-formula` shape: `import
   MathFin.<Module>` + a thin `:= MathFin.<name> …`), carrying its **provenance**:
   ```json
-  "metadata": { "provenance": { "source": "leanstral-autoform",
-                                "model": "labs-leanstral-1-5", "issue": N } }
+  "metadata": { "provenance": { "source": "foundry-autoform", "issue": N } }
   ```
+  `source` names the pipeline. `model`, the model that proved the entry, is written
+  at assembly from the session that ran (`assemble.stamp_prover`), never at staging.
   `formal-mathfin`'s `formalization.yaml` generator counts these markers, so the
   automation disclosure stays mechanically honest (never a hand-set "0 merged").
 
-## Faithfulness bar (the statement is R-curated, the proof is Leanstral's)
+## Faithfulness bar (the statement is R-curated, the proof is the prover's)
 
 Author the stub statement to state EXACTLY the issue's formula — no vacuity, no
 weaker restatement. Faithfulness is R's to confirm at merge; author conservatively.
@@ -126,7 +127,7 @@ Removed as COMPLETED (a different thing from retired on the bar above):
   every other target is a gate design question, not a stale-file question, and it
   should be decided on its own rather than in passing.
 
-## Validate + activate (needs the daemon; does NOT spend Leanstral tokens)
+## Validate + activate (needs the daemon; no model call)
 
 ```bash
 docker compose -f docker/docker-compose.yml up -d lean-repl          # main repo

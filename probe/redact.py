@@ -29,7 +29,6 @@ SECRET_NAME = re.compile(r"(TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|_KEY$|^KEY$|
 #: the one credential each agent CLI authenticates with — the only one it keeps
 AGENT_AUTH = {
     "claude": ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"),
-    "leanstral": ("MISTRAL_API_KEY",),
 }
 
 #: credential SHAPES, labelled by kind; the label is safe to log, the match is not

@@ -1,11 +1,9 @@
 """Prove a queued target with one headless agentic session wired to lean-lsp-mcp.
 
-Replaces the text-loop probe on the cron path (see
-`docs/superpowers/specs/2026-07-17-leanstral-vibe-cron-harness-design.md`). The
-model drives lean-lsp-mcp tools (live `lean_goal`, `lean_multi_attempt`, on-demand
-search) in one deep session per target instead of pasting compiler error strings
-into `/chat/completions`. `[prover] engine` picks the launcher: `claude-prove.sh`
-(`claude -p`) or `leanstral-vibe.sh` (Mistral vibe) — same contract, same tools.
+The model drives lean-lsp-mcp tools (live `lean_goal`, `lean_multi_attempt`, on-demand
+search) in one deep session per target instead of pasting compiler error strings into a
+chat-completions loop. `[prover] engine` names the launcher; today there is one,
+`claude-prove.sh` (`claude -p`).
 
 Every session leaves evidence — exit code, duration, the transcript, and for Claude
 the parsed turns / tool calls / tokens / cost — and `classify_session` decides from
@@ -14,8 +12,8 @@ never a verdict about the target. A canary proves a trivial theorem through the 
 path before each run.
 
 Mechanics (W0-validated):
-- vibe edits files on the HOST from its CWD; the MCP reads goals from `/app` in
-  the container. So we run vibe with CWD = the main repo and materialize the stub
+- the agent edits files on the HOST from its CWD; the MCP reads goals from `/app` in
+  the container. So the session runs with CWD = the main repo and the stub is materialized
   as `<LakeRoot>/<stem>.lean`, the same bind-mounted file on both sides.
 - the stub is a throwaway scratch file; the captured proof is gated (daemon) and
   assembled into its real module downstream by open-pr.sh. We delete the scratch
@@ -42,9 +40,6 @@ from redact import agent_env, redact, redact_file, secret_findings, secret_value
 #: target. The tick turns red and records nothing.
 PROVER_CANARY_FAILED = 5
 
-#: The model string each engine proves with, for provenance (the Claude model comes from
-#: `[prover] claude_model`).
-LEANSTRAL_MODEL = "labs-leanstral-1-5"
 
 
 def sanitize_stem(target_id: str) -> str:
@@ -62,10 +57,11 @@ def scratch_paths(pack, main_repo: str, target_id: str) -> tuple[str, str]:
     return host, rel
 
 
-def build_vibe_task(stub_relpath: str, sorry_name: str, context_pack: str = "",
+def build_prove_task(stub_relpath: str, sorry_name: str, context_pack: str = "",
                     state_hints: str = "", experience: str = "") -> str:
-    """The `-p` task for vibe. leanstral-vibe.sh prepends the house doctrine, so this
-    is the per-target instruction + the consume-don't-reprove pointer pack only.
+    """The `-p` task for the prover. The launcher injects the house doctrine as a system
+    prompt, so this is the per-target instruction + the consume-don't-reprove pointer
+    pack only.
 
     `state_hints` is the proof-state cache's contribution: `goal -> tactic` pairs that
     closed the same state while proving a DIFFERENT target. Empty unless states have
@@ -170,7 +166,7 @@ def run_prover_session(pack, target: dict, *, main_repo: str, context_pack: str,
         f.write(target["statement"])
     transcript = launcher_log = None
     try:
-        task = build_vibe_task(rel, target["sorry_name"], context_pack, state_hints,
+        task = build_prove_task(rel, target["sorry_name"], context_pack, state_hints,
                                experience)
         argv = [launcher, "--agent", "lean", "--auto-approve",
                 "--max-turns", str(max_turns), "-p", task]
@@ -216,13 +212,13 @@ def run_prover_session(pack, target: dict, *, main_repo: str, context_pack: str,
             pass
 
 
-def run_vibe_target(pack, target: dict, *, main_repo: str, context_pack: str,
+def run_prove_target(pack, target: dict, *, main_repo: str, context_pack: str,
                     max_turns: int,
-                    vibe_script: str, run_fn=subprocess.run, state_hints: str = "",
+                    launcher_script: str, run_fn=subprocess.run, state_hints: str = "",
                     experience: str = "") -> str | None:
     """The captured file content only — `run_prover_session` without the evidence."""
     return run_prover_session(pack, target, main_repo=main_repo, context_pack=context_pack,
-                              max_turns=max_turns, launcher=vibe_script, run_fn=run_fn,
+                              max_turns=max_turns, launcher=launcher_script, run_fn=run_fn,
                               state_hints=state_hints, experience=experience)["content"]
 
 
@@ -330,8 +326,9 @@ def classify_session(session: dict | None) -> tuple[bool, str]:
         if not session.get("tool_calls"):
             return False, "the session made no tool calls"
         return True, ""
-    # vibe/Leanstral writes no structured transcript. A session that ended within
-    # seconds without touching the file did not run.
+    # A record with no structured transcript (an engine that writes none, or a record
+    # from before transcripts were parsed): a session that ended within seconds without
+    # touching the file did not run.
     if session.get("identical_to_stub") and (session.get("duration_s") or 0) < 30:
         return False, "the session ended in under 30s without editing the file"
     return True, ""
@@ -413,21 +410,19 @@ def _experience_store(run_dir: str, config_path: str | None):
     return ExperienceStore(os.path.join(run_dir, "experience.json"))
 
 
-def _summarizer():
+def _summarizer(config_path: str | None = None):
     """The chat backend that rolls a notebook, or None to use the mechanical digest.
 
-    Leanstral is already the tick's authenticated model, and this is a short prose call —
-    no new secret, no new dependency. `EXPERIENCE_LLM=0` forces the mechanical path, which
-    is what the tests and any keyless run take.
+    The drafter's Claude, tools off: a short prose call. `EXPERIENCE_LLM=0` forces the
+    mechanical path, which is what the tests and any run without Claude auth take; a call
+    that fails falls through to it as well (`experience.summarize`).
     """
     if os.environ.get("EXPERIENCE_LLM", "1") == "0":
         return None
-    api_key = os.environ.get("MISTRAL_API_KEY")
-    if not api_key:
+    from af_drafting import claude_auth_present
+    if not claude_auth_present():
         return None
-    from probe import mistral_chat
-    # Small, cheap, and deterministic-ish: this is bookkeeping, not proving.
-    return lambda msgs: mistral_chat(msgs, api_key=api_key, max_tokens=800, temperature=0.2)
+    return _reflow_chat(config_path)
 
 
 def _prover(args):
@@ -442,12 +437,8 @@ def _prover(args):
     # MAIN_PR_TOKEN (write access to the library) included — while running with read
     # access to the runner's filesystem.
     env = agent_env(engine)
-    if engine == "claude":
-        env["CLAUDE_PROVER_MODEL"] = cfg.claude_model
-        model = cfg.claude_model
-    else:
-        model = LEANSTRAL_MODEL
-    return engine, launcher, model, env, cfg
+    env["CLAUDE_PROVER_MODEL"] = cfg.claude_model
+    return engine, launcher, cfg.claude_model, env, cfg
 
 
 def _write_json(path: str, obj: dict) -> None:
@@ -478,8 +469,7 @@ def prover_of(run_dir: str, tag: str, target_id: str, config: str | None = None)
             return {"engine": rec["engine"], "model": rec["model"]}
     from pipeline_lib import ProverConfig
     cfg = ProverConfig.load(config)
-    return {"engine": cfg.engine,
-            "model": cfg.claude_model if cfg.engine == "claude" else LEANSTRAL_MODEL}
+    return {"engine": cfg.engine, "model": cfg.claude_model}
 
 
 def adopt_verified(run_dir: str, target_id: str, tag: str) -> str | None:
@@ -504,7 +494,7 @@ def adopt_verified(run_dir: str, target_id: str, tag: str) -> str | None:
         except (OSError, ValueError):
             continue
         if any(r.get("target") == target_id and r.get("outcome") == "pass"
-               and r.get("harness") == "vibe" for r in rows):
+               and r.get("harness") == "agentic" for r in rows):
             passing.append(src)
     for src in reversed(passing):                                    # newest first
         content = read_back(os.path.join(run_dir, f"{src}-{target_id}.candidate"))
@@ -544,28 +534,28 @@ def _cmd_run(args) -> int:
                             or domain_pack.name_from_config(
                                 getattr(args, "config", None) or ""))
     engine, launcher, model, env, prover_cfg = _prover(args)
-    print(f"[vibe-run] prover: {engine} ({model}) via {os.path.basename(launcher)}",
+    print(f"[prove-run] prover: {engine} ({model}) via {os.path.basename(launcher)}",
           flush=True)
     if prover_cfg.canary and not getattr(args, "no_canary", False):
         ok, why = run_canary(pack, main_repo=args.main_repo, launcher=launcher,
                              engine=engine, model=model, run_dir=run_dir, tag=args.run_tag,
                              max_turns=prover_cfg.canary_max_turns, env=env)
         if not ok:
-            print(f"::error::[vibe-run] prover CANARY FAILED — {why}. The prove path is "
+            print(f"::error::[prove-run] prover CANARY FAILED — {why}. The prove path is "
                   "broken, so nothing it produced would be a verdict about a target. "
                   "Nothing was attempted.", flush=True)
             tail = _tail(os.path.join(run_dir, f"{args.run_tag}-{CANARY_ID}.launcher.log"))
             if tail:
-                print("[vibe-run] launcher log (tail):\n" + tail, flush=True)
+                print("[prove-run] launcher log (tail):\n" + tail, flush=True)
             return PROVER_CANARY_FAILED
-        print("[vibe-run] canary proved — the prove path is live", flush=True)
+        print("[prove-run] canary proved — the prove path is live", flush=True)
     cache = _state_cache(run_dir, getattr(args, "config", None))
     memory = _experience_store(run_dir, getattr(args, "config", None))
     # Cross-target `goal -> tactic` pairs. Empty string until states have recurred, so
     # a cold or unproductive cache changes the prompt not at all.
     state_hints = cache.suggestions() if cache is not None else ""
     if state_hints:
-        print(f"[vibe-run] state cache: offering {state_hints.count('-- goal:')} "
+        print(f"[prove-run] state cache: offering {state_hints.count('-- goal:')} "
               f"cross-target suggestion(s)", flush=True)
     for target, root in _iter_targets(args.manifest, args.only):
         target["statement"] = open(os.path.join(root, target["file"]), encoding="utf-8").read()
@@ -573,7 +563,7 @@ def _cmd_run(args) -> int:
         context_pack = extract_signatures(args.main_repo, pointers) if pointers else ""
         notebook = memory.render(target["id"]) if memory is not None else ""
         if notebook:
-            print(f"[vibe-run] {target['id']}: carrying {memory.attempts(target['id'])} "
+            print(f"[prove-run] {target['id']}: carrying {memory.attempts(target['id'])} "
                   f"prior attempt(s) of experience", flush=True)
         prefix = os.path.join(run_dir, f"{args.run_tag}-{target['id']}")
         sess = run_prover_session(pack, target, main_repo=args.main_repo,
@@ -588,20 +578,21 @@ def _cmd_run(args) -> int:
         _write_json(prefix + ".session.json", record)
         ran, why = classify_session(record)
         removed = bool(cand) and not has_sorry(cand)
-        print(f"[vibe-run] {target['id']}: rc={record['rc']} {record['duration_s']}s "
+        print(f"[prove-run] {target['id']}: rc={record['rc']} {record['duration_s']}s "
               f"turns={record.get('turns')} tool_calls={record.get('tool_calls')} "
               f"captured {len(cand or '')} bytes, sorry_removed={removed}", flush=True)
         if not ran:
-            print(f"::error::[vibe-run] {target['id']}: the prover did not run — {why}",
+            print(f"::error::[prove-run] {target['id']}: the prover did not run — {why}",
                   flush=True)
             tail = _tail(record.get("launcher_log"))
             if tail:
-                print("[vibe-run] launcher log (tail):\n" + tail, flush=True)
+                print("[prove-run] launcher log (tail):\n" + tail, flush=True)
     return 0
 
 
 def _reflow_chat(config_path: str | None):
-    """The model that reformats an accepted proof: the drafter's Claude, tools off. A
+    """The model for the short text-only jobs around a proof (reformatting an accepted
+    one, the opt-in golf pass, the notebook summary): the drafter's Claude, tools off. A
     session with no Claude auth raises inside `reflow_candidate`, which keeps the
     original — formatting is never worth losing a proof over."""
     from af_drafting import claude_chat_fn
@@ -619,7 +610,7 @@ def _cmd_gate(args) -> int:
     from autoformalize import (golf_candidate, reflow_candidate, strengthen_candidate,
                                 trim_unused_imports, trim_unused_opens)
     from gate import gate as run_gate
-    from probe import daemon_check, mistral_chat
+    from probe import daemon_check
     from probe_lib import append_jsonl
     _, run_dir = _run_dir()
     pack = domain_pack.load(getattr(args, "domain", None)
@@ -628,7 +619,7 @@ def _cmd_gate(args) -> int:
     summary_log = os.path.join(run_dir, f"{args.run_tag}-summary.jsonl")
     state_cache = _state_cache(run_dir, getattr(args, "config", None))
     memory = _experience_store(run_dir, getattr(args, "config", None))
-    summarizer = _summarizer() if memory is not None else None
+    summarizer = _summarizer(getattr(args, "config", None)) if memory is not None else None
     for target, _root in _iter_targets(args.manifest, args.only):
         cand_path = os.path.join(run_dir, f"{args.run_tag}-{target['id']}.candidate")
         candidate = read_back(cand_path)
@@ -641,7 +632,7 @@ def _cmd_gate(args) -> int:
         ran, why = classify_session(session)
         session = session or {}
         summary = {"target": target["id"], "stream": target.get("stream", ""),
-                   "ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "harness": "vibe",
+                   "ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "harness": "agentic",
                    "arm": getattr(args, "arm", "cron"),
                    "engine": session.get("engine"), "model": session.get("model"),
                    "tokens": int(session.get("tokens") or 0),
@@ -678,7 +669,7 @@ def _cmd_gate(args) -> int:
                     candidate, snippet, target["sorry_name"], g.get("warnings"),
                     regate_fn=lambda c: run_gate(c, target["sorry_name"],
                                                  check_fn=daemon_check),
-                    log=lambda m: print(f"[vibe-gate] {target['id']}: {m}", flush=True))
+                    log=lambda m: print(f"[prove-gate] {target['id']}: {m}", flush=True))
                 if s["stripped"]:
                     candidate = s["candidate"]
                     summary["stripped_hypotheses"] = s["stripped"]
@@ -698,7 +689,7 @@ def _cmd_gate(args) -> int:
                 # all four drafts genuinely consumed their guard (`h.le`,
                 # `field_simp [h]`), so no warning fired, and the statement was true
                 # without it anyway. Re-proves the reduced statement with a tactic
-                # sweep — the gate phase owns the Lean slot and the vibe harness is
+                # sweep — the gate phase owns the Lean slot and the prove session is
                 # down, so this stays daemon-only and costs zero prover tokens.
                 if os.environ.get("NECESSITY", "1") != "0":
                     from strengthen import tactic_sweep_prover, unnecessary_hypotheses
@@ -708,7 +699,7 @@ def _cmd_gate(args) -> int:
                         prove_fn=tactic_sweep_prover(daemon_check, defs),
                         regate_fn=lambda c: run_gate(c, target["sorry_name"],
                                                      check_fn=daemon_check),
-                        log=lambda m: print(f"[vibe-gate] {target['id']}: {m}", flush=True))
+                        log=lambda m: print(f"[prove-gate] {target['id']}: {m}", flush=True))
                     if nec["changed"]:
                         candidate = nec["candidate"]
                         summary["unnecessary_hypotheses"] = nec["dropped"]
@@ -722,7 +713,7 @@ def _cmd_gate(args) -> int:
                     if g3["passed"]:
                         candidate = t["candidate"]
                         summary["trimmed_imports"] = t["removed"]
-                        print(f"[vibe-gate] {target['id']}: trimmed unused "
+                        print(f"[prove-gate] {target['id']}: trimmed unused "
                               f"import(s) {t['removed']}", flush=True)
                 # item V: the house preamble is opened unconditionally at emit (a
                 # missing open is a silent bare-name death, an unused one is not).
@@ -735,21 +726,20 @@ def _cmd_gate(args) -> int:
                     if g4["passed"]:
                         candidate = o["candidate"]
                         summary["trimmed_opens"] = o["removed"]
-                        print(f"[vibe-gate] {target['id']}: trimmed unused "
+                        print(f"[prove-gate] {target['id']}: trimmed unused "
                               f"open(s) {o['removed']}", flush=True)
                 # golf: the prover polishes its own accepted proof to the house
                 # register (proof-only edits enforced by signature equality + a
-                # full re-gate; fail-open). Opt-in with GOLF=1: it calls Leanstral,
-                # whose endpoint Mistral retires 2026-09-30.
-                if os.environ.get("GOLF", "0") == "1" and os.environ.get("MISTRAL_API_KEY"):
+                # full re-gate; fail-open). Opt-in with GOLF=1: one more Claude call
+                # per accepted proof.
+                if os.environ.get("GOLF", "0") == "1":
                     gf = golf_candidate(
                         pack,
                         candidate,
-                        chat_fn=lambda msgs: mistral_chat(
-                            msgs, api_key=os.environ["MISTRAL_API_KEY"]),
+                        chat_fn=_reflow_chat(getattr(args, "config", None)),
                         regate_fn=lambda c: run_gate(c, target["sorry_name"],
                                                      check_fn=daemon_check),
-                        log=lambda m: print(f"[vibe-gate] {target['id']}: {m}",
+                        log=lambda m: print(f"[prove-gate] {target['id']}: {m}",
                                             flush=True))
                     if gf["golfed"]:
                         candidate = gf["candidate"]
@@ -763,7 +753,7 @@ def _cmd_gate(args) -> int:
                     pack, candidate, chat_fn=_reflow_chat(getattr(args, "config", None)),
                     regate_fn=lambda c: run_gate(c, target["sorry_name"],
                                                  check_fn=daemon_check),
-                    log=lambda m: print(f"[vibe-gate] {target['id']}: {m}", flush=True))
+                    log=lambda m: print(f"[prove-gate] {target['id']}: {m}", flush=True))
                 if rf["reflowed"]:
                     candidate = rf["candidate"]
                     summary["reflowed"] = True
@@ -774,7 +764,7 @@ def _cmd_gate(args) -> int:
                         f"must fit in {library_map.LINE_LIMIT} characters")
                     attempt_errors = [summary["gate_reason"]]
                     append_jsonl(summary_log, summary)
-                    print(f"[vibe-gate] {target['id']}: fail_gate ({summary['gate_reason']})",
+                    print(f"[prove-gate] {target['id']}: fail_gate ({summary['gate_reason']})",
                           flush=True)
                     if memory is not None:
                         memory.record(target["id"], {"outcome": "fail_gate",
@@ -795,10 +785,10 @@ def _cmd_gate(args) -> int:
                         candidate, target_id=target["id"], check_fn=daemon_check,
                         cache=state_cache,
                         log_path=os.path.join(run_dir, "proof-states.jsonl"),
-                        log=lambda m: print(f"[vibe-gate] {target['id']}: {m}", flush=True))
+                        log=lambda m: print(f"[prove-gate] {target['id']}: {m}", flush=True))
                     summary.update(proof_states=counts["states"],
                                    new_proof_states=counts["new_states"])
-                    print(f"[vibe-gate] {target['id']}: recorded {counts['states']} "
+                    print(f"[prove-gate] {target['id']}: recorded {counts['states']} "
                           f"proof state(s), {counts['new_states']} new", flush=True)
             else:
                 summary["outcome"] = "fail_gate"
@@ -817,7 +807,7 @@ def _cmd_gate(args) -> int:
                           summarize_fn=summarizer)
             summary["experience_attempts"] = memory.attempts(target["id"])
         append_jsonl(summary_log, summary)
-        print(f"[vibe-gate] {target['id']}: {summary['outcome']}"
+        print(f"[prove-gate] {target['id']}: {summary['outcome']}"
               + (f" ({summary.get('gate_reason')})" if summary.get("gate_reason") else ""),
               flush=True)
     return 0
@@ -877,7 +867,7 @@ def _cmd_experience(args) -> int:
 
 def main() -> int:
     import argparse
-    ap = argparse.ArgumentParser(description="vibe ⇄ lean-lsp-mcp prove harness (two phases)")
+    ap = argparse.ArgumentParser(description="agent ⇄ lean-lsp-mcp prove harness (two phases)")
     sub = ap.add_subparsers(dest="cmd", required=True)
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--manifest", required=True)
@@ -887,7 +877,7 @@ def main() -> int:
     # A/B scoreboard arm (Task 2.6): the plain cron path is "cron"; the decompose driver
     # passes "decompose" for its leaf runs. Which MODEL proves is `--engine`, not the arm.
     common.add_argument("--arm", default="cron", choices=["cron", "decompose"])
-    common.add_argument("--engine", default=None, choices=["claude", "leanstral"],
+    common.add_argument("--engine", default=None, choices=["claude"],
                         help="override `[prover] engine` for this run")
     # pipeline.toml, for `[autoformalize].state_cache`. Absent ⇒ the feature is off and
     # both phases behave byte-identically to before it existed.
@@ -920,7 +910,7 @@ def main() -> int:
     if args.cmd == "adopt":
         _, run_dir = _run_dir()
         src = adopt_verified(run_dir, args.id, args.run_tag)
-        print(f"[vibe-adopt] {args.id}: " + (f"reusing the proof that passed in {src}"
+        print(f"[prove-adopt] {args.id}: " + (f"reusing the proof that passed in {src}"
                                               if src else "no verified proof to reuse"),
               file=sys.stderr)
         return 0 if src else 1
