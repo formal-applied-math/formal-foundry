@@ -10,7 +10,7 @@ from af_parse import *  # noqa: F401,F403
 from af_prompts import *  # noqa: F401,F403
 from domain_pack import DomainPack
 
-__all__ = ['_JSON_FENCE_RE', '_extract_json', 'parse_verdict', 'judge_faithfulness', 'intent_reject_reason', 'parse_intent', '_CLAUDE_CAP_MARKERS', 'ClaudeCapError', '_claude_draft_args', 'claude_draft_fn', 'claude_chat_fn', 'claude_auth_present', 'draft_intent', 'loogle_candidates']
+__all__ = ['_JSON_FENCE_RE', '_extract_json', 'parse_verdict', 'judge_faithfulness', 'intent_reject_reason', 'parse_intent', '_CLAUDE_CAP_MARKERS', 'ClaudeCapError', '_claude_draft_args', 'claude_draft_fn', 'claude_chat_fn', 'claude_auth_present', 'draft_intent', 'intent_contract_reason', 'loogle_candidates']
 
 
 
@@ -215,7 +215,38 @@ def draft_intent(pack: DomainPack, issue: dict, context_pack: str, *, chat_fn,
                                               drafter_preamble=drafter_preamble))
     intent = parse_intent(content)
     reason = None if intent is not None else intent_reject_reason(content)
+    if intent is not None:
+        reason = intent_contract_reason(pack, issue, intent)
+        if reason is not None:
+            intent = None
     return {"ok": intent is not None, "intent": intent, "tokens": tokens, "reason": reason}
+
+
+def intent_contract_reason(pack: DomainPack, issue: dict, intent: dict) -> str | None:
+    """WHY a parsed intent cannot be emitted into THIS library, or None.
+
+    The checks are the target's own gates, asked at the cheapest moment — before a
+    formalize session and a prove session are paid for a module its build will refuse:
+    the corpus keeps entry ids unique, and a library with a bibliography wants every
+    module docstring and corpus entry to cite a work in it. (A missing `title` is not
+    refused: the emitter heads the docstring with the issue's own title.) Each is active only
+    when `prepare_issues` attached the fact it checks against, so an issue prepared
+    without a checkout is not held to a contract nobody could read."""
+    bid = str(intent.get("benchmark_id") or "")
+    if bid in set(issue.get("taken_ids") or ()):
+        return (f"benchmark_id `{bid}` is already an entry in the corpus; ids are unique "
+                "— name this result's own id")
+    bib = issue.get("bibliography")
+    if bib is not None:
+        cite = intent.get("citation")
+        key = str(cite.get("key") or "").strip() if isinstance(cite, dict) else ""
+        if not key:
+            return ("JSON missing 'citation': {\"key\": <a bibliography key from the list>, "
+                    "\"locator\": <chapter/section, or \"\">}")
+        if key not in bib:
+            return (f"citation key `{key}` is not in the library's bibliography; choose the "
+                    "key of a listed work that states this result")
+    return None
 
 
 

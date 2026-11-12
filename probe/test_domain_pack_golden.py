@@ -252,6 +252,8 @@ def renders(main_repo: str) -> dict[str, str]:
         PACK, module, "zcb_le_one", [_POINTER_MODULE, "MathFin/Foundations/Basic.lean"])
     out["gate-lean/defs_probe"] = af_gates.defs_probe(
         PACK, module, "zcb_le_one", ["parYield", "parSpread"])
+    out["gate-lean/map_probe"] = af_gates.map_probe(
+        PACK, module, "zcb_le_one", ["MathFin.Phi", "MathFin.Contracts.Contract.value"])
     out["gate-lean/triviality_goal"] = af_gates.triviality_goal(module)
     out["gate-lean/vacuity_goal"] = af_parse.vacuity_goal(module)
     out["gate-lean/disproof_goal"] = af_parse.disproof_goal(module)

@@ -600,11 +600,23 @@ def _cmd_run(args) -> int:
     return 0
 
 
+def _reflow_chat(config_path: str | None):
+    """The model that reformats an accepted proof: the drafter's Claude, tools off. A
+    session with no Claude auth raises inside `reflow_candidate`, which keeps the
+    original — formatting is never worth losing a proof over."""
+    from af_drafting import claude_chat_fn
+    from pipeline_lib import DrafterConfig
+    return claude_chat_fn(DrafterConfig.load(
+        config_path or os.path.join(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))), "pipeline.toml")))
+
+
 def _cmd_gate(args) -> int:
     import time
 
     import domain_pack
-    from autoformalize import (golf_candidate, strengthen_candidate,
+    import library_map
+    from autoformalize import (golf_candidate, reflow_candidate, strengthen_candidate,
                                 trim_unused_imports, trim_unused_opens)
     from gate import gate as run_gate
     from probe import daemon_check, mistral_chat
@@ -742,6 +754,34 @@ def _cmd_gate(args) -> int:
                     if gf["golfed"]:
                         candidate = gf["candidate"]
                         summary["golfed"] = True
+                # the library's line limit: its ratchet counts every source line over
+                # it, baseline zero. Reformat (an exactly-checkable whitespace edit,
+                # re-gated); a candidate still over the limit is a gate failure NOW,
+                # with its reason in the notebook, not a blocked assembly after the
+                # build has been paid for.
+                rf = reflow_candidate(
+                    pack, candidate, chat_fn=_reflow_chat(getattr(args, "config", None)),
+                    regate_fn=lambda c: run_gate(c, target["sorry_name"],
+                                                 check_fn=daemon_check),
+                    log=lambda m: print(f"[vibe-gate] {target['id']}: {m}", flush=True))
+                if rf["reflowed"]:
+                    candidate = rf["candidate"]
+                    summary["reflowed"] = True
+                if rf["long"]:
+                    summary["outcome"] = "fail_gate"
+                    summary["gate_reason"] = (
+                        f"lint:long_lines {rf['long'][:8]} — every line of the module "
+                        f"must fit in {library_map.LINE_LIMIT} characters")
+                    attempt_errors = [summary["gate_reason"]]
+                    append_jsonl(summary_log, summary)
+                    print(f"[vibe-gate] {target['id']}: fail_gate ({summary['gate_reason']})",
+                          flush=True)
+                    if memory is not None:
+                        memory.record(target["id"], {"outcome": "fail_gate",
+                                                     "reason": summary["gate_reason"],
+                                                     "errors": attempt_errors},
+                                      summarize_fn=summarizer)
+                    continue
                 summary["outcome"] = "pass"
                 summary["axioms_clean"] = True
                 win = os.path.join(run_dir, f"{args.run_tag}-{target['id']}.lean")

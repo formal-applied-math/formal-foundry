@@ -4,3 +4,4 @@ COMMON PITFALLS under our pin (avoid these upfront; lean_diagnostics catches the
 - For `ℝ≥0` add `open scoped NNReal` and write `ℝ≥0` (bare `ℝ ≥ 0` misparses as a Prop).
 - A stuck typeclass metavariable (`?m…`): name the ambiguous implicit (`(μ := μ)`) or `@`-apply, so instance search is not left guessing.
 - For an unknown identifier, use lean_loogle / lean_leansearch to find the real name + namespace before guessing; do not invent a constant.
+- No line longer than 100 characters (statement, docstrings and comments included): the library holds `linter.style.longLine` at zero. Break after a binder group or at an operator.

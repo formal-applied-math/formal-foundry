@@ -175,14 +175,15 @@ def staged_issue_numbers(queue_dir: str) -> set[int]:
 
 
 def claimed_issue_numbers(slug: str, *, run_fn=None) -> set[int] | None:
-    """Issue numbers closed by an OPEN PR — witness for `review`.
+    """Issue numbers claimed by an OPEN PR — witness for `review`.
 
     None (not the empty set) when the lookup failed, because "no PRs" and "could not
     ask" must not reconcile the same way: reading a failed lookup as zero open PRs
     would demote every issue under review back to `in-progress` and re-open it to the
     refill."""
     ok, out = _gh(["pr", "list", "--repo", slug, "--state", "open",
-                   "--json", "number,body,title", "--limit", "200"], run_fn=run_fn)
+                   "--json", "number,body,title,headRefName", "--limit", "200"],
+                  run_fn=run_fn)
     if not ok:
         return None
     try:
@@ -190,10 +191,17 @@ def claimed_issue_numbers(slug: str, *, run_fn=None) -> set[int] | None:
     except ValueError:
         return None
     closes = re.compile(r"(?i)\b(?:closes|fixes|resolves)\s+#(\d+)\b")
+    # The pipeline's OWN PR claims its issue even when it does not close it: a subset
+    # proof, or a proof toward a frontier node, says `refs #N` so that a merge leaves the
+    # issue open for a human. Only on a pipeline branch — anyone's PR may mention an
+    # issue in passing, and that is not a claim.
+    refs = re.compile(r"(?i)\brefs\s+#(\d+)\b")
     nums = set()
     for r in rows:
-        nums |= {int(m) for m in
-                 closes.findall((r.get("body") or "") + " " + (r.get("title") or ""))}
+        text = (r.get("body") or "") + " " + (r.get("title") or "")
+        nums |= {int(m) for m in closes.findall(text)}
+        if str(r.get("headRefName") or "").startswith("autoform/"):
+            nums |= {int(m) for m in refs.findall(text)}
     return nums
 
 

@@ -7,7 +7,7 @@ import re
 from af_parse import *  # noqa: F401,F403
 from domain_pack import DomainPack
 
-__all__ = ['_probed_conclusion', '_probed_signature', '_DEPTH_MARKER', '_mod_name', 'depth_probe', 'depth_rejection', '_TRIV_TACTIC', '_SORRY_RE', 'triviality_goal', 'triviality_rejection', '_DEFS_MARKER', 'drafted_def_names', 'defs_probe', 'defs_rejection', '_INSTANCE_PROBE_TACTIC_RE', '_example_blocks', '_example_probes_def', 'instance_probe_rejection']
+__all__ = ['_probed_conclusion', '_probed_signature', '_DEPTH_MARKER', '_mod_name', 'depth_probe', 'depth_rejection', '_MAP_MARKER', 'map_probe', 'map_rejection', '_TRIV_TACTIC', '_SORRY_RE', 'triviality_goal', 'triviality_rejection', '_DEFS_MARKER', 'drafted_def_names', 'defs_probe', 'defs_rejection', '_INSTANCE_PROBE_TACTIC_RE', '_example_blocks', '_example_probes_def', 'instance_probe_rejection']
 
 
 
@@ -126,6 +126,85 @@ def depth_rejection(pack: DomainPack, lean_text: str, name: str, pointers: list[
                 "verdict": "indeterminate: " + str(res["error"])[:120]}
     depth_errs = [str(e) for e in (res.get("errors") or []) if _DEPTH_MARKER in str(e)]
     return {"shallow": bool(depth_errs), "tokens": 0, "verdict": "; ".join(depth_errs[:2])}
+
+
+
+
+# --- map gate (the corpus must rest on the program map) -------------------------
+#
+# The depth gate asks whether the type consumes a def from the issue's POINTER modules.
+# A library with a blueprint asks more of a new result: its corpus entry must rest on a
+# node of the program map — its statement or proof must depend, through the library's
+# own declarations, on a declaration the map tags — and the library's build holds the
+# count of entries that do not at a ratchet. A theorem over `zcb` alone passes the depth
+# gate (it consumes a pointer def) and fails that ratchet, AFTER a prove session and the
+# library's whole build have been paid for it.
+#
+# So the same question is asked here, of the STATEMENT, where the answer is cheap: walk
+# the constants of the theorem's type, through the types and bodies of the library's own
+# declarations, and require one of the map's tagged names to be reached. It is the
+# sufficient half of the library's condition (a proof could still reach the map through
+# a lemma the statement does not mention), and deliberately so: a statement that names no
+# program object is the thing the library's "one graph" rule exists to refuse.
+
+_MAP_MARKER = "map-gate:"
+
+
+def map_probe(pack: DomainPack, lean_text: str, name: str, anchors: list[str]) -> str:
+    """The stub + a `run_cmd` meta block that FAILS elaboration unless the theorem's TYPE
+    reaches one of `anchors` (the fully-qualified names the program map tags), walking
+    through the types and bodies of declarations in the library's own modules and of the
+    stub's own new definitions."""
+    names = ", ".join(f"`{a}" for a in anchors)
+    meta = (
+        "\nopen Lean in\n"
+        "run_cmd do\n"
+        "  let env ← getEnv\n"
+        f"  let some ci := env.find? `{pack.qualified(name)}\n"
+        f'    | throwError "{_MAP_MARKER} declaration {name} not found"\n'
+        "  let mods := env.header.moduleNames\n"
+        f"  let anchors : NameSet := ([{names}] : List Name).foldl (·.insert ·) {{}}\n"
+        "  let own (c : Name) : Bool :=\n"
+        "    match env.getModuleIdxFor? c with\n"
+        f"    | some i => mods[i.toNat]!.getRoot == `{pack.lake_root}\n"
+        "    | none => true\n"
+        "  let mut seen : NameSet := {}\n"
+        "  let mut todo : Array Name := ci.type.getUsedConstants\n"
+        "  let mut hit := false\n"
+        "  while !todo.isEmpty && !hit do\n"
+        "    let c := todo.back!\n"
+        "    todo := todo.pop\n"
+        "    if seen.contains c then continue\n"
+        "    seen := seen.insert c\n"
+        "    if anchors.contains c then\n"
+        "      hit := true\n"
+        "    else if own c then\n"
+        "      if let some d := env.find? c then\n"
+        "        todo := todo ++ d.type.getUsedConstants\n"
+        "        match d with\n"
+        "        | .defnInfo v => todo := todo ++ v.value.getUsedConstants\n"
+        "        | .inductInfo v => todo := todo ++ v.ctors.toArray\n"
+        "        | _ => pure ()\n"
+        "  unless hit do\n"
+        f'    throwError "{_MAP_MARKER} the statement reaches no declaration of the program map"\n'
+    )
+    return lean_text.rstrip() + "\n" + meta
+
+
+def map_rejection(pack: DomainPack, lean_text: str, name: str, anchors: list[str],
+                  *, check_fn) -> dict:
+    """Elaborate the map probe. `off_map=True` iff the meta block reported a `map-gate:`
+    error. With no anchors (a library with no blueprint, or an issue prepared without a
+    checkout) the gate is inapplicable and SKIPS. Fails open on a daemon error, like the
+    depth gate: an infra hiccup is never a verdict. No prover call ⇒ `tokens=0`."""
+    if not anchors:
+        return {"off_map": False, "tokens": 0, "verdict": "no program map — map gate skipped"}
+    res = check_fn(map_probe(pack, lean_text, name, anchors))
+    if res.get("error"):
+        return {"off_map": False, "indeterminate": True, "tokens": 0,
+                "verdict": "indeterminate: " + str(res["error"])[:120]}
+    errs = [str(e) for e in (res.get("errors") or []) if _MAP_MARKER in str(e)]
+    return {"off_map": bool(errs), "tokens": 0, "verdict": "; ".join(errs[:2])}
 
 
 

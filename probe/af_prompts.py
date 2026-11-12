@@ -88,6 +88,19 @@ def intent_messages(pack: DomainPack, issue: dict, context_pack: str,
     user = f"ISSUE #{issue.get('number')}: {_issue_prose(issue)}\n"
     if context_pack:
         user += "\nAvailable declarations you may reference:\n" + context_pack
+    if issue.get("blueprint_note"):
+        # the library's program map: the node(s) this issue advances, and for a
+        # frontier node the corpus entries already proving part of it
+        user += ("\n\nPROGRAM NODES this issue advances (the library's blueprint):\n"
+                 + issue["blueprint_note"]
+                 + "\nThe library counts a result as part of its program only when it is "
+                 "stated THROUGH declarations the program already holds. Where a node above "
+                 "names a declaration, or the shown declarations include library objects for "
+                 "the quantities involved, state the theorem through them (fully applied), "
+                 "not over raw numbers with the formulas inlined.")
+    if issue.get("citable"):
+        user += ("\n\nBIBLIOGRAPHY — the works this library cites. `citation.key` MUST "
+                 "be one of these keys:\n" + issue["citable"])
     if route == "defs":
         user += pack.prompt("intent-defs-addendum")
         if prior_unknowns:
