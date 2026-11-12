@@ -265,27 +265,29 @@ def append_jsonl(path: str, record: dict) -> None:
 
 # `:= [by] [exact] [Iff.]rfl` as a whole proof term; the negative lookahead keeps
 # it from firing inside a longer identifier (e.g. `foo_rfl`, `rfl_lemma`).
-_RFL_PROOF_RE = re.compile(r":=(by)?(exact)?(Iff\.)?rfl(?![A-Za-z0-9_.])")
+_RFL_DECL_RE = re.compile(
+    r"^(?:@\[[^\]]*\]\s*)?(?:private\s+|protected\s+|noncomputable\s+)*(?:theorem|lemma)\s")
+#: the library's rfl class (`tests/test_values.py` `RFL_TAIL_RE`), plus `by exact rfl`
+_RFL_TAIL_RE = re.compile(
+    r"^(?:Iff\.)?rfl$|^by\s+(?:exact\s+)?(?:unfold\s+[\w.\s,]+;\s*)?(?:Iff\.)?rfl$")
 
 
 def rfl_proof_present(text: str) -> bool:
-    """True if a module's proof is a definitional/`rfl` discharge — a
-    reduced_core-in-disguise the values gate rejects for a `full` entry. Catches
-    `:= rfl`, `:= by rfl`, `:= Iff.rfl`, `:= by exact rfl` (with the term ending the
-    line or continuing on the next), ANYWHERE, not just at EOF — the shell glob it
-    replaces missed `:= by rfl` before a namespace `end` and the `:=byrfl` variant.
-    Comment/import/structure lines are ignored; matching is per-line so a trailing
-    `end <Namespace>` never fuses onto the `rfl`."""
-    prev_opens_proof = False
-    for ln in text.splitlines():
-        if re.match(r"\s*(--|/-|import|module|open|namespace|variable|@\[)", ln):
+    """True if a theorem of the module is proved by a definitional/`rfl` discharge and
+    nothing else — a reduced_core-in-disguise the library's values gate rejects for a
+    `full` entry. The library's rule, read the library's way: each column-0
+    `theorem`/`lemma` runs to the next column-0 line, and its proof is what follows the
+    LAST `:=` in it. An `rfl` that closes an inner `have` is a step of a proof, not the
+    proof: the old per-line scan refused cal-bk-318's 70-line tail lemma for one
+    `have h5 : … := rfl` (2026-11-12), which the library itself accepts."""
+    lines = [ln for ln in text.splitlines()]
+    for i, ln in enumerate(lines):
+        if not _RFL_DECL_RE.match(ln):
             continue
-        compact = re.sub(r"[ \t]+", "", ln)
-        if not compact:
-            continue
-        if _RFL_PROOF_RE.search(compact):
+        end = next((j for j in range(i + 1, len(lines))
+                    if lines[j][:1] not in ("", " ", "\t")), len(lines))
+        block = "\n".join(lines[i:end])
+        cut = block.rfind(":=")
+        if cut != -1 and _RFL_TAIL_RE.match(" ".join(block[cut + 2:].split())):
             return True
-        if prev_opens_proof and re.fullmatch(r"(exact)?(Iff\.)?rfl", compact):
-            return True   # bare rfl continuing a `:=`/`:= by` from the previous line
-        prev_opens_proof = compact.endswith(":=") or compact.endswith(":=by")
     return False

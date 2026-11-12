@@ -35,6 +35,17 @@ def test_rfl_guard_ignores_real_proofs_and_rfl_named_lemmas():
     assert not rfl_proof_present("theorem t : P := by exact my_rfl_lemma h\n")
 
 
+def test_rfl_guard_reads_a_whole_proof_not_an_inner_step():
+    """The library's rule: a declaration whose proof IS `rfl`. An `rfl` closing an inner
+    `have` is one step of a real proof (cal-bk-318's tail lemma, refused for it)."""
+    real = ("theorem t (x : ℝ) : P x := by\n  have h5 : f x = g x := rfl\n"
+            "  linarith [h5]\n")
+    assert not rfl_proof_present(real)
+    assert rfl_proof_present("theorem t : f = g := by\n  rfl\n")         # proof on next line
+    assert rfl_proof_present("theorem t : f = g := by unfold f; rfl\n")
+    assert rfl_proof_present(real + "\ntheorem u : f = g := rfl\n")      # any declaration
+
+
 def test_normalize_content_reasoning_blocks():
     assert normalize_content("plain string") == "plain string"
     blocks = [
