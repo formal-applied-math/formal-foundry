@@ -1807,9 +1807,13 @@ def emit_target_files(pack: DomainPack, issue: dict, stub: str,
         references = []
         if cited:
             references.append(cited["bullet"] + (f", {cite_loc}" if cite_loc else ""))
+        # the summary carries the statement in prose; the result's bullet names it by the
+        # title, so the same sentence is not printed twice ten lines apart
+        doc_title = " ".join(str(meta.get("title") or issue.get("title")
+                                 or module_name).split()).rstrip(".")
         module_doc = library_map.module_doc(
-            title=str(meta.get("title") or issue.get("title") or module_name),
-            summary=docstring, definitions=defs_rows, results=[(name, docstring)],
+            title=doc_title,
+            summary=docstring, definitions=defs_rows, results=[(name, doc_title)],
             references=references, tags=list(meta.get("tags") or []),
             subjects=list(issue.get("subjects") or []))
     else:

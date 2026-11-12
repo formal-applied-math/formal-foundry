@@ -407,7 +407,9 @@ def test_emit_writes_what_the_library_gates(repo):
     assert placement["benchmark"] == "benchmarks/interest_rates.json"
     assert "-- blueprint: thm:ho-lee" in lean
     assert "# The Ho–Lee bond price\n" in lean
-    assert "## Main results\n\n* `hoLee_bond_affine`: The Ho–Lee bond price is affine" in lean
+    # the bullet names the result by the title; the summary alone carries the statement
+    assert "## Main results\n\n* `hoLee_bond_affine`: The Ho–Lee bond price\n" in lean
+    assert lean.count("The Ho–Lee bond price is affine") == 1
     assert "* [Hull, *Options, Futures, and Other Derivatives*][Hull], §31.3" in lean
     assert "ho-lee, short rate, MSC 91G30, JEL E43" in lean
     # the re-export imports the module by its own dotted name (a section is a path now)
