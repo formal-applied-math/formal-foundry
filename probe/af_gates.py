@@ -148,9 +148,11 @@ def depth_rejection(pack: DomainPack, lean_text: str, name: str, pointers: list[
 # program object is the thing the library's "one graph" rule exists to refuse.
 
 _MAP_MARKER = "map-gate:"
+_TRUNK_MARKER = "trunk-gate:"
 
 
-def map_probe(pack: DomainPack, lean_text: str, name: str, anchors: list[str]) -> str:
+def map_probe(pack: DomainPack, lean_text: str, name: str, anchors: list[str],
+              trunk: dict | None = None) -> str:
     """The stub + a `run_cmd` meta block that FAILS elaboration unless the theorem's TYPE
     reaches one of `anchors` (the fully-qualified names the program map tags), walking
     through the types and bodies of declarations in the library's own modules and of the
@@ -160,8 +162,18 @@ def map_probe(pack: DomainPack, lean_text: str, name: str, anchors: list[str]) -
     only its own anchors count: the library's index records dependence on its own
     constants alone, so a statement that touches the map only at an upstream node (a
     Mathlib or BrownianMotion declaration the blueprint also draws) is off the map by the
-    library's count, and its build would refuse the entry after the proof was paid for."""
+    library's count, and its build would refuse the entry after the proof was paid for.
+
+    With `trunk` (`library_map.price_table`: the library's pricing functional and the
+    definitions that claim to be prices) the same walk also fails, under its own marker,
+    when the statement reaches a price but not the functional. That is the library's
+    `price_entries_off_trunk` rule read on the statement: a price founded on the functional
+    carries the statement to it, one not yet re-founded does not (cal-bk-318: `SVI.bsSmile`
+    is defined through `bsV`; the proof passed and its entry was refused at assembly)."""
     names = ", ".join(f"`{a}" for a in anchors)
+    trunk = trunk or {}
+    prices = ", ".join(f"`{a}" for a in trunk.get("prices") or [])
+    functional = ", ".join(f"`{a}" for a in trunk.get("trunk") or [])
     meta = (
         "\nopen Lean in\n"
         "run_cmd do\n"
@@ -170,6 +182,8 @@ def map_probe(pack: DomainPack, lean_text: str, name: str, anchors: list[str]) -
         f'    | throwError "{_MAP_MARKER} declaration {name} not found"\n'
         "  let mods := env.header.moduleNames\n"
         f"  let anchors : NameSet := ([{names}] : List Name).foldl (·.insert ·) {{}}\n"
+        f"  let prices : NameSet := ([{prices}] : List Name).foldl (·.insert ·) {{}}\n"
+        f"  let functional : NameSet := ([{functional}] : List Name).foldl (·.insert ·) {{}}\n"
         "  let own (c : Name) : Bool :=\n"
         "    match env.getModuleIdxFor? c with\n"
         f"    | some i => mods[i.toNat]!.getRoot == `{pack.lake_root}\n"
@@ -177,43 +191,54 @@ def map_probe(pack: DomainPack, lean_text: str, name: str, anchors: list[str]) -
         "  let mut seen : NameSet := {}\n"
         "  let mut todo : Array Name := ci.type.getUsedConstants\n"
         "  let mut hit := false\n"
-        "  while !todo.isEmpty && !hit do\n"
+        "  let mut price : Option Name := none\n"
+        "  let mut onTrunk := false\n"
+        "  while !todo.isEmpty do\n"
         "    let c := todo.back!\n"
         "    todo := todo.pop\n"
         "    if seen.contains c then continue\n"
         "    seen := seen.insert c\n"
         "    if !own c then continue\n"
-        "    if anchors.contains c then\n"
-        "      hit := true\n"
-        "    else\n"
-        "      if let some d := env.find? c then\n"
-        "        todo := todo ++ d.type.getUsedConstants\n"
-        "        match d with\n"
-        "        | .defnInfo v => todo := todo ++ v.value.getUsedConstants\n"
-        "        | .thmInfo v => todo := todo ++ v.value.getUsedConstants\n"
-        "        | .opaqueInfo v => todo := todo ++ v.value.getUsedConstants\n"
-        "        | .inductInfo v => todo := todo ++ v.ctors.toArray\n"
-        "        | _ => pure ()\n"
+        "    if anchors.contains c then hit := true\n"
+        "    if functional.contains c then onTrunk := true\n"
+        "    if prices.contains c && price.isNone then price := some c\n"
+        "    if let some d := env.find? c then\n"
+        "      todo := todo ++ d.type.getUsedConstants\n"
+        "      match d with\n"
+        "      | .defnInfo v => todo := todo ++ v.value.getUsedConstants\n"
+        "      | .thmInfo v => todo := todo ++ v.value.getUsedConstants\n"
+        "      | .opaqueInfo v => todo := todo ++ v.value.getUsedConstants\n"
+        "      | .inductInfo v => todo := todo ++ v.ctors.toArray\n"
+        "      | _ => pure ()\n"
         "  unless hit do\n"
         f'    throwError "{_MAP_MARKER} the statement reaches no declaration of the program map"\n'
+        "  if let some p := price then\n"
+        "    unless onTrunk do\n"
+        f'      throwError m!"{_TRUNK_MARKER} the statement reaches the price {{p}}, which the '
+        'library has not yet founded on its pricing functional"\n'
     )
     return lean_text.rstrip() + "\n" + meta
 
 
 def map_rejection(pack: DomainPack, lean_text: str, name: str, anchors: list[str],
-                  *, check_fn) -> dict:
+                  *, check_fn, trunk: dict | None = None) -> dict:
     """Elaborate the map probe. `off_map=True` iff the meta block reported a `map-gate:`
-    error. With no anchors (a library with no blueprint, or an issue prepared without a
-    checkout) the gate is inapplicable and SKIPS. Fails open on a daemon error, like the
-    depth gate: an infra hiccup is never a verdict. No prover call ⇒ `tokens=0`."""
+    error, `off_trunk=True` iff it reported only a `trunk-gate:` one. With no anchors (a
+    library with no blueprint, or an issue prepared without a checkout) the gate is
+    inapplicable and SKIPS. Fails open on a daemon error, like the depth gate: an infra
+    hiccup is never a verdict. No prover call ⇒ `tokens=0`."""
     if not anchors:
-        return {"off_map": False, "tokens": 0, "verdict": "no program map — map gate skipped"}
-    res = check_fn(map_probe(pack, lean_text, name, anchors))
+        return {"off_map": False, "off_trunk": False, "tokens": 0,
+                "verdict": "no program map — map gate skipped"}
+    res = check_fn(map_probe(pack, lean_text, name, anchors, trunk))
     if res.get("error"):
-        return {"off_map": False, "indeterminate": True, "tokens": 0,
+        return {"off_map": False, "off_trunk": False, "indeterminate": True, "tokens": 0,
                 "verdict": "indeterminate: " + str(res["error"])[:120]}
-    errs = [str(e) for e in (res.get("errors") or []) if _MAP_MARKER in str(e)]
-    return {"off_map": bool(errs), "tokens": 0, "verdict": "; ".join(errs[:2])}
+    errs = [str(e) for e in (res.get("errors") or [])]
+    off_map = [e for e in errs if _MAP_MARKER in e]
+    off_trunk = [e for e in errs if _TRUNK_MARKER in e]
+    return {"off_map": bool(off_map), "off_trunk": bool(off_trunk) and not off_map,
+            "tokens": 0, "verdict": "; ".join((off_map or off_trunk)[:2])}
 
 
 

@@ -13,6 +13,7 @@ import os
 import pytest
 
 import af_drafting
+import af_gates
 import assemble
 import autoformalize as af
 import domain_pack
@@ -649,14 +650,15 @@ def test_the_census_says_whether_a_statement_can_rest_on_the_map(tmp_path):
     idx, root = _census_index(tmp_path)
     c = af.map_census(idx, ANCHORS, root, ["MathFin/Models/BlackScholes/Call.lean"],
                       own_root="MathFin")
-    assert c == {"verdict": "statement", "defs": ["MathFin.bsV"], "theorems": 1}
+    assert c == {"verdict": "statement", "defs": ["MathFin.bsV"], "theorems": 1,
+                 "off_trunk": []}
     # a theorem that rests on the map is something a PROOF can cite, not a statement
     c = af.map_census(idx, ANCHORS, root, ["MathFin/Models/Binomial/Thm.lean"],
                       own_root="MathFin")
     assert c["verdict"] == "proof_only" and c["defs"] == []
     c = af.map_census(idx, ANCHORS, root, ["MathFin/Models/Binomial/Path.lean"],
                       own_root="MathFin")
-    assert c == {"verdict": "off_map", "defs": [], "theorems": 0}
+    assert c == {"verdict": "off_map", "defs": [], "theorems": 0, "off_trunk": []}
 
 
 def test_the_census_does_not_count_an_upstream_node(tmp_path):
@@ -697,3 +699,65 @@ def test_the_intent_prompt_names_the_map_objects_of_the_issue():
     assert "MAP OBJECTS" in user and "`MathFin.bsV`" in user
     bare = af.intent_messages(PACK, {**issue, "map_census": None}, "")[-1]["content"]
     assert "MAP OBJECTS" not in bare
+
+
+# --- the trunk: a price not yet founded on the pricing functional -----------------------
+
+def test_the_census_holds_back_map_objects_that_rest_on_an_unfounded_price(tmp_path):
+    """`bsV` is on the map (through `Phi`) and is a price the table lists; nothing ties it
+    to the functional, so a statement through it would raise the library's
+    `price_entries_off_trunk` count. With the price founded, it is servable again."""
+    idx, root = _census_index(tmp_path)
+    ptr = ["MathFin/Models/BlackScholes/Call.lean"]
+    off = {"trunk": ["MathFin.Market.price"], "prices": ["MathFin.bsV"]}
+    c = af.map_census(idx, ANCHORS, root, ptr, own_root="MathFin", trunk=off)
+    assert c["verdict"] == "off_trunk" and c["defs"] == [] and c["off_trunk"] == ["MathFin.bsV"]
+    founded = {"trunk": ["MathFin.Phi"], "prices": ["MathFin.bsV"]}   # bsV reaches it
+    c = af.map_census(idx, ANCHORS, root, ptr, own_root="MathFin", trunk=founded)
+    assert c["verdict"] == "statement" and c["defs"] == ["MathFin.bsV"]
+    assert af.map_census(idx, ANCHORS, root, ptr, own_root="MathFin")["off_trunk"] == []
+
+
+def test_an_issue_that_waits_for_the_trunk_is_ordered_last():
+    xs = [{"number": 1, "difficulty": "small", "map_census": {"verdict": "off_trunk"}},
+          {"number": 2, "difficulty": "small", "map_census": {"verdict": "off_map"}}]
+    assert [i["number"] for i in af.order_by_route(xs)] == [2, 1]
+
+
+def test_the_intent_prompt_names_the_objects_to_avoid():
+    issue = {"number": 318, "title": "t", "body": "b",
+             "map_census": {"verdict": "statement", "defs": ["MathFin.Phi"], "theorems": 0,
+                            "off_trunk": ["MathFin.bsV"]}}
+    user = af.intent_messages(PACK, issue, "")[-1]["content"]
+    assert "Do NOT state it through these" in user and "`MathFin.bsV`" in user
+
+
+def test_the_price_table_is_read_from_the_checkout(tmp_path):
+    import library_map
+    _write(str(tmp_path), "tools/trunk.toml",
+           '[trunk]\nanchors = ["MathFin.Market.price"]\n[prices]\nnames = ["MathFin.bsV"]\n')
+    assert library_map.price_table(str(tmp_path), "tools/trunk.toml") == {
+        "trunk": ["MathFin.Market.price"], "prices": ["MathFin.bsV"]}
+    assert library_map.price_table(str(tmp_path), "") is None          # not declared
+    assert library_map.price_table(str(tmp_path), "tools/absent.toml") is None
+    _write(str(tmp_path), "tools/bad.toml", "[trunk]\n")
+    assert library_map.price_table(str(tmp_path), "tools/bad.toml") is None
+
+
+def test_the_trunk_gate_reads_its_own_marker():
+    stub = "theorem t : True := by sorry\n"
+    trunk = {"trunk": ["MathFin.Market.price"], "prices": ["MathFin.bsV"]}
+    probe = af_gates.map_probe(PACK, stub, "t", ["MathFin.Phi"], trunk)
+    assert "`MathFin.bsV" in probe and "`MathFin.Market.price" in probe
+    assert af_gates._TRUNK_MARKER in probe
+    def check(errors):
+        return lambda _code: {"errors": errors}
+    r = af_gates.map_rejection(PACK, stub, "t", ["MathFin.Phi"], trunk=trunk,
+                               check_fn=check([f"{af_gates._TRUNK_MARKER} the price bsV"]))
+    assert r["off_trunk"] and not r["off_map"]
+    r = af_gates.map_rejection(PACK, stub, "t", ["MathFin.Phi"], trunk=trunk, check_fn=check([
+        f"{af_gates._MAP_MARKER} nothing", f"{af_gates._TRUNK_MARKER} the price bsV"]))
+    assert r["off_map"] and not r["off_trunk"]
+    r = af_gates.map_rejection(PACK, stub, "t", ["MathFin.Phi"], trunk=trunk,
+                               check_fn=check([]))
+    assert not r["off_map"] and not r["off_trunk"]

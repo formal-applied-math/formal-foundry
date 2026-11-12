@@ -75,6 +75,10 @@ blueprint_frontier = "docs/blueprint_frontier.toml"
 init_module = "MathFin.Init"
 doc_standard = true
 shake_exe = "mathfin_shake"
+# the one-trunk table: a statement that reaches a price not yet founded on the pricing
+# functional is refused at draft time, as the `price_entries_off_trunk` ratchet would
+# refuse its entry after the proof (cal-bk-318, 2026-11-12)
+price_table = "tools/verify/trunk.toml"
 
 [infra]
 # The lean-lsp-mcp container the agentic drafter and the prover both exec

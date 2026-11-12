@@ -141,11 +141,22 @@ class ScoutIndex:
         """Every constant that depends on one of `targets`, transitively, with the
         targets themselves. `deps` in const_dep are a declaration's type AND value
         (`ConstantInfo.getUsedConstantsAsSet`), so a theorem counts through its proof:
-        this is the relation the target library's program map draws its edges with."""
-        rev: dict[str, list[str]] = {}
-        for name, deps in self._dep_of().items():
-            for d in deps:
-                rev.setdefault(d, []).append(name)
+        this is the relation the target library's program map draws its edges with.
+        Memoised per target set: the refill asks the same three sets for every issue."""
+        key = frozenset(targets)
+        memo = self.__dict__.setdefault("_dependents_memo", {})
+        if key not in memo:
+            memo[key] = frozenset(self._dependents(key))
+        return set(memo[key])
+
+    def _dependents(self, targets) -> set[str]:
+        rev = self.__dict__.get("_rev_cache")
+        if rev is None:
+            rev = {}
+            for name, deps in self._dep_of().items():
+                for d in deps:
+                    rev.setdefault(d, []).append(name)
+            self._rev_cache = rev
         seen, stack = set(), [t for t in targets]
         while stack:
             x = stack.pop()

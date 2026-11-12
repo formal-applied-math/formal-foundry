@@ -59,12 +59,13 @@ def count_pointer_defs(main_repo: str, pointers: list[str]) -> int:
 # statement cannot), and 31 held nothing; the tick's first three picks were among the 48.
 
 #: Attempt order by census verdict: a statement can pass, unknown, only a proof could,
-#: nothing on the map.
-MAP_RANK = {"statement": 0, None: 1, "proof_only": 2, "off_map": 3}
+#: nothing on the map, every map object rests on a price not yet on the pricing functional
+#: (the refill skips that last one: its entry is refused whatever the proof).
+MAP_RANK = {"statement": 0, None: 1, "proof_only": 2, "off_map": 3, "off_trunk": 4}
 
 
 def map_census(index, anchors, main_repo: str, pointers: list[str], *,
-               own_root: str = "") -> dict | None:
+               own_root: str = "", trunk: dict | None = None) -> dict | None:
     """What an issue's pointer modules hold that rests on the program map.
 
     `index` is a `ScoutIndex`; `anchors` are the fully-qualified names the map tags.
@@ -75,7 +76,12 @@ def map_census(index, anchors, main_repo: str, pointers: list[str], *,
     declares count, as in the gate and in the library's own index: an upstream node of
     the blueprint is drawn on the map but no entry is counted as resting on it.
     None when it cannot be measured (no index, no anchors, no pointer module): the caller
-    then orders the issue as unknown and the gate decides."""
+    then orders the issue as unknown and the gate decides.
+
+    With `trunk` (`library_map.price_table`) a map object that depends on a listed price
+    and not on the pricing functional is moved from `defs` to `off_trunk`: a statement
+    written through it is refused by the trunk gate. When every map object is such, the
+    verdict is `off_trunk`, and it changes by itself once the library re-founds the price."""
     mods = [p for p in pointers if p.endswith(".lean")]
     if not mods or not anchors or index is None or not index.available:
         return None
@@ -105,8 +111,19 @@ def map_census(index, anchors, main_repo: str, pointers: list[str], *,
                 defs.append(n)
             else:
                 theorems += 1
-    verdict = "statement" if defs else ("proof_only" if theorems else "off_map")
-    return {"verdict": verdict, "defs": sorted(defs), "theorems": theorems}
+    off_trunk: list[str] = []
+    if defs and trunk:
+        try:
+            on_trunk = index.dependents_of(trunk.get("trunk") or [])
+            priced = index.dependents_of(trunk.get("prices") or [])
+        except Exception:
+            on_trunk, priced = set(), set()
+        off_trunk = [d for d in defs if d in priced and d not in on_trunk]
+        defs = [d for d in defs if d not in off_trunk]
+    verdict = ("statement" if defs else "off_trunk" if off_trunk
+               else "proof_only" if theorems else "off_map")
+    return {"verdict": verdict, "defs": sorted(defs), "theorems": theorems,
+            "off_trunk": sorted(off_trunk)}
 
 
 def classify_refill(rec: dict) -> str:
