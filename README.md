@@ -41,6 +41,15 @@ been committed.
 > "Leanstral proves", read "the configured prover". A canary proves a trivial theorem
 > through the real path before every run, and a tick whose prover did not run goes red.
 
+> **Status 2026-11-12.** No PR was opened from 2026-07-27 to 2026-11-12, for two more
+> reasons after the one above ([postmortem](docs/research/2026-11-12-v2-retarget-postmortem.md)).
+> The PR token set on 09-28 could push a branch and not open a pull request, so thirteen
+> ticks assembled a proof green and died at the last command. And the flagship reorganised
+> on 11-08: the foundry kept copies of where things live in it, and all of them went dead
+> at once. The layout is now read from the library's checkout (`probe/library_map.py`),
+> assembly runs the library's own CI from the pack (`domains/<name>/regen.sh`), and an
+> **assembly canary** exercises that path on a runner without a model call.
+
 > **New here?** Read [`docs/overview.md`](docs/overview.md) first — the full map of
 > both repos, the pipeline, and the outside reading to get fluent. Design of
 > record: `formal-mathfin docs/superpowers/specs/2026-07-08-leanstral-foundry-design.md`.
@@ -74,6 +83,15 @@ as a validated target; a rejected issue stays `status:ready`, never auto-closed.
 caveat: elaboration, the depth gate, and the Leanstral probes are *independent,
 elaborator/kernel-grade* checks; the judge is a *soft Claude self-check* (statement vs
 issue), not a faithfulness guarantee — the real authority is the human review at merge.
+
+**What a contribution must look like is the library's call, and is read from it.** The
+drafted module goes in the directory its issue's `area:` label names in the library's
+taxonomy; its corpus entry goes in the file its neighbours are in; its docstring is in
+the library's documentation standard and cites a key of the library's bibliography; its
+statement must rest on the library's program map (the **map gate**, a Lean meta check
+beside the depth gate — the library counts corpus entries off its blueprint and refuses a
+new one). An issue naming a frontier node is never closed by a machine: the entry is
+recorded under the node's `core` and the PR `refs` the issue.
 
 **Prove + ship.** A queued target is a stub plus pointers to the modules it should
 reuse. The house doctrine — values gate · **the live `docs/patterns.md` injected in
@@ -171,8 +189,8 @@ Decomposition mechanics: [`docs/superpowers/specs/2026-07-18-decomposer-design.m
 
 | Path | What |
 |---|---|
-| `probe/` | the pipeline (35 test modules, 539 tests, all daemon-free): `probe.py` (metered prover loop) · `vibe_prove.py` (the live prove path: headless vibe ⇄ lean-lsp, then the daemon-phase gate) · `autoformalize.py` + `af_parse`/`af_prompts`/`af_routing`/`af_drafting`/`af_gates` (the issue→stub refill, split into focused modules re-exported through `autoformalize`) · `decompose.py` + `decompose_tick.py` (the lemma-DAG path) · `gate.py` (the kernel-grade candidate gate) · `strengthen.py` (drop hypotheses the theorem does not need) · `gate_cache.py` · `state_cache.py` + `proof_states.py` (proof-state addressing + recurrence measurement) · `experience.py` (the cross-tick rolling notebook of failed attempts) · `pipeline.py` + `pipeline_lib.py` (cadence + token budgeting) · `house_context.py` (system-prompt assembly, injects the live `docs/patterns.md`) · `build_manifest.py` (elaborate-with-sorry target validation) · `assemble.py` (corpus entry assembly) · `scout_index.py` + `embed.py` (declaration index + embedding retrieval) · `issues.py` (issue sync) |
-| `scripts/` | shell entrypoints: `pipeline-tick.sh` (the cron prove step) · `decompose-tick.sh` (the lemma-DAG tick) · `open-pr.sh` (assemble + open the PR) · `contribute.sh` (manual contribution packet) · `leanstral-vibe.sh` (hands-on vibe + lean-lsp path) · `slot-switch.sh` (the daemon ⇄ lean-lsp flip) · `build-index.sh` / `build-embeddings.sh` (scout index + embedding cache) |
+| `probe/` | the pipeline (its unit tests are all daemon-free): `library_map.py` (the target library's own map, read live: pointer healing, taxonomy placement, bibliography, blueprint) · `probe.py` (metered prover loop) · `vibe_prove.py` (the live prove path: headless vibe ⇄ lean-lsp, then the daemon-phase gate) · `autoformalize.py` + `af_parse`/`af_prompts`/`af_routing`/`af_drafting`/`af_gates` (the issue→stub refill, split into focused modules re-exported through `autoformalize`) · `decompose.py` + `decompose_tick.py` (the lemma-DAG path) · `gate.py` (the kernel-grade candidate gate) · `strengthen.py` (drop hypotheses the theorem does not need) · `gate_cache.py` · `state_cache.py` + `proof_states.py` (proof-state addressing + recurrence measurement) · `experience.py` (the cross-tick rolling notebook of failed attempts) · `pipeline.py` + `pipeline_lib.py` (cadence + token budgeting) · `house_context.py` (system-prompt assembly, injects the live `docs/patterns.md`) · `build_manifest.py` (elaborate-with-sorry target validation) · `assemble.py` (corpus entry assembly) · `scout_index.py` + `embed.py` (declaration index + embedding retrieval) · `issues.py` (issue sync) |
+| `scripts/` | shell entrypoints: `pipeline-tick.sh` (the cron prove step) · `decompose-tick.sh` (the lemma-DAG tick) · `open-pr.sh` (assemble with the pack's recipe + open the PR) · `assembly-smoke.sh` (the assembly canary: the same path on a fixture, no push) · `contribute.sh` (manual contribution packet) · `leanstral-vibe.sh` (hands-on vibe + lean-lsp path) · `slot-switch.sh` (the daemon ⇄ lean-lsp flip) · `build-index.sh` / `build-embeddings.sh` (scout index + embedding cache) |
 | `targets/` | `queue/` — validated targets (stub `.lean` + `.entry.json` sidecar + `manifest.json`, seeded from `status:ready`+`type:proof` issues). Its [`README`](targets/queue/README.md) carries the authoring bar, including the two ways a *faithful* stub is still empty: instantiating an already-∀-quantified corpus lemma, and restating a Mathlib lemma in finance names. · `informal/` — informal statements |
 | `index/` | the scout index of the main repo: `const_dep.jsonl`, `types.jsonl`, `PIN` |
 | `scout-lake/` | a minimal Lake project used to build the index against the pins |
@@ -181,6 +199,8 @@ Decomposition mechanics: [`docs/superpowers/specs/2026-07-18-decomposer-design.m
 | `docs/` | `overview.md` · `leanstral-architecture.md` · `PROVER_SETUP.md` · `research/` · `superpowers/` (specs + plans) |
 | `pipeline.toml` · `pipeline_state.json` | cadence + token-budget config; spent-budget/attempt state |
 | `.github/workflows/pipeline.yml` | the scheduled cron (one tick every `interval_days`, currently 2 days) |
+| `.github/workflows/assembly-smoke.yml` | the assembly canary: on a PR touching the assembly path, weekly, and on demand |
+| `domains/<name>/` | a domain pack: `target.toml` (identity, `[layout]`: where the library keeps its taxonomy, bibliography, corpus and blueprint), prompts, `regen.sh` + `host-gates.sh` (the library's CI, run before a PR), `smoke/` (the canary's fixture) |
 
 ## Runbook
 

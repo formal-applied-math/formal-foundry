@@ -9,9 +9,11 @@ name: autoformalizer pipeline
 # env every step below reads. The scheduled run always ticks the flagship.
 # Secrets:
 #   MISTRAL_API_KEY  — the Leanstral endpoint.
-#   MAIN_PR_TOKEN    — fine-grained PAT on the target library (contents:write +
-#                      pull-requests:write). WITHOUT it the tick falls back to
-#                      candidate-notify and opens NO PR. Revoking it disables auto-PR.
+#   MAIN_PR_TOKEN    — fine-grained PAT on the target library: Contents, Pull requests
+#                      and Issues, each Read and write. WITHOUT it the tick falls back to
+#                      candidate-notify and opens NO PR. With Contents alone it pushes
+#                      the branch and then cannot open the PR (2026-09-28 .. 10-21,
+#                      thirteen ticks). Revoking it disables auto-PR.
 #   GHCR_TOKEN       — optional (read:packages; the image is public).
 # The pipeline safely no-ops until R seeds stubs into targets/queue/.
 
@@ -238,6 +240,9 @@ jobs:
         env:
           MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
           MAIN_PR_TOKEN: ${{ secrets.MAIN_PR_TOKEN }}
+          # this repository's own token, for the `autoform-blocked` issue open-pr files
+          # HERE: MAIN_PR_TOKEN is scoped to the library and has no rights on the foundry
+          FOUNDRY_GH_TOKEN: ${{ github.token }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}   # frontier drafter (item I)
           MAIN_REPO_SLUG: ${{ env.MAIN_REPO_SLUG }}
           CI: "1"
