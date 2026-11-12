@@ -106,6 +106,11 @@ def intent_messages(pack: DomainPack, issue: dict, context_pack: str,
                  "this issue points at, these rest on the program map; the statement "
                  "must be written through at least one of them:\n"
                  + ", ".join(f"`{d}`" for d in census["defs"][:24]))
+        if census.get("off_trunk"):
+            user += ("\nDo NOT state it through these: they rest on a price the library has "
+                     "not yet founded on its pricing functional, and the check refuses a "
+                     "statement that reaches one: "
+                     + ", ".join(f"`{d}`" for d in census["off_trunk"][:12]))
     if issue.get("citable"):
         user += ("\n\nBIBLIOGRAPHY — the works this library cites. `citation.key` MUST "
                  "be one of these keys:\n" + issue["citable"])

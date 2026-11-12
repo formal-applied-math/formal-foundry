@@ -96,3 +96,21 @@ def test_a_theorem_on_the_way_counts_through_its_proof():
         "theorem t_via : viaProof = viaProof := by sorry\n")
     errs = _errors(af_gates.map_probe(PACK, stub, "t_via", [PACK.qualified(obj)]))
     assert errs == [], errs
+
+
+def test_a_statement_through_an_unfounded_price_is_off_the_trunk():
+    """The fixture's object, listed as a price with a functional it does not reach: the
+    walk reports the trunk marker alone (the statement is on the map)."""
+    _, obj = _fixture()
+    stub = _stub(f"theorem t_price (x : ℝ) : {obj} x = {obj} x := by sorry\n")
+    trunk = {"trunk": [f"{PACK.namespace}.Market.price"], "prices": [PACK.qualified(obj)]}
+    errs = _errors(af_gates.map_probe(PACK, stub, "t_price", [PACK.qualified(obj)], trunk))
+    assert errs and all(af_gates._TRUNK_MARKER in e for e in errs), errs
+
+
+def test_a_price_founded_on_the_functional_passes():
+    _, obj = _fixture()
+    stub = _stub(f"theorem t_founded (x : ℝ) : {obj} x = {obj} x := by sorry\n")
+    trunk = {"trunk": [PACK.qualified(obj)], "prices": [PACK.qualified(obj)]}
+    errs = _errors(af_gates.map_probe(PACK, stub, "t_founded", [PACK.qualified(obj)], trunk))
+    assert errs == [], errs

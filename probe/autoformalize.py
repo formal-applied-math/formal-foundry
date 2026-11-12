@@ -426,10 +426,11 @@ def prepare_issues(pack: DomainPack, raw: list[dict], *, main_repo: str | None =
       open because a human has yet to split or close it, not because it is undrafted."""
     by_num = {r.get("number"): r for r in raw}
     layout = pack.layout
-    tax = bib = bp = None
+    tax = bib = bp = trunk = None
     served: set[int] = set()
     taken: set[str] = set()
     if main_repo:
+        trunk = library_map.price_table(main_repo, layout.price_table)
         tax = library_map.Taxonomy.load(main_repo, layout.taxonomy)
         bib = library_map.Bibliography.load(main_repo, layout.bibliography)
         bp = library_map.Blueprint.load(main_repo, layout)
@@ -501,6 +502,8 @@ def prepare_issues(pack: DomainPack, raw: list[dict], *, main_repo: str | None =
                                              "reference": bib.reference(k)}
                                          for k in bib.entries}
             issue["taken_ids"] = sorted(taken)
+            if trunk:
+                issue["trunk"] = trunk
         out.append({**issue, "pointers": pointers})
     return out
 
@@ -566,12 +569,12 @@ def semantic_verdict(pack: DomainPack, *, lean_text: str, stub: str, name: str,
     # the program map: active whenever `prepare_issues` attached the map's tagged names
     # (a library with a blueprint, an issue prepared against a checkout)
     mp = map_rejection(pack, lean_text, name, issue.get("map_anchors") or [],
-                       check_fn=check_fn)
+                       check_fn=check_fn, trunk=issue.get("trunk"))
     if mp.get("indeterminate"):
         return {"gate": "indeterminate", "detail": mp.get("verdict", "")}, tokens
-    if mp["off_map"]:
+    if mp["off_map"] or mp.get("off_trunk"):
         hint = issue.get("map_hint") or ""
-        return {"gate": "off_map",
+        return {"gate": "off_map" if mp["off_map"] else "off_trunk",
                 "detail": mp.get("verdict", "") + (f" Program objects to state it "
                                                    f"through: {hint}" if hint else "")}, tokens
     if triviality_gate:
@@ -1009,7 +1012,7 @@ def main() -> int:
     for i in issues:
         i["map_census"] = map_census(_map_idx, i.get("map_anchors") or [],
                                      args.main_repo, i.get("pointers", []),
-                                     own_root=pack.lake_root)
+                                     own_root=pack.lake_root, trunk=i.get("trunk"))
         if (i["map_census"] or {}).get("defs"):
             own = ", ".join(f"`{d}`" for d in i["map_census"]["defs"][:24])
             i["map_hint"] = own + (", " + i["map_hint"] if i.get("map_hint") else "")
@@ -1017,9 +1020,24 @@ def main() -> int:
     _verdicts = [(i.get("map_census") or {}).get("verdict") or "unmeasured" for i in issues]
     print("[refill] program map: " + ", ".join(
               f"{v}={_verdicts.count(v)}" for v in
-              ("statement", "unmeasured", "proof_only", "off_map") if v in _verdicts)
+              ("statement", "unmeasured", "proof_only", "off_map", "off_trunk")
+              if v in _verdicts)
           + ("" if _map_idx.available else " (no scout index: the gate decides alone)"),
           file=sys.stderr)
+    # an issue whose every map object rests on a price the library has not founded on its
+    # pricing functional waits: its entry would be refused by the library's ratchet after
+    # the proof was paid for. It comes back by itself when the price is re-founded.
+    waiting = [i for i in issues if (i.get("map_census") or {}).get("verdict") == "off_trunk"]
+    for i in waiting:
+        print(f"[refill] #{i['number']}: waits for the trunk — its map objects rest on prices "
+              f"not yet founded on the pricing functional "
+              f"({', '.join(i['map_census']['off_trunk'][:4])})", file=sys.stderr)
+    issues = [i for i in issues
+              if (i.get("map_census") or {}).get("verdict") != "off_trunk"]
+    if not issues:
+        print(json.dumps({"seeded": [], "tokens": 0,
+                          "reason": "every ready issue waits for the trunk"}))
+        return 0
     print(f"[refill] routes: " + ", ".join(
               f"#{i['number']}→{i['route']}"
               f"/{(i.get('map_census') or {}).get('verdict') or 'unmeasured'}"

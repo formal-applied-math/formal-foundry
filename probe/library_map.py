@@ -38,7 +38,7 @@ from dataclasses import dataclass, field
 __all__ = ["Layout", "heal_pointers", "Taxonomy", "benchmark_for", "Bibliography",
            "Blueprint", "named_nodes", "served_issues", "corpus_ids", "declared_in_library",
            "entry_descriptions", "pointer_directory", "module_doc", "add_core",
-           "long_lines", "LINE_LIMIT"]
+           "long_lines", "LINE_LIMIT", "price_table"]
 
 #: The library's line limit (Mathlib's `linter.style.longLine`); its ratchet counts every
 #: longer line in a source file, with the baseline at zero.
@@ -60,11 +60,30 @@ class Layout:
     doc_standard: bool = False
     #: the tool that narrows a module's imports after it is built (`lake exe <name>`)
     shake_exe: str = ""
+    #: the library's table of its pricing functional and of the definitions that claim to
+    #: be prices (`[trunk] anchors`, `[prices] names`): an entry that reaches a price but
+    #: not the functional is a ratchet count the library's build refuses to raise
+    price_table: str = ""
 
     @classmethod
     def from_mapping(cls, raw) -> "Layout":
         raw = dict(raw or {})
         return cls(**{k: raw[k] for k in cls.__dataclass_fields__ if k in raw})
+
+
+def price_table(main_repo: str, path: str) -> dict | None:
+    """`{"trunk": [...], "prices": [...]}` from the library's price table, or None when the
+    pack declares none or the file is missing or malformed (the trunk check then skips)."""
+    if not path:
+        return None
+    try:
+        with open(os.path.join(main_repo, path), "rb") as f:
+            raw = tomllib.load(f)
+        trunk = [str(x) for x in raw["trunk"]["anchors"]]
+        prices = [str(x) for x in raw["prices"]["names"]]
+    except (OSError, KeyError, TypeError, tomllib.TOMLDecodeError):
+        return None
+    return {"trunk": trunk, "prices": prices} if trunk and prices else None
 
 
 # --- pointers -----------------------------------------------------------------
