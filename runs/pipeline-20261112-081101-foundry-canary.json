@@ -1,0 +1,64 @@
+{
+  "target": "foundry-canary",
+  "engine": "claude",
+  "model": "claude-sonnet-5-5",
+  "rc": 0,
+  "duration_s": 29.5,
+  "secret_leak": 0,
+  "identical_to_stub": false,
+  "captured_bytes": 169,
+  "transcript": "/home/runner/work/formal-foundry/formal-foundry/runs/pipeline-20261112-081101-foundry-canary.transcript.jsonl",
+  "launcher_log": "/home/runner/work/formal-foundry/formal-foundry/runs/pipeline-20261112-081101-foundry-canary.launcher.log",
+  "mcp_servers": {
+    "lean-lsp": "connected"
+  },
+  "tool_calls": 5,
+  "lean_tool_calls": 1,
+  "result": {
+    "subtype": "success",
+    "is_error": false,
+    "num_turns": 6,
+    "duration_ms": 8655,
+    "total_cost_usd": 0.37275220000000003,
+    "usage": {
+      "input_tokens": 12,
+      "cache_creation_input_tokens": 81164,
+      "cache_read_input_tokens": 384822,
+      "output_tokens": 959,
+      "output_tokens_details": {
+        "thinking_tokens": 197
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 81164,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 171,
+          "cache_read_input_tokens": 93691,
+          "cache_creation_input_tokens": 426,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 426
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard",
+      "fallback_credit": null
+    }
+  },
+  "turns": 6,
+  "cost_usd": 0.37275220000000003,
+  "tokens": 971,
+  "last_text": "I replaced the `sorry` in `foundry_canary` with `exact Nat.add_comm a b`, but I couldn't compile the file to confirm it.\n\nThe Lean tooling refused to check the file. `lean_diagnostic_messages` answered that it wasn't found in any Lean project (no `lean-toolchain` ancestor). `Nat.add_comm : n + m = m + n` is the standard commutativity lemma for natural numbers, so the proof should compile.\n\nThe statement, name and binders are unchanged.",
+  "canary_ok": true,
+  "canary_reason": ""
+}

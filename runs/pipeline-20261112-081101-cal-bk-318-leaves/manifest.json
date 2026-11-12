@@ -1,0 +1,48 @@
+{
+  "toolchain": "leanprover/lean4:v4.35.0",
+  "main_commit": "",
+  "decompose_parent": "cal-bk-318",
+  "targets": [
+    {
+      "id": "cal-bk-318__blackForm_lower_bound_of_dpl_ge",
+      "kind": "prove",
+      "file": "leaf-cal-bk-318-blackForm_lower_bound_of_dpl_ge.lean",
+      "sorry_name": "blackForm_lower_bound_of_dpl_ge",
+      "pointers": [
+        "MathFin/Models/LocalVol/ForwardSmile.lean",
+        "MathFin/Models/ModelFree/SVI/BlackSmile.lean"
+      ],
+      "parent": "blackForm_tendsto_zero_iff_dpl_tendsto_atBot",
+      "parent_id": "cal-bk-318",
+      "dag_order": 0,
+      "input_hash": "69667c1479df8313b833345bffc92b59b25504007b5038f6c12da81a9ada1b33"
+    },
+    {
+      "id": "cal-bk-318__blackForm_nonneg_le_Phi_dpl",
+      "kind": "prove",
+      "file": "leaf-cal-bk-318-blackForm_nonneg_le_Phi_dpl.lean",
+      "sorry_name": "blackForm_nonneg_le_Phi_dpl",
+      "pointers": [
+        "MathFin/Models/ModelFree/SVI/TailCondition.lean",
+        "MathFin/Models/ModelFree/SVI/BlackSmile.lean"
+      ],
+      "parent": "blackForm_tendsto_zero_iff_dpl_tendsto_atBot",
+      "parent_id": "cal-bk-318",
+      "dag_order": 1,
+      "input_hash": "d0f778fbf508b30de60be32376bfa672cb9b88d2819fb70d5bfc31494db29b79"
+    },
+    {
+      "id": "cal-bk-318__Phi_tendsto_zero_atBot",
+      "kind": "prove",
+      "file": "leaf-cal-bk-318-Phi_tendsto_zero_atBot.lean",
+      "sorry_name": "Phi_tendsto_zero_atBot",
+      "pointers": [
+        "MathFin/Models/ModelFree/SVI/TailCondition.lean"
+      ],
+      "parent": "blackForm_tendsto_zero_iff_dpl_tendsto_atBot",
+      "parent_id": "cal-bk-318",
+      "dag_order": 2,
+      "input_hash": "d6ffb93390348fd728ef676398ba8cd25beff41af18c8b0a322867f4f1515f0a"
+    }
+  ]
+}

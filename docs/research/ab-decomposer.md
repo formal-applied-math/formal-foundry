@@ -44,6 +44,7 @@ bottleneck: it is **filled by hand at merge**, not by the machine.
 <!-- SCOREBOARD:START -->
 | ts | target | arm | engine | outcome | leaves | tokens | refinery min | note |
 |----|--------|-----|--------|---------|--------|--------|--------------|------|
+| 2026-11-12T08:41:51 | cal-bk-318 | decompose | claude | pass | 3/3 | 0 |  |  |
 | 2026-09-23T12:12:27 | cal-bk-91 | decompose | leanstral | max_rounds | 0/0 | 0 |  | VOID — the skeleton imported the target's own not-yet-existing main module (a leaf pointer); one unresolvable import em… |
 | 2026-09-21T13:23:20 | cal-bk-83 | decompose | leanstral | max_rounds | 0/2 | 0 |  | VOID — the leaf prover never started (TypeError in leanstral-vibe.sh from 071a849); leaves_closed=0 measures the crash,… |
 | 2026-09-19T12:16:10 | cal-bk-90 | decompose | leanstral | max_rounds | 0/0 | 0 |  | VOID — the skeleton imported the target's own not-yet-existing main module (a leaf pointer); one unresolvable import em… |

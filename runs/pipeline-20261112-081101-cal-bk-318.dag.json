@@ -1,0 +1,55 @@
+{
+  "main": {
+    "name": "blackForm_tendsto_zero_iff_dpl_tendsto_atBot",
+    "statement": "theorem blackForm_tendsto_zero_iff_dpl_tendsto_atBot (w : \u211d \u2192 \u211d) (hw : \u2200 k, 0 < w k) : Filter.Tendsto (fun k \u21a6 MathFin.ForwardSmile.blackForm k (w k)) Filter.atTop (nhds 0) \u2194 Filter.Tendsto (fun k \u21a6 MathFin.ForwardSmile.dpl k (w k)) Filter.atTop Filter.atBot",
+    "proof": "by\n  constructor\n  \u00b7 intro h\n    by_contra hn\n    rw [Filter.tendsto_atBot] at hn\n    obtain \u27e8M, hM\u27e9 := not_forall.mp hn\n    have hf := Filter.not_eventually.mp hM\n    obtain \u27e8c, hc, R, hR\u27e9 := blackForm_lower_bound_of_dpl_ge w hw M\n    obtain \u27e8k, \u27e8hk1, hk2\u27e9, hk3\u27e9 := ((hf.and_eventually (h.eventually (Iio_mem_nhds hc))).and_eventually (Filter.eventually_ge_atTop R)).exists\n    have h4 := hR k hk3 (le_of_lt (not_le.mp hk1))\n    exact (not_lt.mpr h4) hk2\n  \u00b7 intro h\n    exact tendsto_of_tendsto_of_tendsto_of_le_of_le tendsto_const_nhds (Phi_tendsto_zero_atBot.comp h) (fun k => (blackForm_nonneg_le_Phi_dpl k (w k) (hw k)).1) (fun k => (blackForm_nonneg_le_Phi_dpl k (w k) (hw k)).2)"
+  },
+  "leaves": [
+    {
+      "name": "blackForm_lower_bound_of_dpl_ge",
+      "statement": "theorem blackForm_lower_bound_of_dpl_ge (w : \u211d \u2192 \u211d) (hw : \u2200 k, 0 < w k) (M : \u211d) : \u2203 c : \u211d, 0 < c \u2227 \u2203 R : \u211d, \u2200 k : \u211d, R \u2264 k \u2192 M \u2264 MathFin.ForwardSmile.dpl k (w k) \u2192 c \u2264 MathFin.ForwardSmile.blackForm k (w k)",
+      "pointers": [
+        "MathFin/Models/LocalVol/ForwardSmile.lean",
+        "MathFin/Models/ModelFree/SVI/BlackSmile.lean"
+      ],
+      "depends_on": [],
+      "applied_to": [
+        "MathFin.ForwardSmile.exp_mul_pdf_dmi",
+        "MathFin.ForwardSmile.dpl",
+        "MathFin.ForwardSmile.dmi"
+      ]
+    },
+    {
+      "name": "blackForm_nonneg_le_Phi_dpl",
+      "statement": "theorem blackForm_nonneg_le_Phi_dpl (k w : \u211d) (hw : 0 < w) : 0 \u2264 MathFin.ForwardSmile.blackForm k w \u2227 MathFin.ForwardSmile.blackForm k w \u2264 MathFin.Phi (MathFin.ForwardSmile.dpl k w)",
+      "pointers": [
+        "MathFin/Models/ModelFree/SVI/TailCondition.lean",
+        "MathFin/Models/ModelFree/SVI/BlackSmile.lean"
+      ],
+      "depends_on": [],
+      "applied_to": [
+        "MathFin.SVI.blackCall_le_Phi_dpl",
+        "MathFin.SVI.bsSmile_nonneg"
+      ]
+    },
+    {
+      "name": "Phi_tendsto_zero_atBot",
+      "statement": "theorem Phi_tendsto_zero_atBot : Filter.Tendsto MathFin.Phi Filter.atBot (nhds 0)",
+      "pointers": [
+        "MathFin/Models/ModelFree/SVI/TailCondition.lean"
+      ],
+      "depends_on": [],
+      "applied_to": []
+    }
+  ],
+  "target": {
+    "preamble": "-- pointers: MathFin/Models/ModelFree/SVI/TailCondition.lean, MathFin/Models/ModelFree/SVI/BlackSmile.lean, MathFin/Models/ModelFree/CallPriceFunction.lean, MathFin/Models/ModelFree/CalendarArbitrage.lean, MathFin/Models/LocalVol/ForwardSmile.lean\n-- main-module: MathFin/Models/ModelFree/BlackFormTail.lean\n-- benchmark: benchmarks/black_scholes.json\n-- benchmark-id: mf-smile-black-form-tail-iff\n-- source-issue: 318\n-- deferred: SVI tail lemmas re-derived as corollaries of the general lemma; left-wing bound: IsNormalizedCallPrice (bsSmile p) implies b(1 - rho) \u2264 2, and the mass at zero; calendar-spread martingale step for any convex payoff via conditional Jensen; t > 0 calendar statements tied to the local-variance characterisation; unification of blackForm, totalVarianceCall and logBlackCall into one (k, w) Black form; IsNormalizedCallPrice from a nonnegative random variable with mean 1 (easy direction); port hygiene: scoped maxHeartbeats, maxRecDepth and open scoped Classical\n-- blueprint: thm:smile-no-arbitrage\n\n\n\n\n\n\n/-- For any everywhere-positive total variance `w`, the Black form `blackForm k (w k)` tends to\n`0` as `k \u2192 +\u221e` iff `dpl k (w k)` tends to `-\u221e`. -/",
+    "pointers": [
+      "MathFin/Models/ModelFree/SVI/TailCondition.lean",
+      "MathFin/Models/ModelFree/SVI/BlackSmile.lean",
+      "MathFin/Models/ModelFree/CallPriceFunction.lean",
+      "MathFin/Models/ModelFree/CalendarArbitrage.lean",
+      "MathFin/Models/LocalVol/ForwardSmile.lean"
+    ]
+  }
+}

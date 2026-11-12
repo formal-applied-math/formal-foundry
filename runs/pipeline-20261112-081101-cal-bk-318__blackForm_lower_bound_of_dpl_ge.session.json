@@ -1,0 +1,62 @@
+{
+  "target": "cal-bk-318__blackForm_lower_bound_of_dpl_ge",
+  "engine": "claude",
+  "model": "claude-sonnet-5-5",
+  "rc": 0,
+  "duration_s": 70.9,
+  "secret_leak": 0,
+  "identical_to_stub": false,
+  "captured_bytes": 3735,
+  "transcript": "/home/runner/work/formal-foundry/formal-foundry/runs/pipeline-20261112-081101-cal-bk-318__blackForm_lower_bound_of_dpl_ge.transcript.jsonl",
+  "launcher_log": "/home/runner/work/formal-foundry/formal-foundry/runs/pipeline-20261112-081101-cal-bk-318__blackForm_lower_bound_of_dpl_ge.launcher.log",
+  "mcp_servers": {
+    "lean-lsp": "connected"
+  },
+  "tool_calls": 9,
+  "lean_tool_calls": 3,
+  "result": {
+    "subtype": "success",
+    "is_error": false,
+    "num_turns": 10,
+    "duration_ms": 58380,
+    "total_cost_usd": 0.31929250000000003,
+    "usage": {
+      "input_tokens": 18,
+      "cache_creation_input_tokens": 46791,
+      "cache_read_input_tokens": 845625,
+      "output_tokens": 4753,
+      "output_tokens_details": {
+        "thinking_tokens": 941
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 46791,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 449,
+          "cache_read_input_tokens": 117209,
+          "cache_creation_input_tokens": 813,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 813
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard",
+      "fallback_credit": null
+    }
+  },
+  "turns": 10,
+  "cost_usd": 0.31929250000000003,
+  "tokens": 4771,
+  "last_text": "- **Large strike:** for `k ≥ R`, the quantity `-d₋ = k/√w + √w/2` satisfies `(-d₋)² ≥ 2k`, so `-d₋ ≥ 2/Φ(M)`.\n- **Tail bound:** the library's Mills bound transported by `exp_mul_pdf_dmi` gives `-d₋ · e^k Φ(d₋) ≤ 1`, hence `e^k Φ(d₋) ≤ Φ(M)/2`.\n- **Conclusion:** since `d₊ ≥ M`, `Φ(d₊) ≥ Φ(M)`, so `blackForm ≥ Φ(M)/2`.\n\nI did not change the statement, name or binders.\n\nThe remaining warnings are three over-length lines (24, 29 and 41), a missing module docstring and an empty line inside a command. All come from the file's existing header, comments and statement, which the task said not to touch."
+}

@@ -1,0 +1,1860 @@
+warning: MathFin/Probability/Laws/FiniteWeights.lean:10:0: 'Mathlib.MeasureTheory.Measure.Dirac' has been deprecated: please replace this import by
+
+import Mathlib.MeasureTheory.Measure.Dirac.Def
+import Mathlib.MeasureTheory.Measure.Dirac.Basic
+warning: MathFin/Probability/Discrete/DiscreteIto.lean:2:0: * `This file is a *`:
+Copyright line should start with 'Copyright (c) YYYY'
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Discrete/DiscreteIto.lean:2:52: * `he Lean source snippet`:
+Copyright line should end with '. All rights reserved.'
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Discrete/DiscreteIto.lean:4:0: * `
+  Tamás Nagy, "From Itô to Black–Scholes: A Machine-Verified Derivation in
+  Lean 4", SSRN Working Paper 6336503, March 2026.
+  <https://papers.ssrn.com/sol3/papers.cfm?abstract_id=6336503>
+
+The theorem statement and proof skeleton (telescoping via
+`Finset.sum_range_sub` + per-summand Taylor decomposition +
+`Finset.sum_add_distrib`) are adapted directly from Nagy's published Lean
+code. Modifications: renamed `taylor_remainder` → `discreteTaylorRemainder`
+(camelCase convention), factored `(1/2)` out of the second sum, added
+type ascription, restructured the proof to use `Finset.sum_congr` for the
+per-summand rewrite. Mathematical content is unchanged.
+
+Author of this MathFin Lean 4 adaptation: Raphael Coelho.
+Original Lean derivation: Tamás Nagy (SSRN 6336503, 2026).
+Copyright (c) 2026 Raphael Coelho (this adaptation).
+Mathematical content and original Lean code © Tamás Nagy 2026, used here
+under academic fair use for derivative work with attribution.
+Released under Apache 2.0 license as described in the file LICENSE.`:
+If an authors line spans multiple lines, each line but the last must end with a trailing comma
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Discrete/DiscreteIto.lean:4:0: * `
+  Tamás `:
+The authors line should begin with 'Authors: '
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Discrete/DiscreteIto.lean:5:0: * `  `:
+Double spaces are not allowed.
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Discrete/DiscreteIto.lean:9:21: * ` and `:
+Please, do not use 'and'; use ',' instead.
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Discrete/DiscreteIto.lean:6:49: * `.`:
+Please, do not end the authors' line with a period.
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Discrete/DiscreteIto.lean:3:0: * `published in Section 3 ("The Discrete Itô Formula") of:`:
+Second copyright line should be "Released under Apache 2.0 license as described in the file LICENSE."
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Brownian/Ito/ItoLemma.lean:2:0: * `This file builds`:
+Copyright line should start with 'Copyright (c) YYYY'
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Brownian/Ito/ItoLemma.lean:3:49: * `uctural drift formula*`:
+Copyright line should end with '. All rights reserved.'
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Brownian/Ito/ItoLemma.lean:4:70: * `requires the Taylor-remainder bound + simple-process density argument,which is gated on Mathlib's Itô-integral completeness (currently
+incomplete; see `docs/bridges.md`).
+
+The structural drift formula — `μ_X · f' + (1/2) σ_X² · f''` — is the
+*per-unit-time* coefficient of `dt` in `df(X_t)` and is everything you
+need for the canonical applications (GBM log-drift, BS PDE derivation).
+It is also what Nagy uses downstream (his §5).
+
+Adapted from Theorem 5.1 ("Itô's Lemma") and Theorem 5.2 ("GBM Drift") of:
+
+  Tamás Nagy, "From Itô to Black–Scholes: A Machine-Verified Derivation in
+  Lean 4", SSRN Working Paper 6336503, March 2026.
+  <https://papers.ssrn.com/sol3/papers.cfm?abstract_id=6336503>
+
+Author of this MathFin Lean 4 adaptation: Raphael Coelho.
+Original Lean derivation: Tamás Nagy (SSRN 6336503, 2026).
+Copyright (c) 2026 Raphael Coelho (this adaptation).
+Mathematical content and original Lean code © Tamás Nagy 2026, used here
+under academic fair use for derivative work with attribution.
+Released under Apache 2.0 license as described in the file LICENSE.`:
+If an authors line spans multiple lines, each line but the last must end with a trailing comma
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Brownian/Ito/ItoLemma.lean:4:70: * `requires `:
+The authors line should begin with 'Authors: '
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Brownian/Ito/ItoLemma.lean:14:74: * `  `:
+Double spaces are not allowed.
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Brownian/Ito/ItoLemma.lean:10:46: * ` and `:
+Please, do not use 'and'; use ',' instead.
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Brownian/Ito/ItoLemma.lean:7:27: * `.`:
+Please, do not end the authors' line with a period.
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Brownian/Ito/ItoLemma.lean:3:72: * `for `f(X_t)` when `X_t` is an Itô process. The full L²-limit Itô lemma`:
+Second copyright line should be "Released under Apache 2.0 license as described in the file LICENSE."
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Gaussian/WeakForwardUniqueness.lean:170:2: Try this: 
+  haveI̵
+
+The goal is a proposition, so `have` is preferred over `haveI`.
+The difference between `have` and `haveI` is that `haveI` inlines the value.
+But this is not relevant for proofs because of proof irrelevance.
+
+Note: This linter can be disabled with `set_option linter.style.haveILetI false`
+warning: MathFin/Pricing/FTAP/FTAPTwoState.lean:2:0: * `This file is a *`:
+Copyright line should start with 'Copyright (c) YYYY'
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Pricing/FTAP/FTAPTwoState.lean:2:44: * `sed on Section 7 ("The`:
+Copyright line should end with '. All rights reserved.'
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Pricing/FTAP/FTAPTwoState.lean:4:0: * `
+  Tamás Nagy, "From Itô to Black–Scholes: A Machine-Verified Derivation in
+  Lean 4", SSRN Working Paper 6336503, March 2026.
+  <https://papers.ssrn.com/sol3/papers.cfm?abstract_id=6336503>
+
+Theorem 7.1 (forward FTAP `EMM ⟹ no arbitrage`), Theorem 7.2 (signs of
+no-arb implies opposite-sign components), and Theorem 7.3 (explicit EMM
+construction from sign data) are adapted from Nagy's Lean 4 snippets in
+the paper, restricted to the one-period, one-asset, two-state case for
+concreteness. The general finite-state FTAP — both directions, multiple
+assets — is in `Pricing/FTAP/FTAPMultiState.lean`.
+
+Author of this MathFin Lean 4 adaptation: Raphael Coelho.
+Original Lean derivation: Tamás Nagy (SSRN 6336503, 2026).
+Copyright (c) 2026 Raphael Coelho (this adaptation).
+Mathematical content and original Lean code © Tamás Nagy 2026, used here
+under academic fair use for derivative work with attribution.
+Released under Apache 2.0 license as described in the file LICENSE.`:
+If an authors line spans multiple lines, each line but the last must end with a trailing comma
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Pricing/FTAP/FTAPTwoState.lean:4:0: * `
+  Tamás `:
+The authors line should begin with 'Authors: '
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Pricing/FTAP/FTAPTwoState.lean:5:0: * `  `:
+Double spaces are not allowed.
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Pricing/FTAP/FTAPTwoState.lean:10:41: * ` and `:
+Please, do not use 'and'; use ',' instead.
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Pricing/FTAP/FTAPTwoState.lean:6:49: * `.`:
+Please, do not end the authors' line with a period.
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Pricing/FTAP/FTAPTwoState.lean:3:0: * `Fundamental Theorem of Asset Pricing") of:`:
+Second copyright line should be "Released under Apache 2.0 license as described in the file LICENSE."
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Pricing/FTAP/NoArbitrageLocal.lean:100:20: This simp argument is unused:
+  Set.indicator_apply
+
+Hint: Omit it from the simp argument list.
+  [apply] simp [truncation, h]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+warning: MathFin/Pricing/FTAP/NoArbitrageLocal.lean:104:20: This simp argument is unused:
+  Set.indicator_apply
+
+Hint: Omit it from the simp argument list.
+  [apply] simp [truncation, h]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+warning: MathFin/Pricing/FTAP/NoArbitrageLocal.lean:177:6: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Pricing/FTAP/NoArbitrageLocal.lean:258:6: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Pricing/FTAP/NoArbitrageLocal.lean:270:6: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Pricing/FTAP/NoArbitrageLocal.lean:281:6: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Pricing/FTAP/NoArbitrageLocal.lean:288:4: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Pricing/DiscreteMarket.lean:118:2: Try this: 
+  haveI̵
+
+The goal is a proposition, so `have` is preferred over `haveI`.
+The difference between `have` and `haveI` is that `haveI` inlines the value.
+But this is not relevant for proofs because of proof irrelevance.
+
+Note: This linter can be disabled with `set_option linter.style.haveILetI false`
+warning: MathFin/Pricing/DiscreteMarket.lean:122:6: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Pricing/DiscreteMarket.lean:133:2: Try this: 
+  haveI̵
+
+The goal is a proposition, so `have` is preferred over `haveI`.
+The difference between `have` and `haveI` is that `haveI` inlines the value.
+But this is not relevant for proofs because of proof irrelevance.
+
+Note: This linter can be disabled with `set_option linter.style.haveILetI false`
+warning: MathFin/Pricing/DiscreteMarket.lean:137:6: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Pricing/DiscreteMarket.lean:167:2: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Pricing/DiscreteMarket.lean:177:56: This simp argument is unused:
+  min_assoc
+
+Hint: Omit it from the simp argument list.
+  [apply] simp [Market.deflated, toMarket, discreteAssets, hfl]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+warning: MathFin/Pricing/OneDateMarket.lean:230:2: Try this: 
+  haveI̵
+
+The goal is a proposition, so `have` is preferred over `haveI`.
+The difference between `have` and `haveI` is that `haveI` inlines the value.
+But this is not relevant for proofs because of proof irrelevance.
+
+Note: This linter can be disabled with `set_option linter.style.haveILetI false`
+warning: MathFin/Pricing/OneDateMarket.lean:233:63: Unused tactic linter: `<;>` should be replaced with `;` or be removed.
+
+Note: This linter can be disabled with `set_option linter.unusedTactic false`
+warning: MathFin/Pricing/OneDateMarket.lean:236:74: Unused tactic linter: `<;>` should be replaced with `;` or be removed.
+
+Note: This linter can be disabled with `set_option linter.unusedTactic false`
+warning: MathFin/Pricing/OneDateMarket.lean:233:63: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+warning: MathFin/Pricing/OneDateMarket.lean:236:74: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+warning: MathFin/Models/Bachelier/BachelierGreeks.lean:62:50: Unused tactic linter: `<;>` should be replaced with `;` or be removed.
+
+Note: This linter can be disabled with `set_option linter.unusedTactic false`
+warning: MathFin/Models/Bachelier/BachelierGreeks.lean:62:50: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+warning: MathFin/Models/Bachelier/BachelierGreeks.lean:78:50: Unused tactic linter: `<;>` should be replaced with `;` or be removed.
+
+Note: This linter can be disabled with `set_option linter.unusedTactic false`
+warning: MathFin/Models/Bachelier/BachelierGreeks.lean:78:50: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+warning: MathFin/Models/Bachelier/BachelierGreeks.lean:114:66: Unused tactic linter: `<;>` should be replaced with `;` or be removed.
+
+Note: This linter can be disabled with `set_option linter.unusedTactic false`
+warning: MathFin/Models/Bachelier/BachelierGreeks.lean:114:66: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+warning: MathFin/Models/ModelFree/MarketCallPrice.lean:111:2: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Models/ModelFree/RoperConverse.lean:179:6: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Models/ModelFree/RoperConverse.lean:185:6: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+info: MathFin/Models/Binomial/Model.lean:346:2: Try these:
+  [apply] [grind
+    =] for pattern: [@HAdd.hAdd `[ℝ] `[ℝ] `[ℝ] `[instHAdd] (@HMul.hMul `[ℝ] `[ℝ] `[ℝ] `[instHMul] (crrUpProb #3 #2 #1) #3) (@HMul.hMul `[ℝ] `[ℝ] `[ℝ] `[instHMul] (@HSub.hSub `[ℝ] `[ℝ] `[ℝ] `[instHSub] `[1] (crrUpProb #3 #2 #1)) #2)]
+  [apply] [grind .] for pattern: [crrUpProb #3 #2 #1]
+  [apply] [grind →] for pattern: [BinomialNoArb #3 #2 #1]
+warning: MathFin/Models/Binomial/American.lean:102:27: `Set.setOf_true` has been deprecated: Use `Set.ofPred_true` instead
+
+Hint: Replace the deprecated name:
+  S̵e̵t̵.̵s̵e̵t̵O̵f̵_̵t̵r̵u̵e̵S̲e̲t̲.̲o̲f̲P̲r̲e̲d̲_̲t̲r̲u̲e̲
+warning: MathFin/Models/BlackScholes/BlackScholesPhysical.lean:251:23: This simp argument is unused:
+  List.nil_append
+
+Hint: Omit it from the simp argument list.
+  [apply] simp only [geomAsianCall, Contract.obsList, Payoff.obsList, obsList_obsProd, List.append_nil, List.map_ofFn,
+    List.mem_ofFn] at hp
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+warning: MathFin/Models/Rates/VasicekMarket.lean:114:38: `simp` is a flexible tactic modifying `⊢`. Try `simp?` and use the suggested `simp only [...]`. Alternatively, use `suffices` to explicitly state the simplified form.
+
+Note: This linter can be disabled with `set_option linter.flexible false`
+info: MathFin/Models/Rates/VasicekMarket.lean:114:38: Try this:
+  [apply] simp only [NNReal.coe_zero, lt_self_iff_false, not_false_eq_true, Set.Ioc_eq_empty, Measure.restrict_empty,
+    ae_zero]
+info: MathFin/Models/Rates/VasicekMarket.lean:114:44: `exact Filter.eventually_bot`
+modifies the current goal, which was modified by the flexible tactic `simp` on line 114!
+warning: MathFin/Models/BlackScholes/BlackScholesSelfFinancing.lean:239:6: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Models/Binomial/Market.lean:181:2: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Models/Binomial/Market.lean:191:4: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Models/BlackScholes/American/AmericanPutMarketBound.lean:70:2: Try this: 
+  haveI̵
+
+The goal is a proposition, so `have` is preferred over `haveI`.
+The difference between `have` and `haveI` is that `haveI` inlines the value.
+But this is not relevant for proofs because of proof irrelevance.
+
+Note: This linter can be disabled with `set_option linter.style.haveILetI false`
+warning: MathFin/Models/ModelFree/SVI/SignatureProgram.lean:64:2: `simp [variationProgram, SignProgram.eval_bind, SignProgram.eval, symbolicCoeffList,
+    Polynomial.signVariations, coeffList_of_ne_zero hne, natDegree_eq_of_degree_eq_some hd,
+    List.map_map, hc]` is a flexible tactic modifying `⊢`. Try `simp?` and use the suggested `simp only [...]`. Alternatively, use `suffices` to explicitly state the simplified form.
+
+Note: This linter can be disabled with `set_option linter.flexible false`
+info: MathFin/Models/ModelFree/SVI/SignatureProgram.lean:67:2: `refine Eq.trans ?_ (List.signVariations_map_sign _)`
+modifies the current goal, which was modified by the flexible tactic `simp` on line 64!
+warning: MathFin/Models/Rates/HJMBond.lean:106:64: Unused tactic linter: `<;>` should be replaced with `;` or be removed.
+
+Note: This linter can be disabled with `set_option linter.unusedTactic false`
+warning: MathFin/Models/Rates/HJMBond.lean:106:64: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+warning: MathFin/Risk/ExpectedShortfall.lean:434:37: This simp argument is unused:
+  Pi.single_apply
+
+Hint: Omit it from the simp argument list.
+  [apply] simp [h]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+warning: MathFin/Risk/CompoundPoissonCVaR.lean:78:36: `MeasureTheory.integral_finset_sum` has been deprecated: Use `MeasureTheory.integral_finsetSum` instead
+
+Hint: Replace the deprecated name:
+  integral_finset_̵s̵S̲um
+warning: MathFin/Risk/EntropicRisk.lean:157:63: Variable name `a` is not explicitly referenced.
+
+Hint: The binding can be removed (if unused) or named `_` (if used implicitly). Alternatively, prefix the name with `_` to silence this warning:
+  [apply] _a
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+warning: MathFin/Risk/EntropicRisk.lean:157:65: Variable name `b` is not explicitly referenced.
+
+Hint: The binding can be removed (if unused) or named `_` (if used implicitly). Alternatively, prefix the name with `_` to silence this warning:
+  [apply] _b
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+warning: MathFin/Choice/Utility/StatePriceDensity.lean:151:4: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Choice/Utility/StatePriceDensity.lean:168:67: Unused tactic linter: `<;>` should be replaced with `;` or be removed.
+
+Note: This linter can be disabled with `set_option linter.unusedTactic false`
+warning: MathFin/Choice/Utility/StatePriceDensity.lean:168:67: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+warning: MathFin/Choice/Portfolio/MarketSDF.lean:125:12: This simp argument is unused:
+  Set.indicator_apply
+
+Hint: Omit it from the simp argument list.
+  [apply] simp
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+warning: MathFin/Choice/Portfolio/MarketSDF.lean:126:12: This simp argument is unused:
+  Set.indicator_apply
+
+Hint: Omit it from the simp argument list.
+  [apply] simp [hx]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+warning: MathFin/Choice/Performance/KellyNumeraire.lean:144:56: Unused tactic linter: `<;>` should be replaced with `;` or be removed.
+
+Note: This linter can be disabled with `set_option linter.unusedTactic false`
+warning: MathFin/Choice/Performance/KellyNumeraire.lean:144:60: Unused tactic linter: `ring` does nothing.
+
+Note: This linter can be disabled with `set_option linter.unusedTactic false`
+warning: MathFin/Choice/Performance/KellyNumeraire.lean:144:60: this tactic is never executed
+
+Note: This linter can be disabled with `set_option linter.unreachableTactic false`
+warning: MathFin/Choice/Performance/KellyNumeraire.lean:148:56: Unused tactic linter: `<;>` should be replaced with `;` or be removed.
+
+Note: This linter can be disabled with `set_option linter.unusedTactic false`
+warning: MathFin/Choice/Performance/KellyNumeraire.lean:148:56: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+warning: MathFin/Choice/Utility/MarketMarginalUtility.lean:156:4: `simp` already closes the goal
+
+Hint: Use `simp` instead of `simpa`:
+  [apply] simp
+
+Note: This linter can be disabled with `set_option linter.unnecessarySimpa false`
+warning: MathFin/Choice/Utility/MarketMarginalUtility.lean:184:0: unclosed sections or namespaces; expected: '
+
+end Market
+
+end MathFin'
+
+Note: This linter can be disabled with `set_option linter.style.missingEnd false`
+warning: MathFin/Markets/DeFi/ConstantProductAMM.lean:2:0: * `This file adapts`:
+Copyright line should start with 'Copyright (c) YYYY'
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Markets/DeFi/ConstantProductAMM.lean:2:51: * `constant-product AMM**`:
+Copyright line should end with '. All rights reserved.'
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Markets/DeFi/ConstantProductAMM.lean:4:0: * `
+  Daniele Pusceddu and Massimo Bartoletti, "Formalizing Automated Market
+  Makers in the Lean 4 Theorem Prover", OASIcs FMBC 2024 (5th
+  International Workshop on Formal Methods for Blockchains).
+  <https://doi.org/10.4230/OASIcs.FMBC.2024.5>
+  Companion code: <https://github.com/dpusceddu/lean4-amm>
+
+and the underlying theory paper they cite:
+
+  Massimo Bartoletti, James Chiang, and Alberto Lluch-Lafuente, "A theory
+  of Automated Market Makers in DeFi", LMCS 2022.
+
+Our implementation differs from Pusceddu-Bartoletti's in that we use
+**plain real reserves** (`ℝ` with positivity hypotheses) rather than
+Lean's `PReal` (strictly-positive-reals subtype) machinery, and we model
+**a single AMM pair** rather than their full multi-AMM blockchain state
+abstraction. The mathematical content (constant-product invariant + swap
+output formula + invariant preservation + arbitrage gain) is adapted
+from their work.
+
+Author of this MathFin Lean 4 adaptation: Raphael Coelho.
+Original mathematical framework: Bartoletti-Chiang-Lluch-Lafuente (2022),Pusceddu-Bartoletti Lean formalisation (2024).
+Copyright (c) 2026 Raphael Coelho (this adaptation).
+Mathematical content © Bartoletti et al. / Pusceddu-Bartoletti, used here
+under academic fair use for derivative work with attribution. The
+original Pusceddu-Bartoletti GitHub repository has no explicit license at
+the time of writing; this adaptation does not copy any Lean source from
+that repo and uses only the published paper content.
+Released under Apache 2.0 license as described in the file LICENSE.`:
+If an authors line spans multiple lines, each line but the last must end with a trailing comma
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Markets/DeFi/ConstantProductAMM.lean:4:0: * `
+  Daniel`:
+The authors line should begin with 'Authors: '
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Markets/DeFi/ConstantProductAMM.lean:5:0: * `  `:
+Double spaces are not allowed.
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Markets/DeFi/ConstantProductAMM.lean:5:18: * ` and `:
+Please, do not use 'and'; use ',' instead.
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Markets/DeFi/ConstantProductAMM.lean:7:59: * `.`:
+Please, do not end the authors' line with a period.
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Markets/DeFi/ConstantProductAMM.lean:3:0: * `(Uniswap v2-style) from:`:
+Second copyright line should be "Released under Apache 2.0 license as described in the file LICENSE."
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Markets/DeFi/LPContract.lean:94:66: `if_pos` has been deprecated: Use `ite_eq_left` instead
+
+Hint: Replace the deprecated name:
+  i̵f̵_̵p̵o̵s̵i̲t̲e̲_̲e̲q̲_̲l̲e̲f̲t̲
+warning: MathFin/Markets/DeFi/LPContract.lean:97:8: `if_neg` has been deprecated: Use `ite_eq_right` instead
+
+Hint: Replace the deprecated name:
+  i̵f̵_̵n̵e̵g̵i̲t̲e̲_̲e̲q̲_̲r̲i̲g̲h̲t̲
+warning: MathFin/Markets/DeFi/LPContract.lean:98:4: `push_neg` has been deprecated. Prefer using `push Not` instead.
+If you'd rather continue using `push_neg` in your project, you can implement it as follows:
+```
+open Lean.Parser.Tactic in
+macro "push_neg" cfg:optConfig loc:(location)? : tactic =>
+  `(tactic| push $cfg:optConfig Not $[$loc]?)
+```
+warning: MathFin/Markets/DeFi/LPContract.lean:101:46: `if_pos` has been deprecated: Use `ite_eq_left` instead
+
+Hint: Replace the deprecated name:
+  i̵f̵_̵p̵o̵s̵i̲t̲e̲_̲e̲q̲_̲l̲e̲f̲t̲
+warning: MathFin/Markets/DeFi/LPContract.lean:105:10: `if_neg` has been deprecated: Use `ite_eq_right` instead
+
+Hint: Replace the deprecated name:
+  i̵f̵_̵n̵e̵g̵i̲t̲e̲_̲e̲q̲_̲r̲i̲g̲h̲t̲
+warning: MathFin/Markets/DeFi/LPContract.lean:106:6: `push_neg` has been deprecated. Prefer using `push Not` instead.
+If you'd rather continue using `push_neg` in your project, you can implement it as follows:
+```
+open Lean.Parser.Tactic in
+macro "push_neg" cfg:optConfig loc:(location)? : tactic =>
+  `(tactic| push $cfg:optConfig Not $[$loc]?)
+```
+warning: MathFin/Models/ModelFree/CallPriceInterpolation.lean:228:8: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Models/ModelFree/CallPriceInterpolation.lean:237:10: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Models/ModelFree/CallPriceInterpolation.lean:238:10: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Models/ModelFree/CallPriceInterpolation.lean:242:8: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Models/ModelFree/CallPriceInterpolation.lean:460:8: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+info: MathFin/Models/BlackScholes/ShoutFloorMonotonicity.lean:131:30: Try this:
+  [apply] ring_nf
+  
+  The `ring` tactic failed to close the goal. Use `ring_nf` to obtain a normal form.
+    
+  Note that `ring` works primarily in *commutative* rings. If you have a noncommutative ring, abelian group or module, consider using `noncomm_ring`, `abel` or `module` instead.
+warning: MathFin/Blueprint.lean:729:100: This line exceeds the 100 character limit, please shorten it!
+
+Note: This linter can be disabled with `set_option linter.style.longLine false`
+warning: MathFin/Models/ModelFree/BlackFormTail.lean:45:0: Please, write a comment here or remove this line, but do not place empty lines within commands!
+Context:
+                                                      ↓
+  ⏎`0` as `k → +∞` iff `dpl k (w k)` tends to `-∞`. -/⏎⏎theorem blackForm_lower_bound_of_dpl_ge (w : ℝ → ℝ) (hw : ∀ k, 0 < w k) (M : ℝ) :⏎
+
+Note: This linter can be disabled with `set_option linter.style.emptyLine false`
+warning: MathFin/Models/ModelFree/BlackFormTail.lean:98:100: This line exceeds the 100 character limit, please shorten it!
+
+Note: This linter can be disabled with `set_option linter.style.longLine false`
+warning: MathFin/Models/ModelFree/BlackFormTail.lean:106:100: This line exceeds the 100 character limit, please shorten it!
+
+Note: This linter can be disabled with `set_option linter.style.longLine false`
+warning: MathFin/Models/ModelFree/BlackFormTail.lean:110:100: This line exceeds the 100 character limit, please shorten it!
+
+Note: This linter can be disabled with `set_option linter.style.longLine false`
+warning: MathFin.lean:11:100: This line exceeds the 100 character limit, please shorten it!
+
+Note: This linter can be disabled with `set_option linter.style.longLine false`
+warning: MathFin.lean:13:100: This line exceeds the 100 character limit, please shorten it!
+
+Note: This linter can be disabled with `set_option linter.style.longLine false`
+warning: MathFin.lean:14:100: This line exceeds the 100 character limit, please shorten it!
+
+Note: This linter can be disabled with `set_option linter.style.longLine false`
+warning: MathFin.lean:15:100: This line exceeds the 100 character limit, please shorten it!
+
+Note: This linter can be disabled with `set_option linter.style.longLine false`
+warning: MathFin/AxiomAuditGen.lean: imports `Mathlib.MeasureTheory.Function.ConditionalExpectation.Basic` from package `mathlib`, which is designed for use with the module system; consider adding `module` to the start of this file
+warning: MathFin/AxiomAuditGen.lean: imports `Mathlib.Probability.ConditionalExpectation` from package `mathlib`, which is designed for use with the module system; consider adding `module` to the start of this file
+warning: MathFin/AxiomAuditGen.lean: imports `Mathlib.Probability.Martingale.Convergence` from package `mathlib`, which is designed for use with the module system; consider adding `module` to the start of this file
+warning: MathFin/AxiomAuditGen.lean: imports `Mathlib.Probability.Martingale.OptionalStopping` from package `mathlib`, which is designed for use with the module system; consider adding `module` to the start of this file
+warning: MathFin/AxiomAuditGen.lean: imports `Mathlib.Probability.Martingale.Upcrossing` from package `mathlib`, which is designed for use with the module system; consider adding `module` to the start of this file
+warning: MathFin/AxiomAuditGen.lean:34:0: The module doc-string for a file should be the first command after the imports
+and any necessary `set_option` commands.
+Please, add a module doc-string (`/-! ... -/`) before `set_option linter.style.longLine false`.
+
+Hint: Type `m(odule docstring) + [tab]` to insert a template via snippet.
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+Build completed successfully (9887 jobs).
+The following changes will be made automatically:
+./MathFin/Models/ModelFree/BlackFormTail.lean:
+  remove #[public import Mathlib, public import MathFin.Models.ModelFree.CalendarArbitrage]
+  add #[public import Mathlib.Tactic.ReduceModChar, public import Mathlib.Tactic.Basify, public import Mathlib.RingTheory.WittVector.IsPoly, public import Mathlib.Tactic.ENatToNat]
+Successfully applied 1 suggestions.
+[regen] imports after the shake:
+public import MathFin.Models.LocalVol.ForwardSmile
+public import MathFin.Models.ModelFree.CallPriceFunction
+public import MathFin.Models.ModelFree.SVI.BlackSmile
+public import MathFin.Models.ModelFree.SVI.TailCondition
+public import Mathlib.RingTheory.WittVector.IsPoly
+public import Mathlib.Tactic.Basify
+public import Mathlib.Tactic.ENatToNat
+public import Mathlib.Tactic.ReduceModChar
+warning: MathFin/Probability/Laws/FiniteWeights.lean:10:0: 'Mathlib.MeasureTheory.Measure.Dirac' has been deprecated: please replace this import by
+
+import Mathlib.MeasureTheory.Measure.Dirac.Def
+import Mathlib.MeasureTheory.Measure.Dirac.Basic
+warning: MathFin/Probability/Discrete/DiscreteIto.lean:2:0: * `This file is a *`:
+Copyright line should start with 'Copyright (c) YYYY'
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Discrete/DiscreteIto.lean:2:52: * `he Lean source snippet`:
+Copyright line should end with '. All rights reserved.'
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Discrete/DiscreteIto.lean:4:0: * `
+  Tamás Nagy, "From Itô to Black–Scholes: A Machine-Verified Derivation in
+  Lean 4", SSRN Working Paper 6336503, March 2026.
+  <https://papers.ssrn.com/sol3/papers.cfm?abstract_id=6336503>
+
+The theorem statement and proof skeleton (telescoping via
+`Finset.sum_range_sub` + per-summand Taylor decomposition +
+`Finset.sum_add_distrib`) are adapted directly from Nagy's published Lean
+code. Modifications: renamed `taylor_remainder` → `discreteTaylorRemainder`
+(camelCase convention), factored `(1/2)` out of the second sum, added
+type ascription, restructured the proof to use `Finset.sum_congr` for the
+per-summand rewrite. Mathematical content is unchanged.
+
+Author of this MathFin Lean 4 adaptation: Raphael Coelho.
+Original Lean derivation: Tamás Nagy (SSRN 6336503, 2026).
+Copyright (c) 2026 Raphael Coelho (this adaptation).
+Mathematical content and original Lean code © Tamás Nagy 2026, used here
+under academic fair use for derivative work with attribution.
+Released under Apache 2.0 license as described in the file LICENSE.`:
+If an authors line spans multiple lines, each line but the last must end with a trailing comma
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Discrete/DiscreteIto.lean:4:0: * `
+  Tamás `:
+The authors line should begin with 'Authors: '
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Discrete/DiscreteIto.lean:5:0: * `  `:
+Double spaces are not allowed.
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Discrete/DiscreteIto.lean:9:21: * ` and `:
+Please, do not use 'and'; use ',' instead.
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Discrete/DiscreteIto.lean:6:49: * `.`:
+Please, do not end the authors' line with a period.
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Discrete/DiscreteIto.lean:3:0: * `published in Section 3 ("The Discrete Itô Formula") of:`:
+Second copyright line should be "Released under Apache 2.0 license as described in the file LICENSE."
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Brownian/Ito/ItoLemma.lean:2:0: * `This file builds`:
+Copyright line should start with 'Copyright (c) YYYY'
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Brownian/Ito/ItoLemma.lean:3:49: * `uctural drift formula*`:
+Copyright line should end with '. All rights reserved.'
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Brownian/Ito/ItoLemma.lean:4:70: * `requires the Taylor-remainder bound + simple-process density argument,which is gated on Mathlib's Itô-integral completeness (currently
+incomplete; see `docs/bridges.md`).
+
+The structural drift formula — `μ_X · f' + (1/2) σ_X² · f''` — is the
+*per-unit-time* coefficient of `dt` in `df(X_t)` and is everything you
+need for the canonical applications (GBM log-drift, BS PDE derivation).
+It is also what Nagy uses downstream (his §5).
+
+Adapted from Theorem 5.1 ("Itô's Lemma") and Theorem 5.2 ("GBM Drift") of:
+
+  Tamás Nagy, "From Itô to Black–Scholes: A Machine-Verified Derivation in
+  Lean 4", SSRN Working Paper 6336503, March 2026.
+  <https://papers.ssrn.com/sol3/papers.cfm?abstract_id=6336503>
+
+Author of this MathFin Lean 4 adaptation: Raphael Coelho.
+Original Lean derivation: Tamás Nagy (SSRN 6336503, 2026).
+Copyright (c) 2026 Raphael Coelho (this adaptation).
+Mathematical content and original Lean code © Tamás Nagy 2026, used here
+under academic fair use for derivative work with attribution.
+Released under Apache 2.0 license as described in the file LICENSE.`:
+If an authors line spans multiple lines, each line but the last must end with a trailing comma
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Brownian/Ito/ItoLemma.lean:4:70: * `requires `:
+The authors line should begin with 'Authors: '
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Brownian/Ito/ItoLemma.lean:14:74: * `  `:
+Double spaces are not allowed.
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Brownian/Ito/ItoLemma.lean:10:46: * ` and `:
+Please, do not use 'and'; use ',' instead.
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Brownian/Ito/ItoLemma.lean:7:27: * `.`:
+Please, do not end the authors' line with a period.
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Brownian/Ito/ItoLemma.lean:3:72: * `for `f(X_t)` when `X_t` is an Itô process. The full L²-limit Itô lemma`:
+Second copyright line should be "Released under Apache 2.0 license as described in the file LICENSE."
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Gaussian/WeakForwardUniqueness.lean:170:2: Try this: 
+  haveI̵
+
+The goal is a proposition, so `have` is preferred over `haveI`.
+The difference between `have` and `haveI` is that `haveI` inlines the value.
+But this is not relevant for proofs because of proof irrelevance.
+
+Note: This linter can be disabled with `set_option linter.style.haveILetI false`
+warning: MathFin/Pricing/FTAP/FTAPTwoState.lean:2:0: * `This file is a *`:
+Copyright line should start with 'Copyright (c) YYYY'
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Pricing/FTAP/FTAPTwoState.lean:2:44: * `sed on Section 7 ("The`:
+Copyright line should end with '. All rights reserved.'
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Pricing/FTAP/FTAPTwoState.lean:4:0: * `
+  Tamás Nagy, "From Itô to Black–Scholes: A Machine-Verified Derivation in
+  Lean 4", SSRN Working Paper 6336503, March 2026.
+  <https://papers.ssrn.com/sol3/papers.cfm?abstract_id=6336503>
+
+Theorem 7.1 (forward FTAP `EMM ⟹ no arbitrage`), Theorem 7.2 (signs of
+no-arb implies opposite-sign components), and Theorem 7.3 (explicit EMM
+construction from sign data) are adapted from Nagy's Lean 4 snippets in
+the paper, restricted to the one-period, one-asset, two-state case for
+concreteness. The general finite-state FTAP — both directions, multiple
+assets — is in `Pricing/FTAP/FTAPMultiState.lean`.
+
+Author of this MathFin Lean 4 adaptation: Raphael Coelho.
+Original Lean derivation: Tamás Nagy (SSRN 6336503, 2026).
+Copyright (c) 2026 Raphael Coelho (this adaptation).
+Mathematical content and original Lean code © Tamás Nagy 2026, used here
+under academic fair use for derivative work with attribution.
+Released under Apache 2.0 license as described in the file LICENSE.`:
+If an authors line spans multiple lines, each line but the last must end with a trailing comma
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Pricing/FTAP/FTAPTwoState.lean:4:0: * `
+  Tamás `:
+The authors line should begin with 'Authors: '
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Pricing/FTAP/FTAPTwoState.lean:5:0: * `  `:
+Double spaces are not allowed.
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Pricing/FTAP/FTAPTwoState.lean:10:41: * ` and `:
+Please, do not use 'and'; use ',' instead.
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Pricing/FTAP/FTAPTwoState.lean:6:49: * `.`:
+Please, do not end the authors' line with a period.
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Pricing/FTAP/FTAPTwoState.lean:3:0: * `Fundamental Theorem of Asset Pricing") of:`:
+Second copyright line should be "Released under Apache 2.0 license as described in the file LICENSE."
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Pricing/FTAP/NoArbitrageLocal.lean:100:20: This simp argument is unused:
+  Set.indicator_apply
+
+Hint: Omit it from the simp argument list.
+  [apply] simp [truncation, h]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+warning: MathFin/Pricing/FTAP/NoArbitrageLocal.lean:104:20: This simp argument is unused:
+  Set.indicator_apply
+
+Hint: Omit it from the simp argument list.
+  [apply] simp [truncation, h]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+warning: MathFin/Pricing/FTAP/NoArbitrageLocal.lean:177:6: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Pricing/FTAP/NoArbitrageLocal.lean:258:6: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Pricing/FTAP/NoArbitrageLocal.lean:270:6: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Pricing/FTAP/NoArbitrageLocal.lean:281:6: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Pricing/FTAP/NoArbitrageLocal.lean:288:4: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Pricing/DiscreteMarket.lean:118:2: Try this: 
+  haveI̵
+
+The goal is a proposition, so `have` is preferred over `haveI`.
+The difference between `have` and `haveI` is that `haveI` inlines the value.
+But this is not relevant for proofs because of proof irrelevance.
+
+Note: This linter can be disabled with `set_option linter.style.haveILetI false`
+warning: MathFin/Pricing/DiscreteMarket.lean:122:6: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Pricing/DiscreteMarket.lean:133:2: Try this: 
+  haveI̵
+
+The goal is a proposition, so `have` is preferred over `haveI`.
+The difference between `have` and `haveI` is that `haveI` inlines the value.
+But this is not relevant for proofs because of proof irrelevance.
+
+Note: This linter can be disabled with `set_option linter.style.haveILetI false`
+warning: MathFin/Pricing/DiscreteMarket.lean:137:6: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Pricing/DiscreteMarket.lean:167:2: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Pricing/DiscreteMarket.lean:177:56: This simp argument is unused:
+  min_assoc
+
+Hint: Omit it from the simp argument list.
+  [apply] simp [Market.deflated, toMarket, discreteAssets, hfl]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+warning: MathFin/Pricing/OneDateMarket.lean:230:2: Try this: 
+  haveI̵
+
+The goal is a proposition, so `have` is preferred over `haveI`.
+The difference between `have` and `haveI` is that `haveI` inlines the value.
+But this is not relevant for proofs because of proof irrelevance.
+
+Note: This linter can be disabled with `set_option linter.style.haveILetI false`
+warning: MathFin/Pricing/OneDateMarket.lean:233:63: Unused tactic linter: `<;>` should be replaced with `;` or be removed.
+
+Note: This linter can be disabled with `set_option linter.unusedTactic false`
+warning: MathFin/Pricing/OneDateMarket.lean:236:74: Unused tactic linter: `<;>` should be replaced with `;` or be removed.
+
+Note: This linter can be disabled with `set_option linter.unusedTactic false`
+warning: MathFin/Pricing/OneDateMarket.lean:233:63: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+warning: MathFin/Pricing/OneDateMarket.lean:236:74: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+warning: MathFin/Models/Bachelier/BachelierGreeks.lean:62:50: Unused tactic linter: `<;>` should be replaced with `;` or be removed.
+
+Note: This linter can be disabled with `set_option linter.unusedTactic false`
+warning: MathFin/Models/Bachelier/BachelierGreeks.lean:62:50: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+warning: MathFin/Models/Bachelier/BachelierGreeks.lean:78:50: Unused tactic linter: `<;>` should be replaced with `;` or be removed.
+
+Note: This linter can be disabled with `set_option linter.unusedTactic false`
+warning: MathFin/Models/Bachelier/BachelierGreeks.lean:78:50: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+warning: MathFin/Models/Bachelier/BachelierGreeks.lean:114:66: Unused tactic linter: `<;>` should be replaced with `;` or be removed.
+
+Note: This linter can be disabled with `set_option linter.unusedTactic false`
+warning: MathFin/Models/Bachelier/BachelierGreeks.lean:114:66: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+warning: MathFin/Models/ModelFree/MarketCallPrice.lean:111:2: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Models/ModelFree/RoperConverse.lean:179:6: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Models/ModelFree/RoperConverse.lean:185:6: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+info: MathFin/Models/Binomial/Model.lean:346:2: Try these:
+  [apply] [grind
+    =] for pattern: [@HAdd.hAdd `[ℝ] `[ℝ] `[ℝ] `[instHAdd] (@HMul.hMul `[ℝ] `[ℝ] `[ℝ] `[instHMul] (crrUpProb #3 #2 #1) #3) (@HMul.hMul `[ℝ] `[ℝ] `[ℝ] `[instHMul] (@HSub.hSub `[ℝ] `[ℝ] `[ℝ] `[instHSub] `[1] (crrUpProb #3 #2 #1)) #2)]
+  [apply] [grind .] for pattern: [crrUpProb #3 #2 #1]
+  [apply] [grind →] for pattern: [BinomialNoArb #3 #2 #1]
+warning: MathFin/Models/Binomial/American.lean:102:27: `Set.setOf_true` has been deprecated: Use `Set.ofPred_true` instead
+
+Hint: Replace the deprecated name:
+  S̵e̵t̵.̵s̵e̵t̵O̵f̵_̵t̵r̵u̵e̵S̲e̲t̲.̲o̲f̲P̲r̲e̲d̲_̲t̲r̲u̲e̲
+warning: MathFin/Models/BlackScholes/BlackScholesPhysical.lean:251:23: This simp argument is unused:
+  List.nil_append
+
+Hint: Omit it from the simp argument list.
+  [apply] simp only [geomAsianCall, Contract.obsList, Payoff.obsList, obsList_obsProd, List.append_nil, List.map_ofFn,
+    List.mem_ofFn] at hp
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+warning: MathFin/Models/Rates/VasicekMarket.lean:114:38: `simp` is a flexible tactic modifying `⊢`. Try `simp?` and use the suggested `simp only [...]`. Alternatively, use `suffices` to explicitly state the simplified form.
+
+Note: This linter can be disabled with `set_option linter.flexible false`
+info: MathFin/Models/Rates/VasicekMarket.lean:114:38: Try this:
+  [apply] simp only [NNReal.coe_zero, lt_self_iff_false, not_false_eq_true, Set.Ioc_eq_empty, Measure.restrict_empty,
+    ae_zero]
+info: MathFin/Models/Rates/VasicekMarket.lean:114:44: `exact Filter.eventually_bot`
+modifies the current goal, which was modified by the flexible tactic `simp` on line 114!
+warning: MathFin/Models/BlackScholes/BlackScholesSelfFinancing.lean:239:6: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Models/Binomial/Market.lean:181:2: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Models/Binomial/Market.lean:191:4: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Models/ModelFree/SVI/SignatureProgram.lean:64:2: `simp [variationProgram, SignProgram.eval_bind, SignProgram.eval, symbolicCoeffList,
+    Polynomial.signVariations, coeffList_of_ne_zero hne, natDegree_eq_of_degree_eq_some hd,
+    List.map_map, hc]` is a flexible tactic modifying `⊢`. Try `simp?` and use the suggested `simp only [...]`. Alternatively, use `suffices` to explicitly state the simplified form.
+
+Note: This linter can be disabled with `set_option linter.flexible false`
+info: MathFin/Models/ModelFree/SVI/SignatureProgram.lean:67:2: `refine Eq.trans ?_ (List.signVariations_map_sign _)`
+modifies the current goal, which was modified by the flexible tactic `simp` on line 64!
+warning: MathFin/Models/BlackScholes/American/AmericanPutMarketBound.lean:70:2: Try this: 
+  haveI̵
+
+The goal is a proposition, so `have` is preferred over `haveI`.
+The difference between `have` and `haveI` is that `haveI` inlines the value.
+But this is not relevant for proofs because of proof irrelevance.
+
+Note: This linter can be disabled with `set_option linter.style.haveILetI false`
+warning: MathFin/Models/Rates/HJMBond.lean:106:64: Unused tactic linter: `<;>` should be replaced with `;` or be removed.
+
+Note: This linter can be disabled with `set_option linter.unusedTactic false`
+warning: MathFin/Models/Rates/HJMBond.lean:106:64: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+warning: MathFin/Risk/ExpectedShortfall.lean:434:37: This simp argument is unused:
+  Pi.single_apply
+
+Hint: Omit it from the simp argument list.
+  [apply] simp [h]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+warning: MathFin/Risk/CompoundPoissonCVaR.lean:78:36: `MeasureTheory.integral_finset_sum` has been deprecated: Use `MeasureTheory.integral_finsetSum` instead
+
+Hint: Replace the deprecated name:
+  integral_finset_̵s̵S̲um
+warning: MathFin/Risk/EntropicRisk.lean:157:63: Variable name `a` is not explicitly referenced.
+
+Hint: The binding can be removed (if unused) or named `_` (if used implicitly). Alternatively, prefix the name with `_` to silence this warning:
+  [apply] _a
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+warning: MathFin/Risk/EntropicRisk.lean:157:65: Variable name `b` is not explicitly referenced.
+
+Hint: The binding can be removed (if unused) or named `_` (if used implicitly). Alternatively, prefix the name with `_` to silence this warning:
+  [apply] _b
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+warning: MathFin/Choice/Utility/StatePriceDensity.lean:151:4: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Choice/Utility/StatePriceDensity.lean:168:67: Unused tactic linter: `<;>` should be replaced with `;` or be removed.
+
+Note: This linter can be disabled with `set_option linter.unusedTactic false`
+warning: MathFin/Choice/Utility/StatePriceDensity.lean:168:67: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+warning: MathFin/Choice/Portfolio/MarketSDF.lean:125:12: This simp argument is unused:
+  Set.indicator_apply
+
+Hint: Omit it from the simp argument list.
+  [apply] simp
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+warning: MathFin/Choice/Portfolio/MarketSDF.lean:126:12: This simp argument is unused:
+  Set.indicator_apply
+
+Hint: Omit it from the simp argument list.
+  [apply] simp [hx]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+warning: MathFin/Choice/Performance/KellyNumeraire.lean:144:56: Unused tactic linter: `<;>` should be replaced with `;` or be removed.
+
+Note: This linter can be disabled with `set_option linter.unusedTactic false`
+warning: MathFin/Choice/Performance/KellyNumeraire.lean:144:60: Unused tactic linter: `ring` does nothing.
+
+Note: This linter can be disabled with `set_option linter.unusedTactic false`
+warning: MathFin/Choice/Performance/KellyNumeraire.lean:144:60: this tactic is never executed
+
+Note: This linter can be disabled with `set_option linter.unreachableTactic false`
+warning: MathFin/Choice/Performance/KellyNumeraire.lean:148:56: Unused tactic linter: `<;>` should be replaced with `;` or be removed.
+
+Note: This linter can be disabled with `set_option linter.unusedTactic false`
+warning: MathFin/Choice/Performance/KellyNumeraire.lean:148:56: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+warning: MathFin/Choice/Utility/MarketMarginalUtility.lean:156:4: `simp` already closes the goal
+
+Hint: Use `simp` instead of `simpa`:
+  [apply] simp
+
+Note: This linter can be disabled with `set_option linter.unnecessarySimpa false`
+warning: MathFin/Choice/Utility/MarketMarginalUtility.lean:184:0: unclosed sections or namespaces; expected: '
+
+end Market
+
+end MathFin'
+
+Note: This linter can be disabled with `set_option linter.style.missingEnd false`
+warning: MathFin/Markets/DeFi/ConstantProductAMM.lean:2:0: * `This file adapts`:
+Copyright line should start with 'Copyright (c) YYYY'
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Markets/DeFi/ConstantProductAMM.lean:2:51: * `constant-product AMM**`:
+Copyright line should end with '. All rights reserved.'
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Markets/DeFi/ConstantProductAMM.lean:4:0: * `
+  Daniele Pusceddu and Massimo Bartoletti, "Formalizing Automated Market
+  Makers in the Lean 4 Theorem Prover", OASIcs FMBC 2024 (5th
+  International Workshop on Formal Methods for Blockchains).
+  <https://doi.org/10.4230/OASIcs.FMBC.2024.5>
+  Companion code: <https://github.com/dpusceddu/lean4-amm>
+
+and the underlying theory paper they cite:
+
+  Massimo Bartoletti, James Chiang, and Alberto Lluch-Lafuente, "A theory
+  of Automated Market Makers in DeFi", LMCS 2022.
+
+Our implementation differs from Pusceddu-Bartoletti's in that we use
+**plain real reserves** (`ℝ` with positivity hypotheses) rather than
+Lean's `PReal` (strictly-positive-reals subtype) machinery, and we model
+**a single AMM pair** rather than their full multi-AMM blockchain state
+abstraction. The mathematical content (constant-product invariant + swap
+output formula + invariant preservation + arbitrage gain) is adapted
+from their work.
+
+Author of this MathFin Lean 4 adaptation: Raphael Coelho.
+Original mathematical framework: Bartoletti-Chiang-Lluch-Lafuente (2022),Pusceddu-Bartoletti Lean formalisation (2024).
+Copyright (c) 2026 Raphael Coelho (this adaptation).
+Mathematical content © Bartoletti et al. / Pusceddu-Bartoletti, used here
+under academic fair use for derivative work with attribution. The
+original Pusceddu-Bartoletti GitHub repository has no explicit license at
+the time of writing; this adaptation does not copy any Lean source from
+that repo and uses only the published paper content.
+Released under Apache 2.0 license as described in the file LICENSE.`:
+If an authors line spans multiple lines, each line but the last must end with a trailing comma
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Markets/DeFi/ConstantProductAMM.lean:4:0: * `
+  Daniel`:
+The authors line should begin with 'Authors: '
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Markets/DeFi/ConstantProductAMM.lean:5:0: * `  `:
+Double spaces are not allowed.
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Markets/DeFi/ConstantProductAMM.lean:5:18: * ` and `:
+Please, do not use 'and'; use ',' instead.
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Markets/DeFi/ConstantProductAMM.lean:7:59: * `.`:
+Please, do not end the authors' line with a period.
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Markets/DeFi/ConstantProductAMM.lean:3:0: * `(Uniswap v2-style) from:`:
+Second copyright line should be "Released under Apache 2.0 license as described in the file LICENSE."
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Markets/DeFi/LPContract.lean:94:66: `if_pos` has been deprecated: Use `ite_eq_left` instead
+
+Hint: Replace the deprecated name:
+  i̵f̵_̵p̵o̵s̵i̲t̲e̲_̲e̲q̲_̲l̲e̲f̲t̲
+warning: MathFin/Markets/DeFi/LPContract.lean:97:8: `if_neg` has been deprecated: Use `ite_eq_right` instead
+
+Hint: Replace the deprecated name:
+  i̵f̵_̵n̵e̵g̵i̲t̲e̲_̲e̲q̲_̲r̲i̲g̲h̲t̲
+warning: MathFin/Markets/DeFi/LPContract.lean:98:4: `push_neg` has been deprecated. Prefer using `push Not` instead.
+If you'd rather continue using `push_neg` in your project, you can implement it as follows:
+```
+open Lean.Parser.Tactic in
+macro "push_neg" cfg:optConfig loc:(location)? : tactic =>
+  `(tactic| push $cfg:optConfig Not $[$loc]?)
+```
+warning: MathFin/Markets/DeFi/LPContract.lean:101:46: `if_pos` has been deprecated: Use `ite_eq_left` instead
+
+Hint: Replace the deprecated name:
+  i̵f̵_̵p̵o̵s̵i̲t̲e̲_̲e̲q̲_̲l̲e̲f̲t̲
+warning: MathFin/Markets/DeFi/LPContract.lean:105:10: `if_neg` has been deprecated: Use `ite_eq_right` instead
+
+Hint: Replace the deprecated name:
+  i̵f̵_̵n̵e̵g̵i̲t̲e̲_̲e̲q̲_̲r̲i̲g̲h̲t̲
+warning: MathFin/Markets/DeFi/LPContract.lean:106:6: `push_neg` has been deprecated. Prefer using `push Not` instead.
+If you'd rather continue using `push_neg` in your project, you can implement it as follows:
+```
+open Lean.Parser.Tactic in
+macro "push_neg" cfg:optConfig loc:(location)? : tactic =>
+  `(tactic| push $cfg:optConfig Not $[$loc]?)
+```
+warning: MathFin/Models/ModelFree/CallPriceInterpolation.lean:228:8: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Models/ModelFree/CallPriceInterpolation.lean:237:10: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Models/ModelFree/CallPriceInterpolation.lean:238:10: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Models/ModelFree/CallPriceInterpolation.lean:242:8: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Models/ModelFree/CallPriceInterpolation.lean:460:8: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+info: MathFin/Models/BlackScholes/ShoutFloorMonotonicity.lean:131:30: Try this:
+  [apply] ring_nf
+  
+  The `ring` tactic failed to close the goal. Use `ring_nf` to obtain a normal form.
+    
+  Note that `ring` works primarily in *commutative* rings. If you have a noncommutative ring, abelian group or module, consider using `noncomm_ring`, `abel` or `module` instead.
+warning: MathFin/Blueprint.lean:729:100: This line exceeds the 100 character limit, please shorten it!
+
+Note: This linter can be disabled with `set_option linter.style.longLine false`
+warning: MathFin/Models/ModelFree/BlackFormTail.lean:47:0: Please, write a comment here or remove this line, but do not place empty lines within commands!
+Context:
+                                                      ↓
+  ⏎`0` as `k → +∞` iff `dpl k (w k)` tends to `-∞`. -/⏎⏎theorem blackForm_lower_bound_of_dpl_ge (w : ℝ → ℝ) (hw : ∀ k, 0 < w k) (M : ℝ) :⏎
+
+Note: This linter can be disabled with `set_option linter.style.emptyLine false`
+warning: MathFin/Models/ModelFree/BlackFormTail.lean:100:100: This line exceeds the 100 character limit, please shorten it!
+
+Note: This linter can be disabled with `set_option linter.style.longLine false`
+warning: MathFin/Models/ModelFree/BlackFormTail.lean:108:100: This line exceeds the 100 character limit, please shorten it!
+
+Note: This linter can be disabled with `set_option linter.style.longLine false`
+warning: MathFin/Models/ModelFree/BlackFormTail.lean:112:100: This line exceeds the 100 character limit, please shorten it!
+
+Note: This linter can be disabled with `set_option linter.style.longLine false`
+warning: MathFin.lean:11:100: This line exceeds the 100 character limit, please shorten it!
+
+Note: This linter can be disabled with `set_option linter.style.longLine false`
+warning: MathFin.lean:13:100: This line exceeds the 100 character limit, please shorten it!
+
+Note: This linter can be disabled with `set_option linter.style.longLine false`
+warning: MathFin.lean:14:100: This line exceeds the 100 character limit, please shorten it!
+
+Note: This linter can be disabled with `set_option linter.style.longLine false`
+warning: MathFin.lean:15:100: This line exceeds the 100 character limit, please shorten it!
+
+Note: This linter can be disabled with `set_option linter.style.longLine false`
+warning: MathFin/AxiomAuditGen.lean: imports `Mathlib.MeasureTheory.Function.ConditionalExpectation.Basic` from package `mathlib`, which is designed for use with the module system; consider adding `module` to the start of this file
+warning: MathFin/AxiomAuditGen.lean: imports `Mathlib.Probability.ConditionalExpectation` from package `mathlib`, which is designed for use with the module system; consider adding `module` to the start of this file
+warning: MathFin/AxiomAuditGen.lean: imports `Mathlib.Probability.Martingale.Convergence` from package `mathlib`, which is designed for use with the module system; consider adding `module` to the start of this file
+warning: MathFin/AxiomAuditGen.lean: imports `Mathlib.Probability.Martingale.OptionalStopping` from package `mathlib`, which is designed for use with the module system; consider adding `module` to the start of this file
+warning: MathFin/AxiomAuditGen.lean: imports `Mathlib.Probability.Martingale.Upcrossing` from package `mathlib`, which is designed for use with the module system; consider adding `module` to the start of this file
+warning: MathFin/AxiomAuditGen.lean:34:0: The module doc-string for a file should be the first command after the imports
+and any necessary `set_option` commands.
+Please, add a module doc-string (`/-! ... -/`) before `set_option linter.style.longLine false`.
+
+Hint: Type `m(odule docstring) + [tab]` to insert a template via snippet.
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+Build completed successfully (4864 jobs).
+Running linter on specified modules: [MathFin]
+-- Linting passed for MathFin.
+wrote MathFin/AxiomAuditGen.lean (1094 guards)
+wrote /app/formalization.yaml
+warning: MathFin/Probability/Laws/FiniteWeights.lean:10:0: 'Mathlib.MeasureTheory.Measure.Dirac' has been deprecated: please replace this import by
+
+import Mathlib.MeasureTheory.Measure.Dirac.Def
+import Mathlib.MeasureTheory.Measure.Dirac.Basic
+warning: MathFin/Probability/Discrete/DiscreteIto.lean:2:0: * `This file is a *`:
+Copyright line should start with 'Copyright (c) YYYY'
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Discrete/DiscreteIto.lean:2:52: * `he Lean source snippet`:
+Copyright line should end with '. All rights reserved.'
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Discrete/DiscreteIto.lean:4:0: * `
+  Tamás Nagy, "From Itô to Black–Scholes: A Machine-Verified Derivation in
+  Lean 4", SSRN Working Paper 6336503, March 2026.
+  <https://papers.ssrn.com/sol3/papers.cfm?abstract_id=6336503>
+
+The theorem statement and proof skeleton (telescoping via
+`Finset.sum_range_sub` + per-summand Taylor decomposition +
+`Finset.sum_add_distrib`) are adapted directly from Nagy's published Lean
+code. Modifications: renamed `taylor_remainder` → `discreteTaylorRemainder`
+(camelCase convention), factored `(1/2)` out of the second sum, added
+type ascription, restructured the proof to use `Finset.sum_congr` for the
+per-summand rewrite. Mathematical content is unchanged.
+
+Author of this MathFin Lean 4 adaptation: Raphael Coelho.
+Original Lean derivation: Tamás Nagy (SSRN 6336503, 2026).
+Copyright (c) 2026 Raphael Coelho (this adaptation).
+Mathematical content and original Lean code © Tamás Nagy 2026, used here
+under academic fair use for derivative work with attribution.
+Released under Apache 2.0 license as described in the file LICENSE.`:
+If an authors line spans multiple lines, each line but the last must end with a trailing comma
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Discrete/DiscreteIto.lean:4:0: * `
+  Tamás `:
+The authors line should begin with 'Authors: '
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Discrete/DiscreteIto.lean:5:0: * `  `:
+Double spaces are not allowed.
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Discrete/DiscreteIto.lean:9:21: * ` and `:
+Please, do not use 'and'; use ',' instead.
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Discrete/DiscreteIto.lean:6:49: * `.`:
+Please, do not end the authors' line with a period.
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Discrete/DiscreteIto.lean:3:0: * `published in Section 3 ("The Discrete Itô Formula") of:`:
+Second copyright line should be "Released under Apache 2.0 license as described in the file LICENSE."
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Brownian/Ito/ItoLemma.lean:2:0: * `This file builds`:
+Copyright line should start with 'Copyright (c) YYYY'
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Brownian/Ito/ItoLemma.lean:3:49: * `uctural drift formula*`:
+Copyright line should end with '. All rights reserved.'
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Brownian/Ito/ItoLemma.lean:4:70: * `requires the Taylor-remainder bound + simple-process density argument,which is gated on Mathlib's Itô-integral completeness (currently
+incomplete; see `docs/bridges.md`).
+
+The structural drift formula — `μ_X · f' + (1/2) σ_X² · f''` — is the
+*per-unit-time* coefficient of `dt` in `df(X_t)` and is everything you
+need for the canonical applications (GBM log-drift, BS PDE derivation).
+It is also what Nagy uses downstream (his §5).
+
+Adapted from Theorem 5.1 ("Itô's Lemma") and Theorem 5.2 ("GBM Drift") of:
+
+  Tamás Nagy, "From Itô to Black–Scholes: A Machine-Verified Derivation in
+  Lean 4", SSRN Working Paper 6336503, March 2026.
+  <https://papers.ssrn.com/sol3/papers.cfm?abstract_id=6336503>
+
+Author of this MathFin Lean 4 adaptation: Raphael Coelho.
+Original Lean derivation: Tamás Nagy (SSRN 6336503, 2026).
+Copyright (c) 2026 Raphael Coelho (this adaptation).
+Mathematical content and original Lean code © Tamás Nagy 2026, used here
+under academic fair use for derivative work with attribution.
+Released under Apache 2.0 license as described in the file LICENSE.`:
+If an authors line spans multiple lines, each line but the last must end with a trailing comma
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Brownian/Ito/ItoLemma.lean:4:70: * `requires `:
+The authors line should begin with 'Authors: '
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Brownian/Ito/ItoLemma.lean:14:74: * `  `:
+Double spaces are not allowed.
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Brownian/Ito/ItoLemma.lean:10:46: * ` and `:
+Please, do not use 'and'; use ',' instead.
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Brownian/Ito/ItoLemma.lean:7:27: * `.`:
+Please, do not end the authors' line with a period.
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Brownian/Ito/ItoLemma.lean:3:72: * `for `f(X_t)` when `X_t` is an Itô process. The full L²-limit Itô lemma`:
+Second copyright line should be "Released under Apache 2.0 license as described in the file LICENSE."
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Probability/Gaussian/WeakForwardUniqueness.lean:170:2: Try this: 
+  haveI̵
+
+The goal is a proposition, so `have` is preferred over `haveI`.
+The difference between `have` and `haveI` is that `haveI` inlines the value.
+But this is not relevant for proofs because of proof irrelevance.
+
+Note: This linter can be disabled with `set_option linter.style.haveILetI false`
+warning: MathFin/Pricing/FTAP/FTAPTwoState.lean:2:0: * `This file is a *`:
+Copyright line should start with 'Copyright (c) YYYY'
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Pricing/FTAP/FTAPTwoState.lean:2:44: * `sed on Section 7 ("The`:
+Copyright line should end with '. All rights reserved.'
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Pricing/FTAP/FTAPTwoState.lean:4:0: * `
+  Tamás Nagy, "From Itô to Black–Scholes: A Machine-Verified Derivation in
+  Lean 4", SSRN Working Paper 6336503, March 2026.
+  <https://papers.ssrn.com/sol3/papers.cfm?abstract_id=6336503>
+
+Theorem 7.1 (forward FTAP `EMM ⟹ no arbitrage`), Theorem 7.2 (signs of
+no-arb implies opposite-sign components), and Theorem 7.3 (explicit EMM
+construction from sign data) are adapted from Nagy's Lean 4 snippets in
+the paper, restricted to the one-period, one-asset, two-state case for
+concreteness. The general finite-state FTAP — both directions, multiple
+assets — is in `Pricing/FTAP/FTAPMultiState.lean`.
+
+Author of this MathFin Lean 4 adaptation: Raphael Coelho.
+Original Lean derivation: Tamás Nagy (SSRN 6336503, 2026).
+Copyright (c) 2026 Raphael Coelho (this adaptation).
+Mathematical content and original Lean code © Tamás Nagy 2026, used here
+under academic fair use for derivative work with attribution.
+Released under Apache 2.0 license as described in the file LICENSE.`:
+If an authors line spans multiple lines, each line but the last must end with a trailing comma
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Pricing/FTAP/FTAPTwoState.lean:4:0: * `
+  Tamás `:
+The authors line should begin with 'Authors: '
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Pricing/FTAP/FTAPTwoState.lean:5:0: * `  `:
+Double spaces are not allowed.
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Pricing/FTAP/FTAPTwoState.lean:10:41: * ` and `:
+Please, do not use 'and'; use ',' instead.
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Pricing/FTAP/FTAPTwoState.lean:6:49: * `.`:
+Please, do not end the authors' line with a period.
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Pricing/FTAP/FTAPTwoState.lean:3:0: * `Fundamental Theorem of Asset Pricing") of:`:
+Second copyright line should be "Released under Apache 2.0 license as described in the file LICENSE."
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Pricing/FTAP/NoArbitrageLocal.lean:100:20: This simp argument is unused:
+  Set.indicator_apply
+
+Hint: Omit it from the simp argument list.
+  [apply] simp [truncation, h]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+warning: MathFin/Pricing/FTAP/NoArbitrageLocal.lean:104:20: This simp argument is unused:
+  Set.indicator_apply
+
+Hint: Omit it from the simp argument list.
+  [apply] simp [truncation, h]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+warning: MathFin/Pricing/FTAP/NoArbitrageLocal.lean:177:6: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Pricing/FTAP/NoArbitrageLocal.lean:258:6: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Pricing/FTAP/NoArbitrageLocal.lean:270:6: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Pricing/FTAP/NoArbitrageLocal.lean:281:6: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Pricing/FTAP/NoArbitrageLocal.lean:288:4: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Pricing/DiscreteMarket.lean:118:2: Try this: 
+  haveI̵
+
+The goal is a proposition, so `have` is preferred over `haveI`.
+The difference between `have` and `haveI` is that `haveI` inlines the value.
+But this is not relevant for proofs because of proof irrelevance.
+
+Note: This linter can be disabled with `set_option linter.style.haveILetI false`
+warning: MathFin/Pricing/DiscreteMarket.lean:122:6: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Pricing/DiscreteMarket.lean:133:2: Try this: 
+  haveI̵
+
+The goal is a proposition, so `have` is preferred over `haveI`.
+The difference between `have` and `haveI` is that `haveI` inlines the value.
+But this is not relevant for proofs because of proof irrelevance.
+
+Note: This linter can be disabled with `set_option linter.style.haveILetI false`
+warning: MathFin/Pricing/DiscreteMarket.lean:137:6: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Pricing/DiscreteMarket.lean:167:2: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Pricing/DiscreteMarket.lean:177:56: This simp argument is unused:
+  min_assoc
+
+Hint: Omit it from the simp argument list.
+  [apply] simp [Market.deflated, toMarket, discreteAssets, hfl]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+warning: MathFin/Pricing/OneDateMarket.lean:230:2: Try this: 
+  haveI̵
+
+The goal is a proposition, so `have` is preferred over `haveI`.
+The difference between `have` and `haveI` is that `haveI` inlines the value.
+But this is not relevant for proofs because of proof irrelevance.
+
+Note: This linter can be disabled with `set_option linter.style.haveILetI false`
+warning: MathFin/Pricing/OneDateMarket.lean:233:63: Unused tactic linter: `<;>` should be replaced with `;` or be removed.
+
+Note: This linter can be disabled with `set_option linter.unusedTactic false`
+warning: MathFin/Pricing/OneDateMarket.lean:236:74: Unused tactic linter: `<;>` should be replaced with `;` or be removed.
+
+Note: This linter can be disabled with `set_option linter.unusedTactic false`
+warning: MathFin/Pricing/OneDateMarket.lean:233:63: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+warning: MathFin/Pricing/OneDateMarket.lean:236:74: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+warning: MathFin/Models/Bachelier/BachelierGreeks.lean:62:50: Unused tactic linter: `<;>` should be replaced with `;` or be removed.
+
+Note: This linter can be disabled with `set_option linter.unusedTactic false`
+warning: MathFin/Models/Bachelier/BachelierGreeks.lean:62:50: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+warning: MathFin/Models/Bachelier/BachelierGreeks.lean:78:50: Unused tactic linter: `<;>` should be replaced with `;` or be removed.
+
+Note: This linter can be disabled with `set_option linter.unusedTactic false`
+warning: MathFin/Models/Bachelier/BachelierGreeks.lean:78:50: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+warning: MathFin/Models/Bachelier/BachelierGreeks.lean:114:66: Unused tactic linter: `<;>` should be replaced with `;` or be removed.
+
+Note: This linter can be disabled with `set_option linter.unusedTactic false`
+warning: MathFin/Models/Bachelier/BachelierGreeks.lean:114:66: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+warning: MathFin/Models/ModelFree/MarketCallPrice.lean:111:2: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Models/ModelFree/RoperConverse.lean:179:6: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Models/ModelFree/RoperConverse.lean:185:6: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+info: MathFin/Models/Binomial/Model.lean:346:2: Try these:
+  [apply] [grind
+    =] for pattern: [@HAdd.hAdd `[ℝ] `[ℝ] `[ℝ] `[instHAdd] (@HMul.hMul `[ℝ] `[ℝ] `[ℝ] `[instHMul] (crrUpProb #3 #2 #1) #3) (@HMul.hMul `[ℝ] `[ℝ] `[ℝ] `[instHMul] (@HSub.hSub `[ℝ] `[ℝ] `[ℝ] `[instHSub] `[1] (crrUpProb #3 #2 #1)) #2)]
+  [apply] [grind .] for pattern: [crrUpProb #3 #2 #1]
+  [apply] [grind →] for pattern: [BinomialNoArb #3 #2 #1]
+warning: MathFin/Models/Binomial/American.lean:102:27: `Set.setOf_true` has been deprecated: Use `Set.ofPred_true` instead
+
+Hint: Replace the deprecated name:
+  S̵e̵t̵.̵s̵e̵t̵O̵f̵_̵t̵r̵u̵e̵S̲e̲t̲.̲o̲f̲P̲r̲e̲d̲_̲t̲r̲u̲e̲
+warning: MathFin/Models/BlackScholes/BlackScholesPhysical.lean:251:23: This simp argument is unused:
+  List.nil_append
+
+Hint: Omit it from the simp argument list.
+  [apply] simp only [geomAsianCall, Contract.obsList, Payoff.obsList, obsList_obsProd, List.append_nil, List.map_ofFn,
+    List.mem_ofFn] at hp
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+warning: MathFin/Models/Rates/VasicekMarket.lean:114:38: `simp` is a flexible tactic modifying `⊢`. Try `simp?` and use the suggested `simp only [...]`. Alternatively, use `suffices` to explicitly state the simplified form.
+
+Note: This linter can be disabled with `set_option linter.flexible false`
+info: MathFin/Models/Rates/VasicekMarket.lean:114:38: Try this:
+  [apply] simp only [NNReal.coe_zero, lt_self_iff_false, not_false_eq_true, Set.Ioc_eq_empty, Measure.restrict_empty,
+    ae_zero]
+info: MathFin/Models/Rates/VasicekMarket.lean:114:44: `exact Filter.eventually_bot`
+modifies the current goal, which was modified by the flexible tactic `simp` on line 114!
+warning: MathFin/Models/BlackScholes/BlackScholesSelfFinancing.lean:239:6: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Models/Binomial/Market.lean:181:2: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Models/Binomial/Market.lean:191:4: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Models/ModelFree/SVI/SignatureProgram.lean:64:2: `simp [variationProgram, SignProgram.eval_bind, SignProgram.eval, symbolicCoeffList,
+    Polynomial.signVariations, coeffList_of_ne_zero hne, natDegree_eq_of_degree_eq_some hd,
+    List.map_map, hc]` is a flexible tactic modifying `⊢`. Try `simp?` and use the suggested `simp only [...]`. Alternatively, use `suffices` to explicitly state the simplified form.
+
+Note: This linter can be disabled with `set_option linter.flexible false`
+info: MathFin/Models/ModelFree/SVI/SignatureProgram.lean:67:2: `refine Eq.trans ?_ (List.signVariations_map_sign _)`
+modifies the current goal, which was modified by the flexible tactic `simp` on line 64!
+warning: MathFin/Models/BlackScholes/American/AmericanPutMarketBound.lean:70:2: Try this: 
+  haveI̵
+
+The goal is a proposition, so `have` is preferred over `haveI`.
+The difference between `have` and `haveI` is that `haveI` inlines the value.
+But this is not relevant for proofs because of proof irrelevance.
+
+Note: This linter can be disabled with `set_option linter.style.haveILetI false`
+warning: MathFin/Models/Rates/HJMBond.lean:106:64: Unused tactic linter: `<;>` should be replaced with `;` or be removed.
+
+Note: This linter can be disabled with `set_option linter.unusedTactic false`
+warning: MathFin/Models/Rates/HJMBond.lean:106:64: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+warning: MathFin/Risk/ExpectedShortfall.lean:434:37: This simp argument is unused:
+  Pi.single_apply
+
+Hint: Omit it from the simp argument list.
+  [apply] simp [h]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+warning: MathFin/Risk/CompoundPoissonCVaR.lean:78:36: `MeasureTheory.integral_finset_sum` has been deprecated: Use `MeasureTheory.integral_finsetSum` instead
+
+Hint: Replace the deprecated name:
+  integral_finset_̵s̵S̲um
+warning: MathFin/Risk/EntropicRisk.lean:157:63: Variable name `a` is not explicitly referenced.
+
+Hint: The binding can be removed (if unused) or named `_` (if used implicitly). Alternatively, prefix the name with `_` to silence this warning:
+  [apply] _a
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+warning: MathFin/Risk/EntropicRisk.lean:157:65: Variable name `b` is not explicitly referenced.
+
+Hint: The binding can be removed (if unused) or named `_` (if used implicitly). Alternatively, prefix the name with `_` to silence this warning:
+  [apply] _b
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+warning: MathFin/Choice/Utility/StatePriceDensity.lean:151:4: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Choice/Utility/StatePriceDensity.lean:168:67: Unused tactic linter: `<;>` should be replaced with `;` or be removed.
+
+Note: This linter can be disabled with `set_option linter.unusedTactic false`
+warning: MathFin/Choice/Utility/StatePriceDensity.lean:168:67: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+warning: MathFin/Choice/Portfolio/MarketSDF.lean:125:12: This simp argument is unused:
+  Set.indicator_apply
+
+Hint: Omit it from the simp argument list.
+  [apply] simp
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+warning: MathFin/Choice/Portfolio/MarketSDF.lean:126:12: This simp argument is unused:
+  Set.indicator_apply
+
+Hint: Omit it from the simp argument list.
+  [apply] simp [hx]
+
+Note: This linter can be disabled with `set_option linter.unusedSimpArgs false`
+warning: MathFin/Choice/Performance/KellyNumeraire.lean:144:56: Unused tactic linter: `<;>` should be replaced with `;` or be removed.
+
+Note: This linter can be disabled with `set_option linter.unusedTactic false`
+warning: MathFin/Choice/Performance/KellyNumeraire.lean:144:60: Unused tactic linter: `ring` does nothing.
+
+Note: This linter can be disabled with `set_option linter.unusedTactic false`
+warning: MathFin/Choice/Performance/KellyNumeraire.lean:144:60: this tactic is never executed
+
+Note: This linter can be disabled with `set_option linter.unreachableTactic false`
+warning: MathFin/Choice/Performance/KellyNumeraire.lean:148:56: Unused tactic linter: `<;>` should be replaced with `;` or be removed.
+
+Note: This linter can be disabled with `set_option linter.unusedTactic false`
+warning: MathFin/Choice/Performance/KellyNumeraire.lean:148:56: Used `tac1 <;> tac2` where `(tac1; tac2)` would suffice
+
+Note: This linter can be disabled with `set_option linter.unnecessarySeqFocus false`
+warning: MathFin/Choice/Utility/MarketMarginalUtility.lean:156:4: `simp` already closes the goal
+
+Hint: Use `simp` instead of `simpa`:
+  [apply] simp
+
+Note: This linter can be disabled with `set_option linter.unnecessarySimpa false`
+warning: MathFin/Choice/Utility/MarketMarginalUtility.lean:184:0: unclosed sections or namespaces; expected: '
+
+end Market
+
+end MathFin'
+
+Note: This linter can be disabled with `set_option linter.style.missingEnd false`
+warning: MathFin/Markets/DeFi/ConstantProductAMM.lean:2:0: * `This file adapts`:
+Copyright line should start with 'Copyright (c) YYYY'
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Markets/DeFi/ConstantProductAMM.lean:2:51: * `constant-product AMM**`:
+Copyright line should end with '. All rights reserved.'
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Markets/DeFi/ConstantProductAMM.lean:4:0: * `
+  Daniele Pusceddu and Massimo Bartoletti, "Formalizing Automated Market
+  Makers in the Lean 4 Theorem Prover", OASIcs FMBC 2024 (5th
+  International Workshop on Formal Methods for Blockchains).
+  <https://doi.org/10.4230/OASIcs.FMBC.2024.5>
+  Companion code: <https://github.com/dpusceddu/lean4-amm>
+
+and the underlying theory paper they cite:
+
+  Massimo Bartoletti, James Chiang, and Alberto Lluch-Lafuente, "A theory
+  of Automated Market Makers in DeFi", LMCS 2022.
+
+Our implementation differs from Pusceddu-Bartoletti's in that we use
+**plain real reserves** (`ℝ` with positivity hypotheses) rather than
+Lean's `PReal` (strictly-positive-reals subtype) machinery, and we model
+**a single AMM pair** rather than their full multi-AMM blockchain state
+abstraction. The mathematical content (constant-product invariant + swap
+output formula + invariant preservation + arbitrage gain) is adapted
+from their work.
+
+Author of this MathFin Lean 4 adaptation: Raphael Coelho.
+Original mathematical framework: Bartoletti-Chiang-Lluch-Lafuente (2022),Pusceddu-Bartoletti Lean formalisation (2024).
+Copyright (c) 2026 Raphael Coelho (this adaptation).
+Mathematical content © Bartoletti et al. / Pusceddu-Bartoletti, used here
+under academic fair use for derivative work with attribution. The
+original Pusceddu-Bartoletti GitHub repository has no explicit license at
+the time of writing; this adaptation does not copy any Lean source from
+that repo and uses only the published paper content.
+Released under Apache 2.0 license as described in the file LICENSE.`:
+If an authors line spans multiple lines, each line but the last must end with a trailing comma
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Markets/DeFi/ConstantProductAMM.lean:4:0: * `
+  Daniel`:
+The authors line should begin with 'Authors: '
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Markets/DeFi/ConstantProductAMM.lean:5:0: * `  `:
+Double spaces are not allowed.
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Markets/DeFi/ConstantProductAMM.lean:5:18: * ` and `:
+Please, do not use 'and'; use ',' instead.
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Markets/DeFi/ConstantProductAMM.lean:7:59: * `.`:
+Please, do not end the authors' line with a period.
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Markets/DeFi/ConstantProductAMM.lean:3:0: * `(Uniswap v2-style) from:`:
+Second copyright line should be "Released under Apache 2.0 license as described in the file LICENSE."
+
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: MathFin/Markets/DeFi/LPContract.lean:94:66: `if_pos` has been deprecated: Use `ite_eq_left` instead
+
+Hint: Replace the deprecated name:
+  i̵f̵_̵p̵o̵s̵i̲t̲e̲_̲e̲q̲_̲l̲e̲f̲t̲
+warning: MathFin/Markets/DeFi/LPContract.lean:97:8: `if_neg` has been deprecated: Use `ite_eq_right` instead
+
+Hint: Replace the deprecated name:
+  i̵f̵_̵n̵e̵g̵i̲t̲e̲_̲e̲q̲_̲r̲i̲g̲h̲t̲
+warning: MathFin/Markets/DeFi/LPContract.lean:98:4: `push_neg` has been deprecated. Prefer using `push Not` instead.
+If you'd rather continue using `push_neg` in your project, you can implement it as follows:
+```
+open Lean.Parser.Tactic in
+macro "push_neg" cfg:optConfig loc:(location)? : tactic =>
+  `(tactic| push $cfg:optConfig Not $[$loc]?)
+```
+warning: MathFin/Markets/DeFi/LPContract.lean:101:46: `if_pos` has been deprecated: Use `ite_eq_left` instead
+
+Hint: Replace the deprecated name:
+  i̵f̵_̵p̵o̵s̵i̲t̲e̲_̲e̲q̲_̲l̲e̲f̲t̲
+warning: MathFin/Markets/DeFi/LPContract.lean:105:10: `if_neg` has been deprecated: Use `ite_eq_right` instead
+
+Hint: Replace the deprecated name:
+  i̵f̵_̵n̵e̵g̵i̲t̲e̲_̲e̲q̲_̲r̲i̲g̲h̲t̲
+warning: MathFin/Markets/DeFi/LPContract.lean:106:6: `push_neg` has been deprecated. Prefer using `push Not` instead.
+If you'd rather continue using `push_neg` in your project, you can implement it as follows:
+```
+open Lean.Parser.Tactic in
+macro "push_neg" cfg:optConfig loc:(location)? : tactic =>
+  `(tactic| push $cfg:optConfig Not $[$loc]?)
+```
+warning: MathFin/Models/ModelFree/CallPriceInterpolation.lean:228:8: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Models/ModelFree/CallPriceInterpolation.lean:237:10: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Models/ModelFree/CallPriceInterpolation.lean:238:10: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Models/ModelFree/CallPriceInterpolation.lean:242:8: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+warning: MathFin/Models/ModelFree/CallPriceInterpolation.lean:460:8: The `show` tactic should only be used to indicate intermediate goal states for readability.
+However, this tactic invocation changed the goal. Please use `change` instead for these purposes.
+
+Note: This linter can be disabled with `set_option linter.style.show false`
+info: MathFin/Models/BlackScholes/ShoutFloorMonotonicity.lean:131:30: Try this:
+  [apply] ring_nf
+  
+  The `ring` tactic failed to close the goal. Use `ring_nf` to obtain a normal form.
+    
+  Note that `ring` works primarily in *commutative* rings. If you have a noncommutative ring, abelian group or module, consider using `noncomm_ring`, `abel` or `module` instead.
+warning: MathFin/Models/ModelFree/BlackFormTail.lean:47:0: Please, write a comment here or remove this line, but do not place empty lines within commands!
+Context:
+                                                      ↓
+  ⏎`0` as `k → +∞` iff `dpl k (w k)` tends to `-∞`. -/⏎⏎theorem blackForm_lower_bound_of_dpl_ge (w : ℝ → ℝ) (hw : ∀ k, 0 < w k) (M : ℝ) :⏎
+
+Note: This linter can be disabled with `set_option linter.style.emptyLine false`
+warning: MathFin/Models/ModelFree/BlackFormTail.lean:100:100: This line exceeds the 100 character limit, please shorten it!
+
+Note: This linter can be disabled with `set_option linter.style.longLine false`
+warning: MathFin/Models/ModelFree/BlackFormTail.lean:108:100: This line exceeds the 100 character limit, please shorten it!
+
+Note: This linter can be disabled with `set_option linter.style.longLine false`
+warning: MathFin/Models/ModelFree/BlackFormTail.lean:112:100: This line exceeds the 100 character limit, please shorten it!
+
+Note: This linter can be disabled with `set_option linter.style.longLine false`
+warning: MathFin.lean:11:100: This line exceeds the 100 character limit, please shorten it!
+
+Note: This linter can be disabled with `set_option linter.style.longLine false`
+warning: MathFin.lean:13:100: This line exceeds the 100 character limit, please shorten it!
+
+Note: This linter can be disabled with `set_option linter.style.longLine false`
+warning: MathFin.lean:14:100: This line exceeds the 100 character limit, please shorten it!
+
+Note: This linter can be disabled with `set_option linter.style.longLine false`
+warning: MathFin.lean:15:100: This line exceeds the 100 character limit, please shorten it!
+
+Note: This linter can be disabled with `set_option linter.style.longLine false`
+warning: MathFin/Blueprint.lean:729:100: This line exceeds the 100 character limit, please shorten it!
+
+Note: This linter can be disabled with `set_option linter.style.longLine false`
+warning: MathFin/AxiomAuditGen.lean: imports `Mathlib.MeasureTheory.Function.ConditionalExpectation.Basic` from package `mathlib`, which is designed for use with the module system; consider adding `module` to the start of this file
+warning: MathFin/AxiomAuditGen.lean: imports `Mathlib.Probability.ConditionalExpectation` from package `mathlib`, which is designed for use with the module system; consider adding `module` to the start of this file
+warning: MathFin/AxiomAuditGen.lean: imports `Mathlib.Probability.Martingale.Convergence` from package `mathlib`, which is designed for use with the module system; consider adding `module` to the start of this file
+warning: MathFin/AxiomAuditGen.lean: imports `Mathlib.Probability.Martingale.OptionalStopping` from package `mathlib`, which is designed for use with the module system; consider adding `module` to the start of this file
+warning: MathFin/AxiomAuditGen.lean: imports `Mathlib.Probability.Martingale.Upcrossing` from package `mathlib`, which is designed for use with the module system; consider adding `module` to the start of this file
+warning: MathFin/AxiomAuditGen.lean:34:0: The module doc-string for a file should be the first command after the imports
+and any necessary `set_option` commands.
+Please, add a module doc-string (`/-! ... -/`) before `set_option linter.style.longLine false`.
+
+Hint: Type `m(odule docstring) + [tab]` to insert a template via snippet.
+
+Note: This linter can be disabled with `set_option linter.style.header false`
+warning: Solution.lean:15:100: This line exceeds the 100 character limit, please shorten it!
+
+Note: This linter can be disabled with `set_option linter.style.longLine false`
+warning: Solution.lean:84:100: This line exceeds the 100 character limit, please shorten it!
+
+Note: This linter can be disabled with `set_option linter.style.longLine false`
+warning: Solution.lean:85:100: This line exceeds the 100 character limit, please shorten it!
+
+Note: This linter can be disabled with `set_option linter.style.longLine false`
+warning: Challenge.lean: imports `Mathlib` from package `mathlib`, which is designed for use with the module system; consider adding `module` to the start of this file
+Build completed successfully (9911 jobs).
+verifying 1 entries via `lake env lean` in container docker-lean-repl-1 (HEAD db261745)
+[1/1] OK   mf-smile-black-form-tail-iff (2.5s)
+
+done: 1 verified, 0 failed
+fresh: 872  stale: 0  missing: 0
+ratchet: long_lines: 3 > baseline 0
+ratchet: duplicate_statements: 1 > baseline 0
+ratchet: price_entries_off_trunk: 172 > baseline 171

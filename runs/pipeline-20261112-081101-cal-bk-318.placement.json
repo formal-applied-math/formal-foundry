@@ -1,0 +1,1 @@
+{"written": ["MathFin/Models/ModelFree/BlackFormTail.lean", "benchmarks/black_scholes.json", "MathFin.lean"], "frontier": [], "entry_id": "mf-smile-black-form-tail-iff", "blueprint": ["thm:smile-no-arbitrage"], "new_defs": []}
