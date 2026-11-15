@@ -16,6 +16,7 @@ import re
 import subprocess
 import sys
 
+from af_parse import _locate_main
 from decompose import build_leaf_manifest, parse_dag
 from probe import daemon_check
 from probe_lib import count_sorries, sha256_hex
@@ -172,10 +173,15 @@ def main() -> int:
             quarantined.append({"id": fname[:-5], "file": fname, "reason": why})
             continue
         m = re.match(r"cal-(bk|a4|sp|ctl)-\d+\.lean", fname)
-        decl = re.search(r"\btheorem\s+([A-Za-z0-9_'.]+)", code)
+        # the declaration carrying the `sorry`, not the first theorem: a draft may prove
+        # helper lemmas above its target (cal-bk-72, 2026-11-15)
+        try:
+            name = _locate_main(code)[0]
+        except ValueError:
+            name = re.search(r"\btheorem\s+([A-Za-z0-9_'.]+)", code).group(1)
         target = {
             "id": fname[:-5], "stream": STREAMS[m.group(1)], "kind": "prove",
-            "sorry_name": decl.group(1), "file": fname,
+            "sorry_name": name, "file": fname,
             "pointers": parse_pointers(code),
             "input_hash": sha256_hex(code + toolchain),
             **parse_meta(code),

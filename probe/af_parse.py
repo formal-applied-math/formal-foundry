@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import re
 
-__all__ = ['_DECL_RE', '_OPEN', '_CLOSE', '_locate', 'split_statement', 'vacuity_goal', 'disproof_goal']
+__all__ = ['_DECL_RE', '_OPEN', '_CLOSE', '_locate', '_locate_main', 'split_statement', 'vacuity_goal', 'disproof_goal']
 
 #: `private`/`protected`/`nonrec` are ordinary declaration modifiers. Omitting them made
 #: `_locate` raise "no theorem/lemma declaration found" on a perfectly well-formed
@@ -65,10 +65,46 @@ def _locate(text: str) -> tuple[str, int, int, int]:
 
 
 
+#: where the next top-level command starts: a proof body ends there
+_NEXT_CMD_RE = re.compile(
+    r"^(?:@\[[^\]]*\]\s*)?(?:(?:private|protected|nonrec|noncomputable)\s+)*"
+    r"(?:theorem|lemma|def|abbrev|example|instance|structure|class|inductive|end|namespace|"
+    r"section|open|variable|set_option|/--|/-!)\b",
+    re.MULTILINE,
+)
+_SORRY_RE = re.compile(r"(?<![\w.'])sorry(?![\w'])")
+
+
+def _locate_main(text: str) -> tuple[str, int, int, int]:
+    """`_locate` for a whole draft: the declaration that carries the draft's `sorry`.
+
+    A draft states one target theorem with `sorry` and may prove helper lemmas before
+    it. `_locate` returns the first declaration, which is right for a text sliced to
+    start at a named one and wrong for a draft: on 2026-11-15 cal-bk-72 put
+    `logBarrierObj_unit` above `merton_fraction_first_order_maximiser`, and the helper
+    became the entry's theorem, the module's main result and the prove gate's statement
+    pin. With no `sorry` (a proved module) or several, the first declaration, as before."""
+    found = []
+    for m in _DECL_RE.finditer(text):
+        try:
+            name, bstart, sep, end = _locate(text[m.start():])
+        except ValueError:
+            continue
+        off = m.start()
+        nxt = _NEXT_CMD_RE.search(text, off + end + 2)
+        body = text[off + end:nxt.start() if nxt else len(text)]
+        if _SORRY_RE.search(body):
+            found.append((name, off + bstart, off + sep, off + end))
+    if len(found) == 1:
+        return found[0]
+    return _locate(text)
+
+
 def split_statement(stub: str) -> tuple[str, str, str]:
     """Split a Lean theorem stub into `(name, binders, concl)`. Robust to a full
-    module scaffold around the theorem (finds the line-anchored decl)."""
-    name, bstart, sep, end = _locate(stub)
+    module scaffold around the theorem: the declaration carrying the `sorry`, else the
+    first line-anchored one (`_locate_main`)."""
+    name, bstart, sep, end = _locate_main(stub)
     return name, stub[bstart:sep], stub[sep + 1:end]
 
 
@@ -78,7 +114,7 @@ def vacuity_goal(lean_text: str) -> str:
     """The hypothesis-rejection probe: the stub with its conclusion replaced by
     `False`, keeping imports + binders. A clean proof means the hypotheses are
     contradictory (the theorem is vacuously true) — retire the target."""
-    _n, _b, sep, end = _locate(lean_text)
+    _n, _b, sep, end = _locate_main(lean_text)
     return lean_text[:sep] + ": False " + lean_text[end:]
 
 
@@ -88,6 +124,6 @@ def disproof_goal(lean_text: str) -> str:
     """The disproof probe: the stub with its conclusion `C` replaced by `¬ (C)`,
     keeping imports + binders. A clean proof means the statement is false as
     written — retire the target."""
-    _n, _b, sep, end = _locate(lean_text)
+    _n, _b, sep, end = _locate_main(lean_text)
     concl = lean_text[sep + 1:end].strip()
     return lean_text[:sep] + ": ¬ (" + concl + ") " + lean_text[end:]

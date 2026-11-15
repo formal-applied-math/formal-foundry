@@ -303,3 +303,23 @@ def test_no_queued_target_still_names_a_retired_drafter():
                for d in A._RETIRED_DRAFTERS):
             stale.append(os.path.basename(f))
     assert stale == [], f"queued entries still name a retired drafter: {stale}"
+
+
+# --- the entry snippet's opens follow its module ---------------------------------------
+
+def test_the_snippet_keeps_only_the_opens_its_module_still_has():
+    """cal-bk-72 (2026-11-15): the prove gate trimmed `open MeasureTheory …` from the
+    module, the import shake left no measure theory to open, and the entry kept the line:
+    the ledger's check failed with `unknown namespace`."""
+    module = ("module\n\npublic import MathFin.Choice.Portfolio.RiskParityFOC\n\n"
+              "@[expose] public section\n\nnamespace MathFin\n\nopen Real\n\n"
+              "theorem t : True := trivial\n\nend MathFin\n")
+    snippet = ("import MathFin.Choice.Performance.MertonFraction\n\nopen MathFin\n"
+               "open MeasureTheory ProbabilityTheory Real\nopen scoped NNReal ENNReal\n"
+               "open Finset in\n\ntheorem mf_t : True := MathFin.t\n")
+    got = A.align_snippet_opens(PACK, snippet, module)
+    assert "open MathFin\n" in got                       # the library's own, always
+    assert "open Real\n" in got and "MeasureTheory" not in got
+    assert "NNReal" not in got                           # the module opens no scoped one
+    assert "open Finset in\n" in got                     # not a plain open: left alone
+    assert got.endswith("theorem mf_t : True := MathFin.t\n")
