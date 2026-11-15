@@ -39,6 +39,26 @@ REDRAFT, PARKED = "assembly", "assembly_parked"
 RELEASE_MARK = "released after the library refused the assembly"
 
 
+#: the lines of an assembly log that say what refused it: the ledger's FAIL, a Lean
+#: error, a failed pytest gate. "build/regen failed rc=1" alone taught the re-prove of
+#: cal-bk-72 nothing (2026-11-15); the line it needed was the ledger's.
+_FAILURE_RE = re.compile(
+    r"^(?:\[\d+/\d+\] FAIL .*|\s*FAIL\s+\S.*|(?:\S+:\d+:\d+: )?error: .*|"
+    r"error: \S+\.lean:\d+:\d+: .*|FAILED \S.*|ratchet: .*)$", re.M)
+
+
+def failure_lines(log_text: str, limit: int = 6) -> list[str]:
+    """The distinct lines of an assembly log that name what failed, in order."""
+    out: list[str] = []
+    for m in _FAILURE_RE.finditer(log_text or ""):
+        line = m.group(0).strip()[:300]
+        if line and line not in out:
+            out.append(line)
+        if len(out) >= limit:
+            break
+    return out
+
+
 def reason_of(runs_dir: str, tag: str, target_id: str) -> str:
     """One line: what the library refused, from open-pr's `<tag>-<id>.blocked.json`."""
     try:
@@ -48,6 +68,8 @@ def reason_of(runs_dir: str, tag: str, target_id: str) -> str:
     except (OSError, ValueError):
         return "the library's build refused the module (no reason recorded)"
     parts = [str(b.get("reason") or "").strip()]
+    if b.get("failures"):
+        parts.append("what failed: " + " | ".join(b["failures"]))
     if b.get("ratchets"):
         parts.append("ratchets that rose: " + "; ".join(b["ratchets"]))
     return " — ".join(p for p in parts if p)

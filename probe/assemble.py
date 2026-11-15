@@ -261,6 +261,46 @@ def record_frontier_core(main_repo: str, frontier_rel: str, labels: list[str],
     return done
 
 
+_OPEN_RE = re.compile(r"(?m)^open[ \t]+(scoped[ \t]+)?([^\n]*)\n?")
+
+
+def _opened(text: str) -> set[tuple[bool, str]]:
+    """The namespaces a text opens, as `(scoped, name)`; `open X in`, selective and
+    renaming opens are not plain opens and are left out."""
+    out: set[tuple[bool, str]] = set()
+    for m in _OPEN_RE.finditer(text):
+        rest = m.group(2).split("--")[0]
+        if re.search(r"[()]|\bin\b|\bhiding\b|\brenaming\b|→", rest):
+            continue
+        out |= {(bool(m.group(1)), n) for n in rest.split()}
+    return out
+
+
+def align_snippet_opens(pack, snippet: str, module: str) -> str:
+    """Keep only the snippet's opens that its module still opens, and the library's own
+    namespaces. The snippet is drafted with the module's opens; the prove gate then trims
+    the module's unused ones and the library's import shake narrows the module's imports to
+    what it needs, so a namespace the module stopped opening may no longer exist for the
+    snippet that imports it (cal-bk-72, 2026-11-15: `open MeasureTheory` in the entry, the
+    ledger's check `unknown namespace`). The module built with its own opens after the
+    shake, and the snippet imports the module, so those stay valid."""
+    keep = _opened(module)
+    root = pack.namespace
+
+    def fix(m: re.Match) -> str:
+        rest = m.group(2).split("--")[0]
+        if re.search(r"[()]|\bin\b|\bhiding\b|\brenaming\b|→", rest):
+            return m.group(0)
+        scoped = bool(m.group(1))
+        names = [n for n in rest.split()
+                 if (scoped, n) in keep or n == root or n.startswith(root + ".")]
+        if not names:
+            return ""
+        return "open " + ("scoped " if scoped else "") + " ".join(names) + "\n"
+
+    return _OPEN_RE.sub(fix, snippet)
+
+
 def apply_contribution(pack, candidate_code: str, target: dict, benchmark_entry: dict,
                        main_repo: str) -> list[str]:
     """Write the proven candidate to `target['main_module']` and append
@@ -306,6 +346,10 @@ def apply_contribution(pack, candidate_code: str, target: dict, benchmark_entry:
     bench_abs = os.path.join(main_repo, bench_rel)
     text = open(bench_abs, encoding="utf-8").read()
     entry, scrubbed = sanitize_provenance(benchmark_entry)
+    code = (entry.get("code") or {}).get("lean")
+    if isinstance(code, str):
+        entry = {**entry, "code": {**entry["code"],
+                                   "lean": align_snippet_opens(pack, code, candidate_code)}}
     if scrubbed:
         print(f"[assemble] provenance: dropped retired drafter name from {scrubbed} "
               "(the queue entry predates the current pipeline)")

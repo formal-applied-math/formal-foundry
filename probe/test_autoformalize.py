@@ -462,6 +462,33 @@ def test_autoformalize_config_semantic_cascade_reads_toml(tmp_path):
 
 # --- split_statement ---------------------------------------------------------
 
+_HELPER_FIRST = """namespace MathFin
+
+/-- a helper the draft proves first -/
+theorem helper_unit (x : ℝ) : x * 1 = x := by
+  simp
+
+/-- the target -/
+theorem target_thm (x : ℝ) (hx : 0 < x) : 0 < x ^ 2 := by
+  sorry
+
+example : (1 : ℝ) * 1 = 1 := by norm_num
+
+end MathFin
+"""
+
+
+def test_the_target_is_the_declaration_carrying_the_sorry():
+    """cal-bk-72 (2026-11-15): a helper proved above the target became the entry's theorem,
+    the module's main result and the prove gate's statement pin."""
+    name, binders, concl = af.split_statement(_HELPER_FIRST)
+    assert name == "target_thm" and "(hx : 0 < x)" in binders and "0 < x ^ 2" in concl
+    assert ": False" in af.vacuity_goal(_HELPER_FIRST).split("theorem target_thm")[1]
+    assert "x * 1 = x" in af.vacuity_goal(_HELPER_FIRST)          # the helper untouched
+    proved = _HELPER_FIRST.replace("  sorry", "  positivity")
+    assert af.split_statement(proved)[0] == "helper_unit"           # no sorry: first, as before
+
+
 def test_split_statement_simple():
     name, binders, concl = af.split_statement("theorem foo (x : ℝ) : x = x := by sorry")
     assert name == "foo"

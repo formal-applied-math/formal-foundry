@@ -114,3 +114,29 @@ def test_the_prove_gate_asks_the_library_checks_in_order():
                        if "trunk-gate" in c and "shape-gate" not in c else []}
     assert prove_session.library_refusal(pack, "theorem t : True := trivial\n", "t", tab,
                                          check_fn=trunk).startswith("off_trunk:")
+
+
+def test_failure_lines_name_what_refused_the_assembly():
+    """cal-bk-72 (2026-11-15): the reason was "build/regen failed rc=1" and the line the
+    re-prove needed was the ledger's, three thousand lines further down."""
+    log = ("warning: MathFin/X.lean:3:0: a style note\n"
+           "Build completed successfully (9911 jobs).\n"
+           "[1/1] FAIL mf-a (2.3s) ['MathFin/.ledger-exec-check.lean:4:5: error: unknown "
+           "namespace `MeasureTheory`']\n"
+           "  FAIL portfolio.json   mf-a\n"
+           "error: MathFin/Y.lean:7:2: unknown identifier `foo`\n"
+           "FAILED tests/test_values.py::test_prose - AssertionError\n")
+    got = release.failure_lines(log)
+    assert got[0].startswith("[1/1] FAIL mf-a") and "unknown namespace" in got[0]
+    assert "FAIL portfolio.json   mf-a" in got
+    assert any("unknown identifier `foo`" in x for x in got)
+    assert any(x.startswith("FAILED tests/test_values.py") for x in got)
+    assert not any("style note" in x for x in got)
+
+
+def test_the_reason_carries_the_failing_lines(tmp_path):
+    (tmp_path / "t-x.blocked.json").write_text(json.dumps(
+        {"reason": "build failed rc=1", "failures": ["[1/1] FAIL mf-a: unknown namespace"],
+         "ratchets": []}))
+    r = release.reason_of(str(tmp_path), "t", "x")
+    assert r.startswith("build failed rc=1") and "what failed: [1/1] FAIL mf-a" in r

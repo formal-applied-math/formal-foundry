@@ -187,7 +187,7 @@
       "id": "cal-bk-72",
       "outcome": "fail_assembly",
       "tokens": 2819,
-      "voided": "released after the library refused the assembly (1, reprove, 2026-11-15): in-image build/regen failed rc=1 (domains/mathfin/regen.sh: build / shake / lint / regen / ledger / index + ratchet)"
+      "voided": "voided by hand 2026-11-15: the refusal was the foundry's, not the proof's. The draft's target was taken to be its first theorem (a helper), and the entry kept opens its shaken module no longer supports. Stub retired for a redraft on the fixed code."
     }
   ]
 }

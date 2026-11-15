@@ -68,63 +68,6 @@
           ]
         }
       }
-    },
-    {
-      "id": "cal-bk-72",
-      "stream": "backlog",
-      "kind": "prove",
-      "sorry_name": "logBarrierObj_unit",
-      "file": "cal-bk-72.lean",
-      "pointers": [
-        "MathFin/Choice/Portfolio/SharpeFOCDerivation.lean",
-        "MathFin/Choice/Portfolio/RiskParityFOC.lean",
-        "MathFin/Choice/Performance/Kelly.lean"
-      ],
-      "input_hash": "8617f9aa41e0718a076373b062b16089007c4845a779988f3c0714d86009322b",
-      "main_module": "MathFin/Choice/Performance/MertonFraction.lean",
-      "benchmark": "benchmarks/portfolio_and_performance.json",
-      "benchmark_id": "mf-portfolio-merton-myopic-fraction",
-      "source_issue": 72,
-      "deferred": [
-        "full HJB value function V(t,w) for CRRA utility",
-        "comparison with the discrete Kelly fraction as a limit",
-        "derivation of the quadratic objective from It\u00f4's formula on the wealth process"
-      ],
-      "blueprint": [
-        "thm:merton-portfolio-fraction"
-      ],
-      "benchmark_entry": {
-        "id": "mf-portfolio-merton-myopic-fraction",
-        "name": "Merton's myopic optimal risky fraction as the first-order maximiser",
-        "description": "For \u03b3>0, \u03c3\u22600 the objective \u03c0(\u03bc\u2212r)\u2212(\u03b3\u03c3\u00b2/2)\u03c0\u00b2 has unique critical point and global maximiser \u03c0*=(\u03bc\u2212r)/(\u03b3\u03c3\u00b2), with value (\u03bc\u2212r)\u00b2/(2\u03b3\u03c3\u00b2).",
-        "domain": "mathematical_finance",
-        "code": {
-          "lean": "import MathFin.Choice.Performance.MertonFraction\n\nopen MathFin\nopen MeasureTheory ProbabilityTheory\nopen scoped NNReal ENNReal\n\n/-- For \u03b3>0, \u03c3\u22600 the objective \u03c0(\u03bc\u2212r)\u2212(\u03b3\u03c3\u00b2/2)\u03c0\u00b2 has unique critical point and global maximiser \u03c0*=(\u03bc\u2212r)/(\u03b3\u03c3\u00b2), with value (\u03bc\u2212r)\u00b2/(2\u03b3\u03c3\u00b2). -/\ntheorem mf_portfolio_merton_myopic_fraction (\u03b3 \u03c3 \u03c0 : \u211d) :\n    logBarrierObj (Finset.univ : Finset Unit) (fun _ _ => \u03b3 * \u03c3 ^ 2) 0 (fun _ => \u03c0)\n      = (\u03b3 * \u03c3 ^ 2 / 2) * \u03c0 ^ 2 :=\n  MathFin.logBarrierObj_unit \u03b3 \u03c3 \u03c0\n"
-        },
-        "metadata": {
-          "chapter": 0,
-          "reference": "Merton, An analytic derivation of the efficient portfolio frontier",
-          "difficulty": "medium",
-          "formalization_status": "full",
-          "formalization_scope": "Full formal proof in MathFin/Choice/Performance/MertonFraction.lean (autoformalized statement, machine proof). Re-export from MathFin. Axioms-clean. Faithful SUBSET of issue #72; deferred to follow-up issues: full HJB value function V(t,w) for CRRA utility; comparison with the discrete Kelly fraction as a limit; derivation of the quadratic objective from It\u00f4's formula on the wealth process.",
-          "provenance": {
-            "statement_source": "autoform",
-            "statement_model": "autoform",
-            "source": "foundry-autoform",
-            "issue": 72,
-            "deferred": [
-              "full HJB value function V(t,w) for CRRA utility",
-              "comparison with the discrete Kelly fraction as a limit",
-              "derivation of the quadratic objective from It\u00f4's formula on the wealth process"
-            ]
-          },
-          "citations": [
-            {
-              "key": "Merton1972"
-            }
-          ]
-        }
-      }
     }
   ],
   "quarantined": []
