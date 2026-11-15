@@ -127,6 +127,49 @@ def test_a_proof_through_an_unfounded_price_is_caught_through_the_proof():
     assert errs and all(af_gates._TRUNK_MARKER in e for e in errs), errs
 
 
+# --- the depth gate: the statement consumes a pointer def or a blueprint object ---------
+
+def _pointer() -> str:
+    module, _ = _fixture()
+    return module.replace(".", "/") + ".lean"
+
+
+def test_a_statement_through_a_pointer_def_is_deep():
+    _, obj = _fixture()
+    stub = _stub(f"theorem d_direct (x : ℝ) : {obj} x = {obj} x := by sorry\n")
+    assert _errors(af_gates.depth_probe(PACK, stub, "d_direct", [_pointer()])) == []
+
+
+def test_a_new_def_written_through_a_pointer_def_consumes_it():
+    """The walk passes through the stub's own definitions: `wrapped` is the drafter's new
+    object, written through the library's, and a statement about it consumes both."""
+    _, obj = _fixture()
+    stub = _stub(f"noncomputable def wrapped (x : ℝ) : ℝ := 2 * {obj} x\n\n"
+                 "theorem d_wrapped (x : ℝ) : wrapped x = wrapped x := by sorry\n")
+    assert _errors(af_gates.depth_probe(PACK, stub, "d_wrapped", [_pointer()])) == []
+
+
+def test_a_new_def_over_raw_numbers_is_shallow():
+    stub = _stub("def raw (x : ℝ) : ℝ := 2 * x\n\n"
+                 "theorem d_raw (x : ℝ) : raw x = raw x := by sorry\n")
+    errs = _errors(af_gates.depth_probe(PACK, stub, "d_raw", [_pointer()]))
+    assert errs and all(af_gates._DEPTH_MARKER in e for e in errs), errs
+
+
+def test_a_blueprint_object_counts_without_a_pointer():
+    """#72: the pointer modules were patterns to imitate; the blueprint node the issue
+    names said what the result is built from. The pointer here is a module the statement
+    does not touch, and the object alone carries it."""
+    _, obj = _fixture()
+    stub = _stub(f"noncomputable def viaObj (x : ℝ) : ℝ := {obj} x + 1\n\n"
+                 "theorem d_obj (x : ℝ) : viaObj x = viaObj x := by sorry\n")
+    other = "Mathlib/Analysis/SpecialFunctions/Exp.lean"
+    errs = _errors(af_gates.depth_probe(PACK, stub, "d_obj", [other]))
+    assert errs and all(af_gates._DEPTH_MARKER in e for e in errs), errs
+    assert _errors(af_gates.depth_probe(PACK, stub, "d_obj", [other],
+                                        [PACK.qualified(obj)])) == []
+
+
 # --- the shape gate: what the library's index would count as debt -----------------------
 
 def test_a_new_public_statement_has_a_clean_shape():

@@ -948,6 +948,28 @@ def test_depth_probe_pointers_scoped_targets_pointer_module_defs():
     assert "depth-gate:" in probe                              # the reject marker
 
 
+def test_depth_probe_also_accepts_the_blueprint_objects():
+    lean_text, _e, _p = af.emit_target_files(PACK, _ISSUE, _STUB, _META)
+    probe = af.depth_probe(PACK, lean_text, "fra_value", _ISSUE["pointers"],
+                           ["MathFin.portfolioVarN"])
+    assert "[`MathFin.portfolioVarN]" in probe                 # the object, Lean-name form
+    assert "nor any declaration of the blueprint objects" in probe
+    bare = af.depth_probe(PACK, lean_text, "fra_value", _ISSUE["pointers"])
+    assert "blueprint objects" not in bare                     # no objects, no clause
+
+
+def test_depth_rejection_with_objects_but_no_pointers_asks_the_daemon():
+    lean_text, _e, _p = af.emit_target_files(PACK, {**_ISSUE, "pointers": []}, _STUB, _META)
+    seen = []
+
+    def check(code):
+        seen.append(code)
+        return {"success": False, "errors": [_DEPTH_ERR], "sorry_count": 1}
+    r = af.depth_rejection(PACK, lean_text, "fra_value", [], check_fn=check,
+                           objects=["MathFin.zcb"])
+    assert r["shallow"] is True and len(seen) == 1 and "`MathFin.zcb" in seen[0]
+
+
 def test_depth_rejection_skips_when_no_pointers():
     # the gate is pointers-scoped; with no pointers it is INAPPLICABLE — skip (never
     # reject for a missing Pointers section, and never touch the daemon).

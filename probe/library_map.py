@@ -449,6 +449,19 @@ class Blueprint:
     def frontier_of(self, labels: list[str]) -> list[str]:
         return [x for x in labels if x in self.frontier]
 
+    def builds_on(self, labels: list[str]) -> list[str]:
+        """The declarations of the proved nodes an issue names and of the proved nodes its
+        named nodes `use`: what the blueprint says the result is built from. The depth
+        gate accepts a statement that consumes one of them."""
+        out: list[str] = []
+        for label in labels:
+            node = self.proved.get(label) or self.frontier.get(label) or {}
+            for lab in ([label] if label in self.proved else []) + list(node.get("uses") or []):
+                name = (self.proved.get(lab) or {}).get("name", "")
+                if name and name not in out:
+                    out.append(name)
+        return out
+
     def hint(self, labels: list[str], limit: int = 40) -> str:
         """The declarations a statement can be built from to rest on the map: first the
         ones the issue's own nodes name or build on, then the map's definition nodes
