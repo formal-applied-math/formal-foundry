@@ -481,6 +481,7 @@ def prepare_issues(pack: DomainPack, raw: list[dict], *, main_repo: str | None =
             if nodes:
                 issue["blueprint"] = nodes
                 issue["frontier"] = bp.frontier_of(nodes)
+                issue["node_objects"] = bp.builds_on(nodes)
                 core = {e for x in issue["frontier"]
                         for e in (bp.frontier[x].get("core") or [])}
                 issue["blueprint_note"] = bp.note(nodes, library_map.entry_descriptions(
@@ -560,7 +561,7 @@ def semantic_verdict(pack: DomainPack, *, lean_text: str, stub: str, name: str,
             return {"gate": ip["gate"], "detail": ip.get("verdict", "")}, tokens
     elif depth_gate:
         dep = depth_rejection(pack, lean_text, name, issue.get("pointers", []),
-                              check_fn=check_fn)
+                              check_fn=check_fn, objects=issue.get("node_objects") or [])
         tokens += dep["tokens"]
         if dep.get("indeterminate"):
             return {"gate": "indeterminate", "detail": dep.get("verdict", "")}, tokens

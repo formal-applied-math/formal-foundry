@@ -263,6 +263,17 @@ def test_the_blueprint_tells_proved_from_frontier(repo):
         "`MathFin.vasicekBondPrice`, `ProbabilityTheory.IsPreBrownianReal`, `MathFin.Phi`")
 
 
+def test_builds_on_names_the_objects_a_node_rests_on(repo):
+    """What the depth gate accepts besides the pointer modules: the declarations of the
+    proved nodes the issue names and of the proved nodes its named nodes `use`. Unlike
+    `hint`, never the map's whole list of definition nodes (#72: `portfolioVarN`, the
+    object `thm:merton-portfolio-fraction` uses, was refused as consuming nothing)."""
+    bp = lm.Blueprint.load(repo, LAYOUT)
+    assert bp.builds_on(["thm:ho-lee"]) == ["MathFin.vasicekBondPrice"]
+    assert bp.builds_on(["def:phi"]) == ["MathFin.Phi"]
+    assert bp.builds_on(["thm:survival", "thm:nope"]) == []
+
+
 def test_add_core_creates_extends_and_is_idempotent():
     one = lm.add_core(FRONTIER, "thm:ho-lee", "mf-a")
     assert 'area = "valuation/term"\ncore = ["mf-a"]\n\n[[node]]\nlabel = "thm:survival"' in one

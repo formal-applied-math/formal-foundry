@@ -65,6 +65,17 @@ def _probed_signature(text: str, name: str) -> str | None:
 # If none, the meta throwErrors — surfacing as a daemon error the gate keys on by its
 # `depth-gate:` marker. With no pointers there is nothing to scope to, so it falls back
 # to requiring any own-namespace constant (namespace fallback).
+#
+# Pointers are not the only scope. An issue that names a blueprint node says what the
+# result builds on through the node's `uses`, and an issue's pointers are often modules to
+# imitate (#72: the Sharpe FOC as the pattern, Kelly as a sibling) rather than modules to
+# consume. So a statement also passes when it consumes a declaration of the blueprint
+# objects the issue's nodes build on (`library_map.Blueprint.builds_on`). And it consumes
+# them through its own new definitions: `mertonObjective` written through `portfolioVarN`
+# consumes `portfolioVarN`, as a `let` over raw reals (cal-bk-67) still does not. On
+# 2026-11-12 #72 was refused twice: the faithful draft named `portfolioVarN`, the blueprint
+# node's object, but no pointer def, and the redraft bent the Merton objective through a
+# zero-budget risk-parity log-barrier to reach one.
 
 _DEPTH_MARKER = "depth-gate:"
 
@@ -80,13 +91,18 @@ def _mod_name(pack: DomainPack, pointer: str) -> str:
 
 
 
-def depth_probe(pack: DomainPack, lean_text: str, name: str, pointers: list[str]) -> str:
+def depth_probe(pack: DomainPack, lean_text: str, name: str, pointers: list[str],
+                objects: list[str] | None = None) -> str:
     """The stub + a `run_cmd` meta block that FAILS elaboration unless the theorem's
-    TYPE uses a constant DEFINED in one of its pointer modules (pointers-scoped).
+    TYPE consumes a constant DEFINED in one of its pointer modules, or one of `objects`
+    (the fully-qualified declarations of the blueprint objects the issue builds on). The
+    walk passes through the stub's OWN new declarations (types and bodies), never into
+    the library's, so a def the stub writes through a library object consumes it.
     `name` is the decl name (under the pack's namespace); `pointers` are repo-relative
-    `<LakeRoot>/…/X.lean` paths (assumed non-empty — `depth_rejection` skips otherwise)."""
+    `<LakeRoot>/…/X.lean` paths (`depth_rejection` skips when both scopes are empty)."""
     mods = [_mod_name(pack, p) for p in pointers if p.endswith(".lean")]
     ptr_list = ", ".join(f"`{m}" for m in mods)
+    obj_list = ", ".join(f"`{o}" for o in objects or [])
     meta = (
         "\nopen Lean in\n"
         "run_cmd do\n"
@@ -95,13 +111,27 @@ def depth_probe(pack: DomainPack, lean_text: str, name: str, pointers: list[str]
         f'    | throwError "{_DEPTH_MARKER} declaration {name} not found"\n'
         "  let mods := env.header.moduleNames\n"
         f"  let ptr : List Name := [{ptr_list}]\n"
-        "  let used := ci.type.getUsedConstants\n"
-        "  let hit := used.any fun c =>\n"
+        f"  let objs : NameSet := ([{obj_list}] : List Name).foldl (·.insert ·) {{}}\n"
+        "  let mut seen : NameSet := {}\n"
+        "  let mut todo : Array Name := ci.type.getUsedConstants\n"
+        "  let mut hit := false\n"
+        "  while !todo.isEmpty do\n"
+        "    let c := todo.back!\n"
+        "    todo := todo.pop\n"
+        "    if seen.contains c then continue\n"
+        "    seen := seen.insert c\n"
+        "    if objs.contains c then hit := true\n"
         "    match env.getModuleIdxFor? c with\n"
-        "    | some i => ptr.contains mods[i.toNat]!\n"
-        "    | none => false\n"
+        "    | some i => if ptr.contains mods[i.toNat]! then hit := true\n"
+        "    | none =>\n"
+        "      if let some d := env.find? c then\n"
+        "        todo := todo ++ d.type.getUsedConstants\n"
+        "        if let some v := d.value? true then\n"
+        "          todo := todo ++ v.getUsedConstants\n"
         "  unless hit do\n"
-        f'    throwError "{_DEPTH_MARKER} statement type consumes no def from pointer modules {{ptr}}"\n'
+        f'    throwError "{_DEPTH_MARKER} the statement consumes no def from its pointer modules '
+        '{ptr}' + (f' nor any declaration of the blueprint objects it builds on '
+                    f'[{", ".join(objects)}]' if objects else '') + '"\n'
     )
     return lean_text.rstrip() + "\n" + meta
 
@@ -109,18 +139,18 @@ def depth_probe(pack: DomainPack, lean_text: str, name: str, pointers: list[str]
 
 
 def depth_rejection(pack: DomainPack, lean_text: str, name: str, pointers: list[str],
-                    *, check_fn) -> dict:
+                    *, check_fn, objects: list[str] | None = None) -> dict:
     """Elaborate the depth probe via `check_fn` (the daemon). `shallow=True` iff the meta
-    block reported a `depth-gate:` error (the type consumes no pointer-module def). With
-    NO pointers the gate is inapplicable — it SKIPS (a missing Pointers section is a
-    metadata gap, not a shallowness verdict; the stub carries no library import to consume
-    anyway). Fails OPEN too: a daemon-communication error is NOT a depth verdict, so an
-    infra hiccup never rejects a good target (like the prover gates). No prover call ⇒
-    `tokens=0`."""
+    block reported a `depth-gate:` error (the type consumes no pointer-module def and
+    none of `objects`). With NO pointers and no objects the gate is inapplicable — it
+    SKIPS (a missing Pointers section is a metadata gap, not a shallowness verdict; the
+    stub carries no library import to consume anyway). Fails OPEN too: a
+    daemon-communication error is NOT a depth verdict, so an infra hiccup never rejects
+    a good target (like the prover gates). No prover call ⇒ `tokens=0`."""
     mods = [p for p in pointers if p.endswith(".lean")]
-    if not mods:
+    if not mods and not objects:
         return {"shallow": False, "tokens": 0, "verdict": "no pointers — depth gate skipped"}
-    res = check_fn(depth_probe(pack, lean_text, name, mods))
+    res = check_fn(depth_probe(pack, lean_text, name, mods, objects))
     if res.get("error"):   # H5: wedged daemon is NOT a depth verdict — retryable, never a pass
         return {"shallow": False, "indeterminate": True, "tokens": 0,
                 "verdict": "indeterminate: " + str(res["error"])[:120]}
