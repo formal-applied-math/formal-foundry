@@ -1,0 +1,1 @@
+in-image build/regen failed rc=1 (domains/mathfin/regen.sh: build / shake / lint / regen / ledger / index + ratchet)

@@ -45,9 +45,9 @@
       "tokens": 0
     }
   ],
-  "last_tick_epoch": 1794477688,
+  "last_tick_epoch": 1794782847,
   "month": "2026-11",
-  "tokens_spent_this_month": 37397,
+  "tokens_spent_this_month": 40216,
   "voided": [
     {
       "epoch": 1787144348,
@@ -181,6 +181,13 @@
       "outcome": "fail_assembly",
       "tokens": 8817,
       "voided": "released 2026-11-12: the tail lemma passed the gate (run pipeline-20261112-091835) and open-pr's rfl guard refused it for one inner `have h5 : \u2026 := rfl`, a step the library's own tripwire (a declaration whose WHOLE proof is rfl) accepts. fix/rfl-guard-whole-proof reads the library's rule; the kept proof is reused and re-assembled, no new session."
+    },
+    {
+      "epoch": 1794782847,
+      "id": "cal-bk-72",
+      "outcome": "fail_assembly",
+      "tokens": 2819,
+      "voided": "released after the library refused the assembly (1, reprove, 2026-11-15): in-image build/regen failed rc=1 (domains/mathfin/regen.sh: build / shake / lint / regen / ledger / index + ratchet)"
     }
   ]
 }

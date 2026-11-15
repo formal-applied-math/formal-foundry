@@ -31,6 +31,14 @@
       "targets": [
         "cal-bk-318__blackForm_lower_bound_of_dpl_ge"
       ]
+    },
+    "fb6d6b392a76e2ba4a9e3d84da4d5440d0486166e6f1d9b795edbd2a0117124b": {
+      "seen": 1,
+      "state": "γ σ π : ℝ\n⊢ (logBarrierObj Finset.univ (fun x x_1 => γ * σ ^ 2) 0 fun x => π) = γ * σ ^ 2 / 2 * π ^ 2",
+      "tactic": "  simp [logBarrierObj, portfolioVarN]\n  ring",
+      "targets": [
+        "cal-bk-72"
+      ]
     }
   },
   "generation": "v2"

@@ -1,0 +1,64 @@
+{
+  "target": "foundry-canary",
+  "engine": "claude",
+  "model": "claude-sonnet-5-5",
+  "rc": 0,
+  "duration_s": 19.5,
+  "secret_leak": 0,
+  "identical_to_stub": false,
+  "captured_bytes": 163,
+  "transcript": "/home/runner/work/formal-foundry/formal-foundry/runs/pipeline-20261115-222644-foundry-canary.transcript.jsonl",
+  "launcher_log": "/home/runner/work/formal-foundry/formal-foundry/runs/pipeline-20261115-222644-foundry-canary.launcher.log",
+  "mcp_servers": {
+    "lean-lsp": "connected"
+  },
+  "tool_calls": 2,
+  "lean_tool_calls": 0,
+  "result": {
+    "subtype": "success",
+    "is_error": false,
+    "num_turns": 3,
+    "duration_ms": 6560,
+    "total_cost_usd": 0.34540200000000004,
+    "usage": {
+      "input_tokens": 6,
+      "cache_creation_input_tokens": 80514,
+      "cache_read_input_tokens": 199240,
+      "output_tokens": 341,
+      "output_tokens_details": {
+        "thinking_tokens": 0
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 80514,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 99,
+          "cache_read_input_tokens": 93240,
+          "cache_creation_input_tokens": 227,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 227
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard",
+      "fallback_credit": null
+    }
+  },
+  "turns": 3,
+  "cost_usd": 0.34540200000000004,
+  "tokens": 347,
+  "last_text": "I replaced the `sorry` in `foundry_canary` with `Nat.add_comm a b`, which is exactly the statement `a + b = b + a`. I didn't compile the file or check its diagnostics, so I haven't confirmed it builds clean. The statement, name and binders are unchanged.",
+  "canary_ok": true,
+  "canary_reason": ""
+}

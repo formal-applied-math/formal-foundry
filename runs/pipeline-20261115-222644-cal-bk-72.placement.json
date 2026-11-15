@@ -1,0 +1,1 @@
+{"written": ["MathFin/Choice/Performance/MertonFraction.lean", "benchmarks/portfolio_and_performance.json", "MathFin.lean", "docs/blueprint_frontier.toml"], "frontier": ["thm:merton-portfolio-fraction"], "entry_id": "mf-portfolio-merton-myopic-fraction", "blueprint": ["thm:merton-portfolio-fraction"], "new_defs": []}
